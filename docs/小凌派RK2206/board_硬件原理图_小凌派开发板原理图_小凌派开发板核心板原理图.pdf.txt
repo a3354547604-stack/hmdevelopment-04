@@ -1,0 +1,2197 @@
+5
+ 5
+4
+ 4
+3
+ 3
+2
+ 2
+1
+ 1
+D
+D
+C
+C
+B
+B
+A
+A
+Rockchip Confidential
+CPU: ARM Cortex-M4F+DSP HIFI3
+RAM: Embedder SRAM
+（
+256KB
+）
++ Embedder pSRAM
+（
+2/4/8 MB Option
+）
+ROM: Embedder SPI Nor Flash
+（
+2/4/8 MByte Option
+）
+PMIC: RK812
+Interface: UART/SPI/I2C/I2S/PDM/CIF/LCD
+TB-RK2206C0-A
+20210915
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+00.Cover Page
+TB-RK2206C0-A
+Louis.weng
+1 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+00.Cover Page
+TB-RK2206C0-A
+Louis.weng
+1 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+00.Cover Page
+TB-RK2206C0-A
+Louis.weng
+1 24
+V0.1
+<Checker>
+Lockzhiner Electroic Technology Co., Ltd.
+5
+ 5
+4
+ 4
+3
+ 3
+2
+ 2
+1
+ 1
+D
+D
+C
+C
+B
+B
+A
+A
+Content Indexing 
+Page01___00.Cover Page
+Page02___01.Index
+Page03___02.Change List
+Page04___03.Block Diagram
+Page05___04.Power Diagram and Sequence
+Page06___10.RK2206 OSC/POWER
+Page07___11.RK2206 WIFI/USB
+Page08___12.RK2206 GPIO
+Page10___20.POWER PMIC RK812
+Page20___99.MARK/HOLE
+Combined property string:
+Header:
+{Item}\t{Value}\t{Description}\t{PCB Footprint}\t{Reference}\t{Quantity}\t{Option}
+Bill of Materials
+Item\tPart\tDescription\tPCB Footprint\tReference\tQuantity\tOption
+Note
+NOTE 1
+Component parameter description
+NOTE 2:
+Please use our recommended components to avoid
+too many changes.For more informations about the 
+second source,please refer to our AVL.
+1. DNP stands for component not mounted temporarily
+2. If Value or option is DNP, which means the area is 
+    reserved without being mounted
+3. If Flash is compatible, please notice when eMMC is
+    used, the option is that @eMMC is mounted, @Nand 
+    is not mounted when Nand is used, the option is that 
+    @Nand is mounted, @eMMC is not mounted
+Option
+Note
+Description
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+01.Index
+TB-RK2206C0-A
+Louis.weng
+2 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+01.Index
+TB-RK2206C0-A
+Louis.weng
+2 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+01.Index
+TB-RK2206C0-A
+Louis.weng
+2 24
+V0.1
+<Checker>
+Lockzhiner Electroic Technology Co., Ltd.
+5
+ 5
+4
+ 4
+3
+ 3
+2
+ 2
+1
+ 1
+D
+D
+C
+C
+B
+B
+A
+A
+First edition
+20210693
+V10
+Version  Date Change Notes
+Author
+DJ
+Revision History
+V11
+20210825 DJ Delete MIC1_INP/N,MIC2_INP/N;
+Delete SPK_P/N,LOOP_P/N;
+Delete OTG_VBUS;
+Delete VCC2V5_Efuse;
+Delete PMIC_INT_M0
+Add 4 Codec IO, GPIO0_D0/1/2/3;
+Add VCC_3V3  power port
+Change pin number 40
+Change VCCIO2 from 1V8 to 3V3
+Change C2034 DNP
+，
+install R1006
+Recover MIC1_INP/N,MIC2_INP/N;
+Delete PMIC_INT_M0
+Recover deleteing 3 Codec IO, GPIO0_D0/1/2;
+recover VCCIO2 1V8;
+20210827
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+02.Change List
+TB-RK2206C0-A
+Louis.weng
+3 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+02.Change List
+TB-RK2206C0-A
+Louis.weng
+3 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+02.Change List
+TB-RK2206C0-A
+Louis.weng
+3 24
+V0.1
+<Checker>
+Lockzhiner Electroic Technology Co., Ltd.
+5
+ 5
+4
+ 4
+3
+ 3
+2
+ 2
+1
+ 1
+D
+D
+C
+C
+B
+B
+A
+A
+Block Diagram
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Friday, September 17, 2021
+03.Block Diagram
+TB-RK2206C0-A
+Louis.weng
+4 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Friday, September 17, 2021
+03.Block Diagram
+TB-RK2206C0-A
+Louis.weng
+4 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Friday, September 17, 2021
+03.Block Diagram
+TB-RK2206C0-A
+Louis.weng
+4 24
+V0.1
+<Checker>
+Lockzhiner Electroic Technology Co., Ltd.
+5
+5
+4
+4
+3
+3
+2
+2
+1
+1
+D
+D
+C
+C
+B
+B
+A
+A
+Power Diagram and Sequence
+  PMU
+Channel
+TIMER
+Default
+ON/OFF
+Default
+Voltage
+POWER NAME
+DCDC SOLT:1 ON 1.8V VCC1V8_RF
+LDO1 SOLT:3
+LDO2
+LDO4
+LDO5
+SOLT:2
+SOLT:3
+SOLT:3
+ON
+ON
+ON
+ON
+1.8V
+1.8V
+3.3V
+1.1V
+VCC_3V3
+VDD_1V1
+VCC_1V8
+VCC1V8
+1ms 1ms 4ms
+DCDC
+LDO2
+LDO1
+LDO4
+LDO5
+RESET
+4ms 1ms 1ms
+VCC  VBAT
+INPUT
+VCC1
+BUCK
+VCC
+1.5A
+LDO1 600mA
+VCC3
+100mA
+LDO4
+Charge 
+RK2206_Core
+RK2206_RF
+RK2206 IO Supply
+USB
+Display Panel
+VCC1V8_RF
+pSRAM
+VCC_3V3
+VCC_2V8
+RK2206_CODEC
+VCC_1V8
+LDO5
+RK812
+100mA
+RK2206_RF
+VDD_1V1
+SPI Nor FLASH
+LDO2 400mA
+VCC2
+RK2206_RF
+VCC_VBAT
+reserved
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+04.Power Diagram and Sequence
+TB-RK2206C0-A
+Louis.weng
+5 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+04.Power Diagram and Sequence
+TB-RK2206C0-A
+Louis.weng
+5 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Thursday, September 16, 2021
+04.Power Diagram and Sequence
+TB-RK2206C0-A
+Louis.weng
+5 24
+V0.1
+<Checker>
+Lockzhiner Electroic Technology
+5
+ 5
+4
+ 4
+3
+ 3
+2
+ 2
+1
+ 1
+D
+D
+C
+C
+B
+B
+A
+A
+RK2206 PART-E
+RK2206 PART-F
+RK2206 PART-B
+注意：所有的滤波电容必须靠近
+R2206
+摆放
+Note:All the Power filter capacitors should be
+placed close to the power pins of RK2206
+请将
+C1000
+和
+C1010
+靠近
+NPOR
+脚摆放
+please placed C1000 and C1010 
+closed to PIN NPOR_u
+VDD_1V1
+VCC_3V3
+VCC_1V8
+VCC2V5_eFuse
+VCC_3V3
+VDD_1V1
+VCC_3V3
+VCC_1V8
+RESET
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+10.RK2206 OSC/POWER
+TB-RK2206C0-A
+Louis.weng
+6 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+10.RK2206 OSC/POWER
+TB-RK2206C0-A
+Louis.weng
+6 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+10.RK2206 OSC/POWER
+TB-RK2206C0-A
+Louis.weng
+6 24
+V0.1
+<Checker>
+Y1000
+40MHz
+CRY4_2R00X1R60X0R55
+X1
+1
+GND
+2
+X2
+3
+GND
+4
+C1009
+100nF
+C0201
+X5R
+6.3V
+1
+2
+GROUND
+U1000F
+RK2206
+VSS2
+59
+VSS1
+44
+EPAD_VSS
+69
+AVSS3
+57
+AVSS2
+55
+EPAD_AVSS
+70
+AVSS1
+45
+C1000 22nF
+C0201 X5R 10V
+1
+2
+C1008
+100nF
+C0201
+X5R
+6.3V
+1
+2
+C1002
+22pF
+C0201
+C0G
+50V
+1
+2
+R1006
+100R
+R0201
+5%
+DNP
+1
+2
+C1012
+100nF
+C0201
+X5R
+10V
+1
+2
+C1010
+100nF
+C0201
+X5R
+6.3V
+1
+2
+C1007
+100nF
+C0201
+X5R
+6.3V
+1
+2
+R1010 1K
+R0201 5%
+1
+2
+R1000 47R
+R0201 5%
+1
+2
+NPOR
+OSC
+eFuse
+U1000B
+RK2206
+NPOR_u
+10
+TVSS
+11
+XOUT_40M
+50
+XIN_40M
+49
+WIFI_OSC_AVSS1
+48
+WIFI_OSC_AVSS2
+51
+eFuse_VDD_2V5
+33
+POWER
+U1000E
+RK2206
+VDD5
+60
+VDD4
+43
+VDD3
+32
+VDD2
+9
+VDD1
+3
+VCCIO3
+31
+VCCIO4
+8
+C1005
+4.7uF
+C0402
+X5R
+6.3V
+1
+2
+C1014
+100nF
+C0201
+X5R
+6.3V
+1
+2
+C1003
+100nF
+C0201
+X5R
+6.3V
+1
+2
+C1001
+22pF
+C0201
+C0G
+50V
+1
+2
+Lockzhiner Electroic Technology Co., Ltd.
+5
+ 5
+4
+ 4
+3
+ 3
+2
+ 2
+1
+ 1
+D
+D
+C
+C
+B
+B
+A
+A
+RK2206 PART-C
+RF Microstrip
+Z0=50 Ohm
+NOTE:
+The matching network is placed near the antenna
+RK2206 PART-D
+VCC_3V3
+VDD3V3_RF
+VCC_3V3
+VCC1V8_RF
+VCC_3V3
+VDD1V1_RF
+VDD_1V1
+VCC5V0_OTG
+OTG_DM
+OTG_DP
+OTG_VBUS
+OTG_VBUS
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Wednesday, September 01, 2021
+11.RK2206 WIFI/USB
+TB-RK2206C0-A
+Louis.weng
+7 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Wednesday, September 01, 2021
+11.RK2206 WIFI/USB
+TB-RK2206C0-A
+Louis.weng
+7 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Wednesday, September 01, 2021
+11.RK2206 WIFI/USB
+TB-RK2206C0-A
+Louis.weng
+7 24
+V0.1
+<Checker>
+C1106
+100nF
+C0201
+X5R
+6.3V
+1
+2
+C1107
+100nF
+C0201
+X5R
+6.3V
+1
+2
+R1102 10K
+R0201 5%
+1
+2
+C1103
+DNP
+C0201
+1
+2
+C1105
+10pF
+C0201
+C0G
+25V
+1
+2
+C1112
+1uF
+C0402
+X5R
+6.3V
+1
+2
+C1115
+1uF
+C0402
+X5R
+10V
+1
+2
+C1114
+10pF
+C0201
+C0G
+25V
+1
+2
+C1108
+10uF
+C0402
+X5R
+4V
+1
+2
+OTG
+U1000C
+RK2206
+OTG_DM
+64
+OTG_DP
+65
+OTG_ID
+61
+OTG_VBUS
+62
+OTG_EXTR
+66
+OTG_VDD_3V3
+63
+C1102 10pF
+C0201 C0G
+25V
+1
+2
+ANT1101
+ANT_JACK
+ANT_JACK
+<Option>
+ANT
+1
+GND1
+2
+GND2
+3
+C1111
+10pF
+C0201
+C0G
+25V
+1
+2
+R1104
+18K
+R0201
+5%
+1
+2
+R1100 4.7K
+R0201 5%
+DNP
+1
+2
+C1104
+DNP
+C0201
+1
+2
+C1100
+100nF
+C0201
+X5R
+10V
+1
+2
+C1116 10pF
+C0201 C0G
+25V
+DNP
+1
+2
+C1110
+100nF
+C0201
+X5R
+10V
+1
+2
+C1109
+100nF
+C0201
+X5R
+10V
+1
+2
+WIFI
+U1000D
+RK2206
+RF_PAD_RFIO
+56
+RF_PAD_REFRES
+53
+RF_VDD_1V8_3
+54
+RF_VDD_1V8_2
+52
+RF_VDD_3V3
+58
+RF_VDD_1V8_1
+47
+RF_VDD_1V1
+46
+R1103 19.6K
+R0201 1%
+1
+2
+ANT1100
+ANT1270SDR
+ANTPCB_12R00X7R00_SDR1
+ANT
+1
+GND
+2
+R1101 43.2R
+R0201 1%
+1
+2
+C1113
+100nF
+C0201
+X5R
+6.3V
+1
+2
+RF_ANT
+Lockzhiner Electroic Technology Co., Ltd.
+5
+5
+4
+4
+3
+3
+2
+2
+1
+1
+D
+D
+C
+C
+B
+B
+A
+A
+RK2206 PART-A
+VCC_3V3
+VCC_3V3
+VCC_2V8
+VCC_1V8
+LCD_D0/CIF_D0/LCD_DC
+LCD_D1/CIF_D1
+LCD_RS/CIF_HREF
+LCD_CSn/CIF_VSYNC
+LCD_RDN/CIF_CLKOUT
+LCD_D4/CIF_D4
+LCD_D5/CIF_D5
+LCD_D6/CIF_D6
+LCD_D7/CIF_D7
+I2C0_SDA_M0
+I2C0_SCL_M0
+UART0_RX_M0
+UART0_TX_M0
+LCD_PWREN
+I2C2_SDA_M0
+CODEC_CLK_M0
+I2C2_SCL_M0
+PMIC_INT_M0
+CODEC_DAC_DL_M0/MASKROM
+SDMMC_CLK
+SDMMC_CMD
+ADC_KEY
+SPI1_CS0n
+SPI1_CLK
+SPI1_MOSI
+SDMMC_D0
+LCD_WRn/CIF_CLKIN
+LCD_D2/CIF_D2
+LCD_D3/CIF_D3
+SPI1_MISO
+CODEC_SYNC_M0
+CODEC_ADC_D_M0
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+12.RK2206 GPIO
+TB-RK2206C0-A
+Louis.weng
+8 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+12.RK2206 GPIO
+TB-RK2206C0-A
+Louis.weng
+8 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+12.RK2206 GPIO
+TB-RK2206C0-A
+Louis.weng
+8 24
+V0.1
+<Checker>
+C1202
+100nF
+C0201
+X5R
+10V
+1
+2
+R1201 0R
+R0402 5%
+1
+2
+R1200 0R
+R0402 5%
+DNP
+1
+2
+C1200
+100nF
+C0201
+X5R
+10V
+1
+2
+C1203
+100nF
+C0201
+X5R
+6.3V
+1
+2
+TOUCH_KEY
+UART1_CTSn_M0
+UART0_CTSn_M1
+UART0_RTSn_M1
+UART1_RX_M0
+UART0_TX_M1
+UART1_RTSn_M0
+UART1_TX_M0
+UART0_RX_M1
+UART
+TKEY8
+TKEY10
+TKEY5_M0
+TKEY7
+TKEY4_M0
+TKEY11
+TKEY9
+TKEY6_M0
+PWM6_M0
+PWM4_M0
+PWM3_M0
+PWM5_M0
+PWM1_M0
+PWM7_M0
+PWM0_M0
+PWM2_M0
+PWM
+I2C1_SCL_M1
+I2C1_SDA_M1
+------
+I2C0_SDA_M1
+I2C0_SCL_M1
+PDM_CLK
+PDM_CLK_S
+PDM_SDI
+SPI0_CS0n_M1
+SPI1_CLK_M0
+SPI1_MISO_M0
+SPI0_MISO_M1
+SPI1_MOSI_M0
+SPI0_CLK_M1
+SPI0_MOSI_M1
+SPI1_CS0n_M0
+SPI I2C/PDM
+SRADC6
+SRADC2
+SRADC1
+SRADC4
+SRADC7
+SRADC5
+SRADC3
+SRADC0
+SRADC
+I2S_SDI_M0
+I2S_SDO1_M0
+I2S_SCLK_RX_M0
+I2S_SDO0_M0
+I2S_LRCK_TX_M0
+I2S
+I2S_MCLK_M0
+I2S_SCLK_TX_M0
+I2S_LRCK_RX_M0
+SDMMC_D0
+SDMMC_CMD
+SDMMC_CLK
+SDMMC/PMIC
+PMIC_INT_M1
+------
+------
+------
+------
+PWM_AUDIO/T_DRIVE
+PWM_AUDIO_R_M1
+PWM_AUDIO_L_M1
+------
+------
+------
+------
+------
+GPIO
+UART1_RX_M1
+UART1_RTSn_M1
+UART2_RTSn_M1
+UART1_TX_M1
+UART1_CTSn_M1
+------
+UART0_TX_M0
+UART
+UART0_RX_M0
+UART2_RX_M1
+------
+UART2_CTSn_M1
+UART2_TX_M1
+------
+------
+UART0_CTSn_M0
+UART0_RTSn_M0
+TKEY3_M0
+TKEY16
+------
+TKEY18
+TKEY12
+TKEY19
+TKEY14
+------
+TKEY1_M0
+------
+TKEY13
+TKEY0_M0
+TOUCH_KEY
+TKEY17
+------
+TKEY2_M0
+TKEY15
+PDM_SDI_M0
+PWM/PDM/SPI
+------
+SPI_SLV_MOSI
+------
+SPI_SLV_CLK
+SPI_SLV_MISO
+SPI_SLV_CSn
+PWM0_M1
+------
+------
+PWM1_M1
+------
+PWM2_M1
+PDM_CLK_M0
+PWM3_M1
+PDM_CLK_S_M0
+I2C1_SDA_M0
+I2C
+------
+------
+I2C0_SCL_M2
+------
+------
+I2C1_SDA_M2
+------
+I2C2_SDA_M1
+I2C0_SDA_M2
+I2C2_SCL_M1
+------
+I2C1_SCL_M2
+------
+------
+I2C1_SCL_M0
+SPI0_MISO_M0
+SPI0_CLK_M0
+SPI1_CS0n_M1
+CODEC_DAC_DL_M1
+SPI1_CLK_M1
+CODEC_ADC_D_M1
+CODEC_SYNC_M1
+SPI0_MOSI_M0
+CODEC_CLK_M1
+SPI0_CS0n_M0
+SPI/PMIC_CODEC
+------
+------
+------
+------
+SPI1_MISO_M1
+SPI1_MOSI_M1
+LCD_D4
+LCD_D7
+LCD_WRn
+LCD_D3
+LCD_D0
+LCD_CSn
+LCD_D6
+LCD_RS
+LCD_RDn
+LCD_D2
+PWM_AUDIO_L_M0
+LCD_D1
+PWM_AUDIO_R_M0
+LCD_D5
+------
+------
+LCD/PWM_AUDIO
+CIF_D2
+CIF_CLKOUT
+CIF_CLKIN
+CIF_D7
+CIF_D4
+CIF_HREF
+CIF_VSYNC
+CIF_D0
+------
+CIF_D5
+CIF_D6
+CIF_D1
+CIF_D3
+------
+------
+------
+------
+------
+------
+------
+------
+I2C0_SCL_M0
+I2C0_SDA_M0
+------
+------
+------
+------
+------
+------
+------
+------
+I2C0_SCL_M3
+I2S_SDI_M1
+TKEY0_M1
+------
+PWM_AUDIO_R_M2
+TKEY5_M1
+I2C2_SCL_M0
+PWM_AUDIO_L_M2
+TKEY4_M1
+I2C0_SDA_M3
+I2S_MCLK_M1
+TKEY1_M1
+PMIC_CODEC/I2C
+UART2_CTSn_M0
+------
+SPI1_CLK_M2
+I2S_LRCK_TX_M1
+TKEY2_M1
+UART2_TX_M0
+PWM8
+TKEY_DRIVE_M4
+TKEY3_M1
+------
+PWM
+TKEY_DRIVE_M5
+TOUCH_KEY
+UART
+PMW5_M1
+I2S_SCLK_TX_M1
+------
+CODEC_CLK_M0 UART1_RX_M2
+PWM9
+SPI/TKEY_DRIVE
+UART2_RX_M0
+PWM6_M1
+SPI1_MOSI_M2
+I2C1_SCL_M3
+UART2_RTSn_M0
+PWM10
+I2C2_SDA_M0
+I2C1_SDA_M3
+UART1_TX_M2
+PWM4_M1
+------
+SPI1_MISO_M2
+I2S/PWM_AUDIO
+PWM11
+I2C
+SPI_CS0n_M2
+I2S_SDO0_M1
+TKEY6_M1
+SPI0_CS1n
+------
+SPI1_CS1n
+------ ------
+------
+------
+PWM7_M1
+------
+GPIO
+GPIO
+JTAG_TCK
+JTAG_TMS
+------
+------
+------
+------
+JTAG_TDO
+JTAG_TDI
+JTAG_TRSTn
+TKEY_DRIVE_M0
+TKEY_DRIVE_M2 ------
+------
+TKEY_DRIVE_M3
+TKEY_DRIVE I2C/JTAG CIF
+------
+------
+------
+TKEY_DRIVE_M1
+PWM_AUDIO
+PWM_AUDIO_R_M3
+PWM_AUDIO_L_M3
+------
+------
+------
+------
+------
+CODEC_DAC_DL_M0
+CODEC_SYNC_M0
+PMIC_INT_M0
+CODEC_ADC_D_M0
+U1000A
+RK2206
+QFN70_28R0X28R0X41R3_S
+GPIO0_D2_u
+4
+GPIO0_D3_u
+68
+GPIO0_D4_u
+2
+GPIO0_D5_u
+6
+GPIO0_D6_u
+7
+GPIO0_D1_u
+1
+GPIO0_A0_u
+17
+GPIO0_A1_u
+18
+GPIO0_A2_u
+14
+GPIO0_A3_u
+13
+GPIO0_A4_u
+16
+GPIO0_A5_d
+15
+GPIO0_A6_d
+19
+GPIO0_A7_d
+20
+GPIO0_B0_u
+21
+GPIO0_B1_u
+22
+GPIO0_B2_u
+23
+GPIO0_B3_u
+24
+GPIO0_B4_d
+26
+GPIO0_B5_d
+27
+GPIO0_B6_d
+28
+GPIO0_B7_d
+29
+GPIO0_C0_u
+34
+GPIO0_C1_u
+37
+GPIO0_C4_u
+36
+GPIO0_C3_d
+38
+GPIO0_C5_u
+40
+GPIO0_C6_u
+39
+GPIO0_C7_d
+41
+GPIO0_D0_u
+67
+GPIO0_C2_u
+35
+VCCIO0_1
+12
+VCCIO2
+5
+ADC_AVDD_3V3
+42
+VCCIO0_2
+25
+GPIO1_D0_u
+30
+Lockzhiner Electroic Technology
+5
+5
+4
+4
+3
+3
+2
+2
+1
+1
+D
+D
+C
+C
+B
+B
+A
+A
+RK812 PART-A RK812 PART-B
+RK812 PART-C P_KEY P_SW
+BATTERY
+VCC1V8_RF
+VCC_3V3
+VDD_1V1
+VCC1V8_RF
+VCC_VBAT
+VCC_1V8
+VCC5V0_OTG
+VCC_VBAT
+VCC_VBAT
+VCC_VBAT
+VCC_VBAT
+VCC_2V8
+VCC_1V8
+I2C2_SDA_M0
+I2C2_SCL_M0
+PMIC_INT_M0
+RESET
+CODEC_ADC_D_M0
+CODEC_CLK_M0
+CODEC_SYNC_M0
+CODEC_DAC_DL_M0/MASKROM
+MIC1_ADC_INP
+MIC1_ADC_INN
+MIC2_ADC_INP
+MIC2_ADC_INN
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Friday, September 10, 2021
+20.POWER PMIC RK812
+TB-RK2206C0-A
+Louis.weng
+10 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Friday, September 10, 2021
+20.POWER PMIC RK812
+TB-RK2206C0-A
+Louis.weng
+10 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Friday, September 10, 2021
+20.POWER PMIC RK812
+TB-RK2206C0-A
+Louis.weng
+10 24
+V0.1
+<Checker>
+C2001
+22uF
+C0603
+X5R
+4V
+1
+2
+C2009
+1uF
+C0402
+X5R
+10V
+1
+2
+R2010 4.7K
+R0201 5%
+1
+2
+C2015 100nF
+C0201 X5R 16V
+1
+2
+L2000 470nH
+IND_252010 4.53A
+0.035ohm
+C2006 1uF
+C0402 X5R 10V
+1
+2
+U2000C
+RK812
+ADC_IN1P
+20
+ADC_IN2P
+18
+ADC_IN3P
+16
+ADC_IN1N
+21
+ADC_IN2N
+19
+ADC_IN3N
+17
+SPK_N
+7
+SPK_P
+5
+LINEOUT_R
+3
+LINEOUT_L
+4
+VCC_SPK
+6
+CLK8X
+11
+CLK_sync
+9
+ADC_D
+10
+DAC_DR
+13
+DAC_DL
+12
+C2032
+4.7uF
+C0402
+X5R
+10V
+1
+2
+C2014 100nF
+C0201 X5R 16V
+1
+2
+C2004
+1uF
+C0402
+X5R
+10V
+1
+2
+C2010
+1uF
+C0402
+X5R
+10V
+1
+2
+C2021
+100nF
+C0201
+X5R
+16V
+1
+2
+C2016 100nF
+C0201 X5R 16V
+1
+2
+U2000B
+RK812
+USB
+23
+VBAT
+24
+SCL
+14
+RESETB
+8
+P_SW
+33
+P_KEY
+25
+SDA
+15
+INT
+1
+VREF
+2
+V1P8
+22
+EPAD_GND
+37
+C2034
+22uF
+C0603
+X5R
+10V
+1
+2
+C2017 100nF
+C0201 X5R 16V
+1
+2
+C2005
+1uF
+C0402
+X5R
+10V
+1
+2
+C2025
+10uF
+C0402
+X5R
+4V
+1
+2
+C2003 1uF
+C0402 X5R 10V
+1
+2
+C2002 100nF
+C0201 X5R 16V
+1
+2
+C2102 33uF
+C0805 X5R 10V
+DNP
+1
+2
+R2007 4.7K
+R0201 5%
+1
+2
+C2000
+22uF
+C0603
+X5R
+10V
+1
+2
+C2008
+1uF
+C0402
+X5R
+10V
+1
+2
+C2012
+1uF
+C0402
+X5R
+10V
+1
+2
+LD01|  600mA@Vin>2.7V Vdropout>0.4V
+LD02|  400mA@Vin>1.8V Vdropout>0.4V
+FB
+LDO1 600mA
+VCC1
+LDO2 400mA
+VCC2
+LD05|  100mA@Vin>2V Vdropout>0.4V
+LD04|  100mA@Vin>2V Vdropout>0.4V
+LDO4 100mA
+VCC3
+BUCK
+1.5A
+VCC
+SW
+LDO5 100mA
+Codec Digital Signal Power
+U2000A
+RK812
+36
+35
+34
+29
+32
+27
+26
+28
+31
+30
+C2007
+1uF
+C0402
+X5R
+10V
+1
+2
+R2026 4.7K
+R0201 5%
+1
+2
+I2C2_SDA_PMIC
+I2C2_SCL_PMIC
+PMIC_INT_M0
+RESET
+V1P8
+I2C2_SDA_PMIC
+I2C2_SCL_PMIC
+Lockzhiner Electroic Technology
+5
+ 5
+4
+ 4
+3
+ 3
+2
+ 2
+1
+ 1
+E
+E
+D
+D
+C
+C
+B
+B
+A
+A
+interface
+1V8 IO
+ADC_KEY
+I2C0_SDA_M0
+I2C0_SCL_M0
+SPI1_MOSI
+SPI1_CLK
+LCD_PWREN
+SPI1_MISO
+UART0_TX_M0
+GND
+GND GND
+VCC_VBAT
+SPI1_CS0n
+SDMMC_CLK
+SDMMC_D0
+VBAT(In)
+UART0_RX_M0
+VCC5V0_OTG 5V0(In)
+I2C2_SDA_M0
+I2C2_SCL_M0
+OTG_DP
+LCD_WRn/
+CIF_CLKIN
+LCD_RS/
+CIF_HREF
+OTG_DM OTG_DM
+OTG_DP
+I2C2_SDA_M0(1V8)
+I2C2_SCL_M0(1V8)
+VCC_3V3 3V3(out)
+SDMMC_CMD
+GPIO0_C0
+GPIO0_C2
+GPIO0_C1
+PWM3
+ADC4
+ADC5
+GPIO0_C6
+PWM7_M0
+GPIO1_D0
+Debug_TX
+Debug_RX
+I2C0_SCL_M0
+I2C0_SDA_M0
+GND
+Net Name silk name
+MIC1_ADC_INP
+MIC1_ADC_INN
+MIC2_ADC_INP
+CODEC_DAC_DL_M0
+/MASKROM
+MIC2_ADC_INN
+LCD_D7/CIF_D7
+LCD_D6/CIF_D6
+Maskrom
+SPI1_MISO_M1
+LCD_D5/CIF_D5
+LCD_D4/CIF_D4
+LCD_D3/CIF_D3
+LCD_D2/CIF_D2
+LCD_D1/CIF_D1
+LCD_D0/CIF_D0
+/LCD_DC
+LCD_RDN/
+CIF_CLKOUT
+LCD_CSn/
+CIF_VSYNC
+RESET RESET
+MIC1_ADC_INN
+MIC1_ADC_INP
+MIC2_ADC_INP
+MIC2_ADC_INN
+SPI1_MOSI_M1
+SPI1_CLK_M1
+SPI1_CS0N_M1
+LCD_D3
+LCD_D2
+LCD_WRN
+LCD_RDN
+I2C1_SCL_M2
+I2C1_SDA_M2
+SPI_DC
+LCD_D1
+Net Name silk name
+1V8 IO
+VCC5V0_OTG
+VCC_VBAT
+VCC_3V3
+VCC_3V3
+VCC5V0_OTG
+VCC_VBAT
+SDMMC_CLK
+SDMMC_D0
+SPI1_CS0n
+SDMMC_CMD
+ADC_KEY
+SPI1_MOSI
+SPI1_CLK
+SPI1_MISO
+LCD_PWREN
+UART0_TX_M0
+UART0_RX_M0
+I2C0_SCL_M0
+I2C0_SDA_M0
+OTG_DP
+OTG_DM
+LCD_CSn/CIF_VSYNC
+LCD_RS/CIF_HREF
+LCD_WRn/CIF_CLKIN
+LCD_RDN/CIF_CLKOUT
+LCD_D0/CIF_D0/LCD_DC
+LCD_D1/CIF_D1
+LCD_D2/CIF_D2
+LCD_D3/CIF_D3
+LCD_D4/CIF_D4
+LCD_D5/CIF_D5
+LCD_D6/CIF_D6
+LCD_D7/CIF_D7
+I2C2_SDA_M0
+I2C2_SCL_M0
+RESET
+CODEC_DAC_DL_M0/MASKROM
+MIC2_ADC_INP
+MIC2_ADC_INN
+MIC1_ADC_INP
+MIC1_ADC_INN
+MIC2_ADC_INP
+MIC2_ADC_INN
+MIC1_ADC_INP
+MIC1_ADC_INN
+I2C2_SDA_M0
+I2C2_SCL_M0
+SDMMC_CLK
+SDMMC_D0
+SPI1_CS0n
+SDMMC_CMD
+ADC_KEY
+SPI1_MOSI
+SPI1_CLK
+SPI1_MISO
+LCD_PWREN
+UART0_TX_M0
+UART0_RX_M0
+I2C0_SCL_M0
+I2C0_SDA_M0
+OTG_DP
+OTG_DM
+LCD_CSn/CIF_VSYNC
+LCD_RS/CIF_HREF
+LCD_WRn/CIF_CLKIN
+LCD_RDN/CIF_CLKOUT
+LCD_D0/CIF_D0/LCD_DC
+LCD_D1/CIF_D1
+LCD_D2/CIF_D2
+LCD_D3/CIF_D3
+LCD_D4/CIF_D4
+LCD_D5/CIF_D5
+LCD_D6/CIF_D6
+LCD_D7/CIF_D7
+RESET
+CODEC_DAC_DL_M0/MASKROM
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+99.Inteface
+TB-RK2206C0-A
+Louis.weng
+24 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+99.Inteface
+TB-RK2206C0-A
+Louis.weng
+24 24
+V0.1
+<Checker>
+Project:
+File:
+Date:
+Fuzhou Rockchip Electronics
+Designed by:
+Rev:
+Sheet:  of
+Reviewed by:
+Tuesday, August 31, 2021
+99.Inteface
+TB-RK2206C0-A
+Louis.weng
+24 24
+V0.1
+<Checker>
+U1
+StampVia
+1
+1
+2
+2
+3
+3
+4
+4
+5
+5
+6
+6
+7
+7
+8
+8
+9
+9
+10
+10
+11
+11
+12
+12
+13
+13
+14
+14
+15
+15
+16
+16
+17
+17
+18
+18
+19
+19
+20
+20
+21
+21
+22
+22
+23
+23
+24
+24
+25
+25
+26
+26
+27
+27
+28
+28
+29
+29
+30
+30
+31
+31
+32
+32
+33
+33
+34
+34
+35
+35
+36
+36
+37
+37
+38
+38
+39
+39
+40
+40
+U2001
+StampVia
+1
+1
+2
+2
+3
+3
+4
+4
+5
+5
+6
+6
+7
+7
+8
+8
+9
+9
+10
+10
+11
+11
+12
+12
+13
+13
+14
+14
+15
+15
+16
+16
+17
+17
+18
+18
+19
+19
+20
+20
+21
+21
+22
+22
+23
+23
+24
+24
+25
+25
+26
+26
+27
+27
+28
+28
+29
+29
+30
+30
+31
+31
+32
+32
+33
+33
+34
+34
+35
+35
+36
+36
+37
+37
+38
+38
+39
+39
+40
+40
+Lockzhiner Electroic Technology Co., Ltd.

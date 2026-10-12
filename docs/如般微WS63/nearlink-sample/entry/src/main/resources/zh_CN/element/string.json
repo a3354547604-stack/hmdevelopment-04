@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "NearLink Kit Demo"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "NearLink Kit Demo"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Nearlink Demo"
+    }
+  ]
+}
