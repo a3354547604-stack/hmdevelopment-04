@@ -1,0 +1,54 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\DCJB\\.ohos\\config\\default_nearlink-kit_-sample-code-master_30VFvwTPy8ihiurC1VSD6DZkD89DZWWUW0pGsLJ6_KA=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B7580C3AA3A986FE37CEDAB0B2E0927D078753577D01BDAD70FBCCB696DB3407809321EC7226DAE",
+          "profile": "C:\\Users\\DCJB\\.ohos\\config\\default_nearlink-kit_-sample-code-master_30VFvwTPy8ihiurC1VSD6DZkD89DZWWUW0pGsLJ6_KA=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\DCJB\\.ohos\\config\\default_nearlink-kit_-sample-code-master_30VFvwTPy8ihiurC1VSD6DZkD89DZWWUW0pGsLJ6_KA=.p12",
+          "storePassword": "0000001BA3A62049366D9784482A8E79EF91A311EFD98A6705C28B8D51EC959885B5D5EE6006BFFA077551"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.1(13)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug",
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

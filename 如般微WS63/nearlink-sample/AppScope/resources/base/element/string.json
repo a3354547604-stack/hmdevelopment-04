@@ -1,0 +1,12 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "NearLink Demo"
+    },
+    {
+      "name": "permission_reason_nearlink",
+      "value": "Ask for nearlink access permission"
+    }
+  ]
+}
