@@ -1,0 +1,81 @@
+产品规格书如般微电子
+1.1 模组简介
+M528HX 模组是一基于海思 WS63 SOC 设计的 2.4GHz Wi-Fi、
+BLE 和 SLE 的三合一模组，内部集成 IEEE 802.11b/g/n/ax 基带和
+RF 电路， 包括功率放大器 PA、低噪声放大器 LNA、 RF balun、天
+线开关、无源晶振、2.4G 天线以及电源管理模块等； 支持 802.11n 
+20MHz/40MHz 频宽， 支持 802.11ax 20MHz 频宽， 能提供 150Mbps 
+物理层速率和更远的覆盖距离。
+WIFI
+特性
+ 1×1 2.4GHz 频段（ch1～ch14） Wi-Fi Station
+ PHY 支 持 IEEE 802.11b/g/n/ax ； MAC 支 持 IEEE802.11
+d/e/i/k/v/w
+ 支持 802.11n 20MHz/40MHz 频宽， 支持 802.11ax20MHz 频宽
+ 支持最大速率： 150Mbps@HT40 MCS7，114.7Mbps@HE20 MCS9
+ 内置 PA 和 LNA，集成 TX/RX Switch、 Balun 等
+ 支持 STA、 AP 和 P2P 形态，作为 AP 时最大支持 8 个 STA 接入
+ 支持 STA+AP 共存， 支持 STA+P2P 共存
+ 支持 A-MPDU、 A-MSDU
+ 支持 Block-ACK
+ 支持 QoS，满足不同业务服务质量需求
+ 支持 WPA/WPA2/WPA3 personal、 WPS2.0
+ 支持 RF 自校准方案
+ 支持 STBC 和 LDPC
+BLE
+特性
+ 低功耗蓝牙 Bluetooth Low Energy（BLE）
+ 支持 BLE 4.0/4.1/4.2/5.0/5.1/5.2
+ 速率支持 125Kbps、 500Kbps、 1Mbps、 2Mbps
+ 支持 Class 1
+ 支持高功率 20dBm
+ 支持 BLE Mesh， 支持 BLE 网关
+SLE
+特性
+
+
+
+
+
+星闪低功耗接入技术 Sparklink Low Energy（SLE）
+支持 SLE 1.0
+支持 SLE 1MHz/2MHz/4MHz， 最大空口速率 4Mbps
+支持 Polar 信道编码
+支持 SLE 网关
+1.5 尺寸、温度
+ 正常工作温度：-35℃～+70℃
+ 极限工作温度：-40℃～+85℃
+ 物理尺寸：
+25.5mm*18mm*2.7mm
+M528HX 星闪系列模组
+1.6 应用领域
+ 智能家电控制
+ 智能音箱音频传输
+ 智能门锁
+ 消防信息采集
+1.4 接口
+ UART最多可支持 3 路（无流
+控模式，最大波特率 2Mbit/s）
+ SPI最多可支持 1路
+ I2C最多可支持 2路
+ I2S最多可支持 1路
+ ADC最多可支持 6路
+ PWM最多可支持 8路
+ GPIO最多可支持 19 个
+ IPEX座和板载天线兼容接口
+
+1.2 主要参数
+ CPU:
+32bit 微处理器 @ 240MHz
+SRAM 606KB、ROM 300KB
+4MB Flash
+ 供电：
+3.3V 版本/5V 版本
+ 功耗：
+Nomal Work : 46mA
+1.3 功能特性
+
+产品规格书
+1.7管脚描述
+1.8外观尺寸
+如般微电子
