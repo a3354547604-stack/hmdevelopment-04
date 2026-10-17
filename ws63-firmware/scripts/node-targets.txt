@@ -9,3 +9,9 @@ m1   | -def=NODE_ROLE=1               | node_main.c node_json.c node_link.c node
 m2   | -def=NODE_ROLE=2               | node_main.c node_json.c node_link.c node_sensor_radar.c radar_hub.c sle_hub.c sle_hub_adv.c
 m4   | -def=NODE_ROLE=4               | node_main.c node_json.c node_link.c node_sensor_door.c sle_hub.c sle_hub_adv.c
 mock | -def=NODE_ROLE=1,NODE_MOCK=1   | node_main.c node_json.c node_link.c node_sensor_mock.c sle_hub.c sle_hub_adv.c
+#   - 汇聚 H1 是**另一块板上的另一份固件**：SLE Central（只扫描/连接，不广播、不做服务端），
+#     经 UART1（排针 23/24，MODE 1）按契约 §3 的帧与网关说话。它不共用任何 node_* 源文件。
+#   - hubmock = hub 加 HUB_MOCK=1（内置 3 个虚拟节点），用于单板跑通整条聚合链路；
+#     它需要 hub_vnode.c 与节点固件那份 node_json.c（mock 与真节点同构，见 hub_vnode.h）。
+hub     | -def=HUB_MOCK=0               | hub_main.c hub_client.c hub_agg.c hub_frame.c hub_json.c hub_glink.c hub_adv.c
+hubmock | -def=HUB_MOCK=1               | hub_main.c hub_client.c hub_agg.c hub_frame.c hub_json.c hub_glink.c hub_adv.c hub_vnode.c node_json.c

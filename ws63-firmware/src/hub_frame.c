@@ -60,6 +60,30 @@ int hub_frame_build(uint8_t type, uint16_t seq, const char *payload, uint16_t pl
     return (int)total;
 }
 
+int hub_frame_build_node(uint16_t seq, const char *node_json, uint16_t json_len,
+                         uint8_t *out, uint32_t cap)
+{
+    /* 契约 §3.4 对 0x01 的规定只有一句：「§2.2 节点 JSON 原样」。§3.7 的第一条样例帧就是
+     * 124 字节的节点 JSON 本体（`{"sn":"M1","ts":..,"type":"gas",..}`），没有外层信封。
+     *
+     * ⚠️ 这里**曾经**把节点 JSON 再包一层 `{"sn":..,"ts":..,"data":..}`，那是错的：
+     *   1) 与 §3.7 样例逐字节不符，验收脚本一比对就红；
+     *   2) sn / ts 在节点 JSON 里已经有了，再包一层就有两份 ts（节点采样时刻 vs 汇聚收到时刻），
+     *      服务器算「上报延迟」时不知道用哪个；
+     *   3) §2.6 明确「汇聚不解析业务字段」，加信封等于承认汇聚要碰业务语义。
+     * 所以汇聚在这条链路上是**哑管道**：只换帧头，正文一个字节都不动。
+     */
+    if (node_json == NULL || out == NULL || json_len == 0u) {
+        return -1;
+    }
+    /* 只做「像不像一个 JSON 对象」的最低限度检查：不解析（§2.6 不许解析），
+     * 但不能把一段 UART 噪声当业务数据转发出去 —— 网关/服务器那边更难定位。 */
+    if (node_json[0] != '{' || node_json[json_len - 1u] != '}') {
+        return -1;
+    }
+    return hub_frame_build(HUB_T_NODE_DATA, seq, node_json, json_len, out, cap);
+}
+
 void hub_parser_init(hub_parser_t *p)
 {
     if (p == NULL) {

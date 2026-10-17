@@ -182,7 +182,9 @@ int hub_wl_del(hub_agg_t *a, const char *sn)
     a->wl_count--;
     (void)memset(&a->node[a->wl_count], 0, sizeof(a->node[0]));
     a->list_dirty = 1u;
-    return idx;
+    /* 返回 0 而不是下标：这个返回值直接进 §9.3 的 result 字段（hub_client 的 pair_bind del），
+     * 返回下标会让网关收到 result=2 这种"没定义过"的码。要找下标用 hub_wl_index()。 */
+    return 0;
 }
 
 void hub_wl_clear(hub_agg_t *a)
@@ -315,6 +317,25 @@ void hub_agg_scan_begin_periodic(hub_agg_t *a, int64_t now_ms)
     hub_scan_reset(a, -1, HUB_SCAN_WINDOW_MS, now_ms);
 }
 
+void hub_agg_scan_end(hub_agg_t *a, int64_t now_ms, hub_act_t *act)
+{
+    if (a == NULL || !a->scan_active) {
+        return;
+    }
+    hub_scan_flush(a);                      /* 先排序截断，再让调用方按视图发 0x21 */
+    a->scan_active = 0u;
+    a->last_scan_end_ms = now_ms;
+    a->next_scan_ms = now_ms + (int64_t)HUB_SCAN_PERIOD_MS;
+    if (a->scan_ack_id >= 0 && act != NULL) {
+        act->scan_rsp_ready = 1u;
+        act->scan_rsp_ack = a->scan_ack_id;
+        act->scan_rsp_result = (int)HUB_R_OK;
+        act->scan_rsp_duration_ms = a->scan_duration_ms;
+        (void)hub_act_push(act, HUB_AK_SCAN_RSP, 0xFFu, 0u);
+    }
+    a->scan_ack_id = -1;                    /* 周期短扫不带 ack，避免上一轮的 ack 被复用 */
+}
+
 /* ================================================================== */
 /* 链路事件                                                            */
 /* ================================================================== */
@@ -374,6 +395,7 @@ void hub_agg_on_disconnected(hub_agg_t *a, uint16_t conn_id, int64_t now_ms, hub
     a->node[idx].proc = HUB_PROC_NONE;
     a->node[idx].poll_pending = 0u;
     a->node[idx].conn_id = 0u;      /* 清零只是为了下次复用变量，判断一律用 have_conn */
+    a->node[idx].fall_active = 0u;  /* 断开即解锁跌倒边沿：重连后若还躺着要能再报一次 */
     a->node[idx].cool_until_ms = now_ms + (int64_t)HUB_RECONNECT_COOL_MS;
     a->list_dirty = 1u;
     /* 链路都断了就不必等 3 次 poll：这是「确定离线」，直接报事件（比 9 s 门限更快，
@@ -449,11 +471,18 @@ int hub_agg_on_uplink(hub_agg_t *a, const hub_uplink_t *u, int64_t now_ms, hub_a
     } else if (u->req_id >= 0) {
         n->req_mismatch++;          /* 对不上号的 req_id：只记统计，不当成应答 */
     }
-    /* §3.4/§3.8：跌倒事件走「即时加速通路」0x03（0x01 透传由 hub_client 照常发） */
-    if (strncmp(u->type, "fall", sizeof(u->type)) == 0 && u->fall == 1) {
-        a->ev_fall++;
-        if (act != NULL) {
-            (void)hub_act_push(act, HUB_AK_EVENT_FALL, (uint8_t)idx, 0u);
+    /* §3.4/§3.8：跌倒事件走「即时加速通路」0x03（0x01 透传由 hub_client 照常发）。
+     * 触发条件是 fall 的 0→1 边沿：节点在迟滞状态机（§8.4）退出前会持续回 fall=1，
+     * 每次轮询都推一条就等于把一次跌倒放大成 N 次报警。fall=0 一到就解锁，下一次跌倒才会再报。 */
+    if (strncmp(u->type, "fall", sizeof(u->type)) == 0) {
+        if (u->fall == 1 && !n->fall_active) {
+            n->fall_active = 1u;
+            a->ev_fall++;
+            if (act != NULL) {
+                (void)hub_act_push(act, HUB_AK_EVENT_FALL, (uint8_t)idx, 0u);
+            }
+        } else if (u->fall == 0) {
+            n->fall_active = 0u;
         }
     }
     return idx;

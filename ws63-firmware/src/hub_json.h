@@ -115,7 +115,10 @@ int hub_json_parse_nack(const char *js, size_t len, int *nack_seq, int *reason);
 int hub_json_parse_time(const char *js, size_t len, int64_t *ts_ms);
 
 /* ---- 小工具（白名单/表格里要按 MAC 显示成 §3.4 要求的格式） ---- */
-/** "11:22:33:44:55:01"（大写十六进制、冒号分隔）；buf 至少 18 字节 */
+/* "11:22:33:44:55:01" = 17 字符 + '\0'；调用方按这个常量开缓冲，别写魔数 20 */
+#define HUB_MAC_STR_MAX     18u
+
+/** "11:22:33:44:55:01"（大写十六进制、冒号分隔）；buf 至少 HUB_MAC_STR_MAX 字节 */
 void hub_mac_str(const uint8_t mac[HUB_MAC_BYTES], char *buf, size_t cap);
 /** 解析 "11:22:33:44:55:01" / 允许小写；成功返回 1 */
 int  hub_mac_parse(const char *s, uint8_t mac[HUB_MAC_BYTES]);

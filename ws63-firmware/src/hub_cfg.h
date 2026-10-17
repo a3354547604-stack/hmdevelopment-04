@@ -41,6 +41,15 @@
  * 必须是本目标独有的字符串，且不能出现在 node_* 或 sle_hub_adv.c 里。 */
 #define HUB_ROLE_MARK           "HUB-ROLE=CENTRAL"
 
+/* 构建标签：与节点侧 node_cfg.h 的 NODE_BUILD_TAG 同款式，串口一行就能认出
+ * 「这块板烧的是汇聚、哪一版、链路身份是什么」。构建脚本按它做角色断言。 */
+#define HUB_BUILD_TAG           ("HUB-ROLE=CENTRAL sn=" HUB_SN_STR " fw=" HUB_FW_VERSION " mock=" HUB_MOCK_STR)
+
+/* HUB_MOCK 转字符串：宏拼接里 #x 只能用在函数式宏里（# 运算符只在宏参数上生效） */
+#define HUB_STR_(x)             #x
+#define HUB_STR(x)              HUB_STR_(x)
+#define HUB_MOCK_STR            HUB_STR(HUB_MOCK)
+
 /* 串口日志前缀（grep 定位用） */
 #define HUB_TAG                 "[HUB] "
 
@@ -98,6 +107,24 @@
 #define HUB_RX_BUF_SIZE         512u
 /* 帧最大长度 = 10 + 1024（§3.2） */
 #define HUB_TX_FRAME_MAX        1034u
+
+/* 引脚（《引脚与接线表》§3.2）：汇聚排针 23=U1TX=GPIO_15、24=U1RX=GPIO_16，
+ * 复用关系表里 UART1 是 MODE 1，115200 8N1，3.3 V 直连不分压、必须共地。
+ * 这三个符号来自 SDK 的 pin_t / pin_mode_t，值（15 / 16 / 1）在
+ * 「platform_core_rom.h」「pinctrl_porting.h」里定死；因为本头文件带 `UART_BUS_1`、
+ * `GPIO_15` 这类 SDK 符号，**只有 hub_client.c / hub_main.c 可以 include 它**，
+ * 纯逻辑模块（hub_agg / hub_frame / hub_glink / hub_adv / hub_vnode）一律不许 include，
+ * 否则它们就编不进主机单测了 —— 这是"无板可验证"的前提。 */
+#define HUB_UART_TXD_PIN        GPIO_15
+#define HUB_UART_RXD_PIN        GPIO_16
+#define HUB_UART_PIN_MODE       PIN_MODE_1
+
+/* 上电回环自检（《引脚与接线表》§3.2）：短接排针 23/24 再上电，必须打印
+ * `[UART1] loopback ok, tx=<帧> rx=<帧>`；没短接时打印 no echo（接网关是正常工作态）。
+ * 自检帧用 0x11 空命令体，因为它是网关→汇聚方向、绝不该出现在生产的汇聚→网关流里。 */
+#define HUB_LOOPBACK_TAG        "[UART1] loopback ok"
+#define HUB_LOOPBACK_TRIES      3u
+#define HUB_LOOPBACK_WAIT_MS    100u
 
 /* ------------------------------------------------------------------ */
 /* 调试与演示                                                         */

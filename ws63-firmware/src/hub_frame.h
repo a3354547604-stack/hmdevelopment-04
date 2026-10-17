@@ -53,6 +53,7 @@ extern "C" {
 #define HUB_R_NOT_CONN      9u
 #define HUB_R_WL_FULL       10u
 #define HUB_R_MAC_TAKEN     11u
+#define HUB_R_LINK_TIMEOUT  12u   /* §3.6：下行 3 次重传无应答，回 GW_ACK(result=12) */
 
 /**
  * @brief CRC-16/MODBUS（契约 §3.3：poly 0x8005 反射 0xA001、初值 0xFFFF、
@@ -66,6 +67,20 @@ uint16_t hub_crc16(const uint8_t *d, uint32_t n);
  */
 int hub_frame_build(uint8_t type, uint16_t seq, const char *payload, uint16_t plen,
                     uint8_t *out, uint32_t cap);
+
+/**
+ * @brief 组一帧 `0x01 NODE_DATA`：PAYLOAD = 节点原始 JSON，**一个字节都不改**。
+ *
+ * 契约 §3.4 对这一行的规定就一句「§2.2 节点 JSON 原样」，§3.7 第一条样例帧正是 124 字节的
+ * 节点 JSON 本体。这里再套一层 `{"sn":..,"ts":..,"data":..}` 是错的（曾经这么写过）：
+ * 与样例帧不符、`ts` 会出现两份（节点采样 vs 汇聚收到）、且违反 §2.6「汇聚不解析业务字段」。
+ * 汇聚是哑管道：只换帧头与 CRC，正文原样。
+ *
+ * @param node_json 节点上报的完整 JSON 对象（外层的 `{` 与 `}` 必须都在）
+ * @return 整帧字节数；失败返回 -1（空指针 / 不是对象 / 缓冲不足）
+ */
+int hub_frame_build_node(uint16_t seq, const char *node_json, uint16_t json_len,
+                         uint8_t *out, uint32_t cap);
 
 /** 拆出来的一个帧。payload 是调用方 scratch 里的副本，可安全长期持有。 */
 typedef struct {

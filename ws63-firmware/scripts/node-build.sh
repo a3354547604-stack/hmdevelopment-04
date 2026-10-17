@@ -104,26 +104,38 @@ say "已暂存原有 custom/ → $STASH"
 build_one() {
     local name="$1" extra="$2" files="$3"
     local log="$OUT_DIR/build-$name.log"
-    local dest="$OUT_DIR/NODE_$(echo "$name" | tr 'a-z' 'A-Z').fwpkg"
-    local own_tag other_tags own_marker other_marker
+    local kind own_tag other_tags own_marker other_marker
     local f base old_hash new_hash
 
-    # 角色断言用的标记串（来自 node_cfg.h 的 NODE_BUILD_TAG 与各驱动的打印）
+    # 汇聚目标（hub/hubmock）与节点目标产出的是两种完全不同的固件：
+    # 汇聚是 SLE **Central**（只扫描/连接），节点是 Peripheral（广播/服务端）。
+    # 拿错包烧板比编不过更危险（两块板同角色、或汇聚去广播），所以产物名与断言都分开。
+    case "$name" in hub|hubmock) kind="hub" ;; *) kind="node" ;; esac
+    local dest="$OUT_DIR/$(echo "$kind" | tr 'a-z' 'A-Z')_$(echo "$name" | tr 'a-z' 'A-Z').fwpkg"
+
+    # 角色断言用的标记串（来自 node_cfg.h 的 NODE_BUILD_TAG / hub_cfg.h 的 HUB_BUILD_TAG）
     case "$name" in
         m1)   own_marker="EC-NODE-ROLE=M1 type=gas" ;;
         m2)   own_marker="EC-NODE-ROLE=M2 type=fall" ;;
         m4)   own_marker="EC-NODE-ROLE=M4 type=door+presence" ;;
         mock) own_marker="EC-NODE-ROLE=M1 type=gas" ;;
+        hub)     own_marker="HUB-ROLE=CENTRAL sn=H1 fw=0.1.0 mock=0" ;;
+        hubmock) own_marker="HUB-ROLE=CENTRAL sn=H1 fw=0.1.0 mock=1" ;;
         *)    die "目标 $name 没有定义角色标记，请在 build_one 里补" ;;
     esac
     other_tags=""
-    for n in "${T_NAMES[@]}"; do
-        [ "$n" = "$name" ] && continue
-        case "$n" in
-            m2) other_tags="$other_tags EC-NODE-ROLE=M2 type=fall" ;;
-            m4) other_tags="$other_tags EC-NODE-ROLE=M4 type=door+presence" ;;
-        esac
-    done
+    if [ "$kind" = "hub" ]; then
+        # 汇聚镜像里出现任何节点角色标记 = 编进镜像的是节点代码（或反射了节点常量表）
+        other_tags="EC-NODE-ROLE="
+    else
+        for n in "${T_NAMES[@]}"; do
+            [ "$n" = "$name" ] && continue
+            case "$n" in
+                m2) other_tags="$other_tags EC-NODE-ROLE=M2 type=fall" ;;
+                m4) other_tags="$other_tags EC-NODE-ROLE=M4 type=door+presence" ;;
+            esac
+        done
+    fi
 
     # 1) 清空扩展点里的自研源码（原件在 STASH 里），只放本目标的文件
     rm -f "$CUSTOM"/*.c "$CUSTOM"/*.h "$CUSTOM"/CMakeLists.txt "$CUSTOM"/HsTest.* 2>/dev/null || true
@@ -177,14 +189,18 @@ build_one() {
         [ "${n_other:-0}" -eq 0 ] || die "目标 $name 角色断言失败：镜像里出现了别的角色标记 '$other_marker'×$n_other。
     绝不把这种包交给用户烧板，否则两块板可能同角色。"
     done
-    if [ "$name" = "mock" ]; then
+    if [ "$kind" = "hub" ]; then
+        say "$name 角色断言通过（汇聚镜像）：'$own_marker'×$n_own，节点角色标记 0"
+    elif [ "$name" = "mock" ]; then
         n_mock=$(grep -acF -- "[MOCK]" "$FWPKG" || true)
         [ "${n_mock:-0}" -ge 1 ] || die "mock 目标里找不到 '[MOCK]' 标记：伪数据源没编进去"
     else
         n_mock=$(grep -acF -- "[MOCK]" "$FWPKG" || true)
         [ "${n_mock:-0}" -eq 0 ] || die "真实目标 $name 里出现了 '[MOCK]'：mock 驱动混进了固件"
     fi
-    say "$name 角色断言通过：'$own_marker'×$n_own，其它角色标记 0，[MOCK]×$n_mock"
+    if [ "$kind" != "hub" ]; then
+        say "$name 角色断言通过：'$own_marker'×$n_own，其它角色标记 0，[MOCK]×$n_mock"
+    fi
 
     cp "$FWPKG" "$dest"
     {

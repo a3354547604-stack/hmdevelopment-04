@@ -43,8 +43,11 @@ CCJ = os.path.join(SDK, "src/output/ws63/acore/ws63-liteos-app/compile_commands.
 
 DROP_WITH_ARG = {"-o", "-MF", "-MT", "-MQ", "-MD", "-MMD", "-MP"}
 # 模板条目是“上一次构建”留下的，里面烤进了上一次目标的按文件宏，必须丢掉自己补
+# 汇聚目标（hub/hubmock）由 t3 加入同一份清单，因此 -DHUB_MOCK= 也要丢：
+# 模板条目是「上一次构建」的，若上次编的是 hubmock，模板里就烤着 -DHUB_MOCK=1，
+# 再叠上目标自己的 -DHUB_MOCK=0 会得到「重复定义」警告（值取后来的，但日志很脏）。
 DROP_DEFINE_PREFIX = ("-DTHIS_FILE_ID=", "-DSPIKE_ROLE=", "-DNODE_ROLE=", "-DNODE_MOCK=",
-                      "-DNODE_LEGACY_SPEED_TEST=")
+                      "-DNODE_LEGACY_SPEED_TEST=", "-DHUB_MOCK=")
 
 
 def read_targets():

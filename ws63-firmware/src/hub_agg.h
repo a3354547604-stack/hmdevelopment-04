@@ -89,6 +89,10 @@ typedef struct {
 
     uint32_t rx_frames;
     uint32_t req_mismatch;
+    /* 跌倒事件必须**边沿触发**：节点在自己的迟滞状态机里（§8.4）退出前会一直回 fall=1，
+     * 每次轮询都推一条 0x03 会让网关/服务器把一次跌倒当 N 次报警刷屏。
+     * 0 = 该节点当前不在跌倒态。 */
+    uint8_t  fall_active;
 
     int64_t  conn_at_ms;
     int64_t  connect_try_ms;
@@ -204,6 +208,19 @@ void hub_scan_flush(hub_agg_t *a);
 void hub_agg_scan_begin(hub_agg_t *a, int ack_id, uint32_t duration_ms, int include_bound, int64_t now_ms);
 /** 周期性短扫（找未连接的已绑定节点、刷新 rssi） */
 void hub_agg_scan_begin_periodic(hub_agg_t *a, int64_t now_ms);
+
+/**
+ * @brief 结束当前扫描会话（由 hub_client 在收到 HUB_AK_SCAN_STOP 时调用）。
+ *
+ * 为什么必须有这个函数：`scan_active` 只能由本模块改，而「会话到点」这件事
+ * 只有调 tick 的一方能观察到 —— 少了它，`scan_active` 永远是 1，
+ * 于是 scan_schedule 每拍都推一个 SCAN_STOP，射频被 stop_seek 刷爆。
+ *
+ * 职责：排序+截断发现列表（§3.4 0x21 要求按 rssi 降序）→ 关会话 → 排下一次周期短扫；
+ * 若该会话由 0x20 触发（scan_ack_id >= 0），顺手把 0x21 的应答内容填进 act 并置
+ * HUB_AK_SCAN_RSP —— act 里那几个 scan_rsp_* 字段就是为此存在的。
+ */
+void hub_agg_scan_end(hub_agg_t *a, int64_t now_ms, hub_act_t *act);
 
 /* ---- 链路事件 ---- */
 /** @return 槽位下标；-1 = 不在白名单（调用方应断开这个陌生设备） */
