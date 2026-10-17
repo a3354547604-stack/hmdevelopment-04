@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import struct
@@ -88,11 +89,52 @@ def case_pair_frames_are_declared_types():
 
 
 def case_truncated_samples_are_known():
-    """§3.7 前三行/第五行 payload 用「…」省略——完整帧不可复现（复核报告 M1）。"""
-    truncated = [s for s in C.uart_samples() if "…" in cs.plain(s["hex"])]
-    require(len(truncated) >= 3,
-            "§3.7 省略帧数量变少了（%d）——若已补齐完整 hex，请把本用例改成硬断言" % len(truncated))
-    raise SkipCase("§3.7 有 %d 条示例帧 payload 省略，无法逐字节复现（已登记 M1）" % len(truncated))
+    """§3.7 六条样例帧必须逐字节完整，字段集与 §2.2/§2.4.x 对齐。
+
+    v1.2 已补齐复核 M1（原先两条样例帧 payload 用「…」省略），本用例随之从「登记缺陷」
+    改为硬断言：省略帧数必须为 0；逐帧 `len == 10 + LEN` 且 CRC 复算一致；携带节点 JSON
+    的帧（0x01 NODE_DATA / 0x03 HUB_EVENT）其 envelope 键集与 §2.2 完全一致、内层 payload
+    键集 ⊆ §2.4.x 声明字段且覆盖全部必填字段（P1 键允许缺省，如 §2.4.2 的 `presence`）。
+    """
+    samples = C.uart_samples()
+    require_eq(len(samples), 6, "§3.7 样例帧条数（v1.2 的六条实测帧）")
+    truncated = [s["scene"][:24] for s in samples
+                 if "…" in cs.plain(s["hex"]) or "..." in cs.plain(s["hex"])]
+    require_eq(truncated, [], "§3.7 仍有 payload 省略的帧（M1 回退：v1.2 要求逐字节完整）")
+
+    envelope = [cs.plain(C.envelope_fields().cell(r, "字段")) for r in C.envelope_fields().rows]
+    example = C.json_blocks("2.2")
+    require_eq(len(example), 1, "§2.2 应有一条完整示例 JSON")
+
+    node_json_frames = 0
+    for s in samples:
+        label = "§3.7 " + s["scene"][:20]
+        data = _hex_bytes(s["hex"])
+        require(data[:2] == b"\xAA\x55", "%s 帧头不是 AA 55" % label)
+        _ver, type_hex, _seq, length = struct.unpack("<BBHH", data[2:8])
+        require_eq(len(data), 10 + length, "%s 整帧长度应为 10+LEN" % label)
+        crc_rx = struct.unpack("<H", data[8 + length:10 + length])[0]
+        require_eq(ri.crc16_modbus(data[2:8 + length]), crc_rx, "%s CRC 复算" % label)
+        frames, errors, _rest = ri.decode_frames(data)
+        require_eq(errors, [], "%s 解码不应报错" % label)
+        if type_hex not in (0x01, 0x03):       # 其余帧的 payload 不是节点 JSON
+            continue
+        node_json_frames += 1
+        obj = json.loads(frames[0].payload.decode("utf-8"))
+        require_eq(sorted(obj.keys()), sorted(envelope), "%s envelope 键集应与 §2.2 一致" % label)
+        if type_hex == 0x01:
+            require_eq(obj, example[0], "%s 应逐字段等于 §2.2 示例" % label)
+        table = C.payload_fields(obj["type"])
+        section = C.payload_section(obj["type"])
+        declared = [cs.plain(table.cell(r, "字段")) for r in table.rows]
+        required = [cs.plain(table.cell(r, "字段")) for r in table.rows
+                    if table.cell(r, "必填").startswith("是")]
+        inner = sorted(obj["payload"].keys())
+        undeclared = sorted(set(inner) - set(declared))
+        require_eq(undeclared, [], "%s payload 有 §%s 未声明的键" % (label, section))
+        require_eq(sorted(set(required) - set(inner)), [],
+                   "%s payload 缺 §%s 的必填字段" % (label, section))
+    require_eq(node_json_frames, 2, "§3.7 应有 2 条携带节点 JSON 的帧（0x01/0x03）")
 
 
 def case_coalesced_frames():
@@ -179,7 +221,7 @@ CASES = [
     ("§3.7/§3.9 完整示例帧逐字节复现", case_golden_frames_byte_exact),
     ("§3.9 SEQ/LEN 列与字节一致", case_pair_samples_match_declared_len),
     ("§3.9 帧 TYPE 都在 §3.4 中", case_pair_frames_are_declared_types),
-    ("§3.7 省略帧已登记（M1）", case_truncated_samples_are_known),
+    ("§3.7 六条样例帧完整且字段集对齐（M1 已修）", case_truncated_samples_are_known),
     ("§3.6 粘包按 LEN 切分", case_coalesced_frames),
     ("§3.6 半包保留残余", case_half_frame_kept_as_residual),
     ("§3.6 假帧头滑动重找", case_garbage_prefix_is_skipped),
