@@ -40,6 +40,12 @@ ws63-firmware/scripts/node-build.sh            # 也可只编 m2 mock
 `build-*.log`（构建日志，被 `.gitignore` 的 `*.log` 排除，需重现时按 §2 重跑）、
 `node-uplink-sample.txt`（§5 样例）、`node-json-check.txt`（JSON 复检输出）。
 
+> 注意：`node-build.sh` 每次构建前把 SDK 的 `src/application/samples/custom/` 整体暂存，装进本目标的
+> 源文件清单，编完（含失败/中断）**再原样还原**。所以此刻 SDK 那边躺着的仍是 **t2 之前的生产版本**
+> （`sle_hub.c` 未改、无 `node_*.c`），这是**故意**的 —— 别以为「拷过就一直在」。改完节点固件后要用
+> 官方流程编译时，请直接跑 `node-build.sh`，不要手工拷（手工拷漏 `radar_hub.c`/清单不同就会编出错的固件）。
+> 最新一次构建后已核对：`custom/` 无任何 `node_*`/`spike_*` 残留、无暂存目录。
+
 ---
 
 ## 3. 四份固件与产物指纹
