@@ -59,6 +59,10 @@ curl -s http://127.0.0.1:3000/api/health
 - 可选反代：`docker compose --profile proxy up -d`（`127.0.0.1:${HTTP_PORT:-8080}` → api）
 - 停止/清理：`docker compose down`（保留数据卷 `hmprogram-server-db-data`）；`docker compose down -v` 连数据一起删
 
+> **演示提示**：种子只写入一次心跳，之后没有真实上报时，服务器会在 180 s（`gateway_offline_timeout_s`，§8.7）
+> 后按契约把网关判为离线并生成 `device_offline` 告警——这是**预期行为**，不是故障。演示前重跑一次 `app.seed`，
+> 或用 README §5 示例 21 的属性 webhook 重新上报一次，即可让 `online=true`。
+
 `app.seed` 会创建：演示账号 `demo / demo-pass-123`（**仅 dev**）、网关 `M0-3F1A2B`（已绑定，含 H1/M1/M2/M4 四个节点）、
 未绑定网关 `M0-9C2D4E`（用于走绑定流程）、最近 3 天读数（gateway 属性快照 / presence 活动 / gas 背景值 / 一组跌倒）、
 3 条不同状态的告警，并按 §7.9 归并出 `activity_hourly`/`activity_daily`。
