@@ -1,0 +1,11 @@
+# 节点固件目标清单（node-build.sh 与 tools/node-compile-check.py 共用，避免两处文件列表漂移）
+#
+# 格式：目标名 | build.py 追加参数 | 编进 custom/ 组件的源文件（相对 ws63-firmware/src）
+#   - 每个目标一份固件、一份源文件列表：M1/M2/M4 三个角色互不共用驱动文件，
+#     这样「M2 的固件里根本没有 I2C 代码」是编译期事实，而不是运行期分支。
+#   - mock 用 node_sensor_mock.c 顶替角色驱动：一份固件展示无硬件时的完整链路。
+#   - NODE_ROLE 的取值见 node_cfg.h 与接口契约 §0.7（M1=1 / M2=2 / M4=4）。
+m1   | -def=NODE_ROLE=1               | node_main.c node_json.c node_link.c node_sensor_gas.c sle_hub.c sle_hub_adv.c
+m2   | -def=NODE_ROLE=2               | node_main.c node_json.c node_link.c node_sensor_radar.c radar_hub.c sle_hub.c sle_hub_adv.c
+m4   | -def=NODE_ROLE=4               | node_main.c node_json.c node_link.c node_sensor_door.c sle_hub.c sle_hub_adv.c
+mock | -def=NODE_ROLE=1,NODE_MOCK=1   | node_main.c node_json.c node_link.c node_sensor_mock.c sle_hub.c sle_hub_adv.c

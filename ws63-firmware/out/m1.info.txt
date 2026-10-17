@@ -1,0 +1,7 @@
+target=m1
+extra_build_args=-def=NODE_ROLE=1
+sources= node_main.c node_json.c node_link.c node_sensor_gas.c sle_hub.c sle_hub_adv.c
+bytes=1467944
+sha256=001c70200d232ded5cc76d5d293f1ddcf2a323380f59e3e2629267d10a45a067
+built_at=2026-10-17T22:18:31+08:00
+role_marker=EC-NODE-ROLE=M1 type=gas count=1

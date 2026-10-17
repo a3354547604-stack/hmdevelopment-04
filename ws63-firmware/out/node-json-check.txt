@@ -1,0 +1,26 @@
+使用编译器: gcc
+$ gcc -std=c99 -Wall -Wextra -Werror -O1 -I /w/ws63-firmware/src -o /tmp/tmpcfb800m1/node-json-selftest /w/tools/node-json-selftest.c /w/ws63-firmware/src/node_json.c
+FRAME gas_M1_warmup
+{"sn":"M1","ts":1760000000000,"type":"gas","payload":{"smoke":320,"temp":24.5,"humi":56.2,"adc_mv":[160],"warmup":true},"seq":12,"req_id":7,"fw":"0.1.0"}
+FRAME gas_M1_minimal
+{"sn":"M1","ts":1760000123456,"type":"gas","payload":{"smoke":0,"temp":-0.5,"humi":100.0},"seq":13,"fw":"0.1.0"}
+FRAME fall_M2_alarm
+{"sn":"M2","ts":1760000000000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart","dist":1.8},"seq":2,"fw":"0.1.0"}
+FRAME fall_M2_clear_tx2
+{"sn":"M2","ts":1760000000000,"type":"fall","payload":{"fall":0,"presence":0,"src":"tx2"},"seq":3,"fw":"0.1.0"}
+FRAME door_M4_open_ch0
+{"sn":"M4","ts":1760000000000,"type":"door","payload":{"door":true,"window":false,"ch":0},"seq":4,"fw":"0.1.0"}
+FRAME door_M4_periodic
+{"sn":"M4","ts":1760000000000,"type":"door","payload":{"door":false,"window":true},"seq":5,"fw":"0.1.0"}
+FRAME presence_M4_motion
+{"sn":"M4","ts":1760000000000,"type":"presence","payload":{"presence":true,"last_motion_ts":1759999999000,"count":37,"ch":1},"seq":6,"fw":"0.1.0"}
+FRAME status_M2_full
+{"sn":"M2","ts":1760000000000,"type":"status","payload":{"uptime_s":7325,"rssi":-62,"power_src":"usb","battery":255,"err_cnt":3},"seq":7,"fw":"0.1.0"}
+FRAME set_ack
+{"cmd":"set_ack","key":"presence_hold_s","result":0}
+FRAME nack
+{"cmd":"nack","reason":1}
+SELFTEST OK
+
+用 JSON 解析器复检了 10 帧，字段级断言 8 条
+✅ 全部通过：信封键序/类型、§2.4 必填与量程、§0.1 sn、§0.2 ts、§0.3 精度、§2.1 长度
