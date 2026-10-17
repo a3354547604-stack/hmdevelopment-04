@@ -12,9 +12,9 @@
 
 /* 故意**不** include hub_cfg.h：它带 SDK 的 `UART_BUS_1` 等宏，会把本模块从"纯 C、主机可编译"
  * 拖成"只能在 SDK 里编译"，而本模块的全部价值就是能在主机上跑出聚合日志。
- * 代价是这条 fw 字符串与 hub_cfg.h 的 VNODE_FW 要靠人同步 —— 代价是可接受的：
- * §2.2 的 `fw` 是选填字段，且 tools/hub-selftest.py 会从 hub_cfg.h 里把 VNODE_FW 抠出来，
- * 逐条断言 mock 帧里的这个字段，改漏一处自测就红。 */
+ * 代价是这条 fw 字符串与 hub_cfg.h 的 HUB_FW_VERSION 要靠人同步 —— 代价是可接受的：
+ * §2.2 的 `fw` 是选填字段，且 tools/hub-selftest.py 的"mock fw 版本一致性"一节会把
+ * hub_cfg.h 的 HUB_FW_VERSION 与本文件的 VNODE_FW 抠出来比对，改漏一处自测就红。 */
 #define VNODE_FW            "0.1.0"
 
 /* node_cfg.h 里的传感器快照初值：这里只填一个"看起来正常"的基线，

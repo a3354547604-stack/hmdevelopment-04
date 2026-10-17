@@ -42,7 +42,7 @@ hub_client.c   ← 只做 SDK 适配：SLE 回调、kthread、UART1 驱动、执
 
 ```bash
 cd <仓库根>
-# ① 主机侧自测：编译 + 192 条断言 + 契约样例帧逐字节回归 + mock 60 s 时间轴
+# ① 主机侧自测：编译 + 192 条断言 + 契约样例帧逐字节回归 + mock 60 s 时间轴 + mock fw 版本一致性
 python3 tools/hub-selftest.py
 #    期望结尾：==== 结果：PASS 192 / FAIL 0 ====   与  总判定：PASS
 #    样例帧：11 条，失败 0 条
@@ -63,7 +63,7 @@ tools/build-lock.sh ws63-firmware/scripts/node-build.sh hub hubmock
 
 | 项 | 结果 |
 |---|---|
-| `tools/hub-selftest.py` | **PASS 192 / FAIL 0**，契约样例帧 **11/11 逐字节一致** |
+| `tools/hub-selftest.py` | **PASS 192 / FAIL 0**，契约样例帧 **11/11 逐字节一致**，mock fw 版本一致性 PASS |
 | `tools/node-compile-check.py m1 m2 m4 mock hub hubmock` | **41 个（目标×文件）编译，失败 0**（含 SDK 的 `-Werror` 级别警告） |
 | `HUB_HUB.fwpkg` | 1 472 744 B，sha256 `8ef1978be0b414308691f2ab709fe6c3d3bad326de6e0b3588f4bc568fc1f2f4` |
 | `HUB_HUBMOCK.fwpkg` | 1 476 200 B，sha256 `28a1f56e5c37668b7fd4ef7d4db8f3d4223c07fec08cd5fe627c937ea0044ca6` |
@@ -114,9 +114,10 @@ tools/build-lock.sh ws63-firmware/scripts/node-build.sh hub hubmock
 
 ```
   t=    0ms poll -> M1 (id=1) reply=141 bytes
-  t=  200ms poll -> M2 (id=2) reply=111 bytes
+  t=  200ms poll -> M2 (id=2) reply=124 bytes
   t=  400ms poll -> M4 (id=3) reply=113 bytes
   t= 3000ms poll -> M1 (id=4) reply=144 bytes
+  t= 3200ms poll -> M2 (id=5) reply=125 bytes
   ...
   t=25000ms M2 pushes fall (主动上报，不等轮询)
   t=51650ms EVENT node_offline (sn=M4 miss=3)
@@ -181,8 +182,54 @@ t3 任务卡 inScope 写的是 `ws63-firmware/src/`，但要让"编译通过"这
 上一次 `-DHUB_MOCK` 会与新目标重复定义）。均为**追加式**改动，未改任何既有行为。
 新增文件：`tools/hub-selftest.c`、`tools/hub-selftest.py`。
 
-## 8. 变更记录
+## 8. 复核记录（attempt 4：独立复现 + 收口）
+
+architect-op 的 attempt 3 交付了实现（commit `170f98d`）。attempt 4 不做并行重写，只做
+**独立复现**与**收口**，全部结论都在本机重跑得到（2026-10-18 01:00 前后，WSL + `ws63wsl:latest`）。
+
+### 8.1 独立复现（不看源码先看结果，再回头逐条核对）
+
+| 复现项 | 命令 | 结果 |
+|---|---|---|
+| 主机自测 | `tools/build-lock.sh python3 tools/hub-selftest.py` | PASS 192 / FAIL 0；11 条样例帧逐字节一致 |
+| SDK 编译自检 | `python3 tools/node-compile-check.py hub hubmock` | 16 个（目标×文件），失败 0 |
+| 出镜像 | `tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh hub hubmock` | 角色断言通过；`HUB_HUB.fwpkg` 1472744 B sha256 `8ef1978b…f2f4`、`HUB_HUBMOCK.fwpkg` 1476200 B sha256 `28a1f56e…4ca6` —— 与 attempt 3 报的**逐位相同** |
+
+另按 t3 任务卡的三条"注意"逐条读代码核对（不是看文档自述）：
+
+- ① **每次连接都走完整套发现**：`hub_client.c:561-565` 在 `pair_state != SLE_PAIR_NONE` 时
+  **直接**推 `HUB_EV_AUTHED` 往下走（官方样例此处为空 → 已配对板重连卡死）；未配对才先
+  `sle_pair_remote_device`。`cli_start_discover()` 每次从 `EXCH` 重头开始。
+- ② **常驻线程连上就发**：连接发起在 `hub_connect_manage()`（`sle_connect_remote_device`），
+  轮询在 `hub_agg` 的 3 s 节拍上，不依赖对端 READ。
+- ③ **身份按 §2.7**：`hub_seek_result_cbk()` 调 `hub_adv_parse()` 解析 `0xFF` 厂商结构，
+  MAC 取自 `result->addr.addr`，无写死 MAC/名字；`0x7F` 按"不提供 rssi"处理。
+
+t16 的两条教训在本版**已经是显式状态机**，不是 0 值哨兵：
+`HUB_STAGE_IDLE/AUTH/EXCH/SVC/PROP/CCCD/DONE`（`hub_client.c:94-100`）+ 每阶段超时重来
+（`hub_discovery_manage()`，含 `HUB_PAIR_GRACE_MS` 宽限）；连接在册状态用
+`hub_node_t.have_conn` + `conn_id` 两个字段表示 —— `hub_agg.c:397` 的注释就是这条纪律本身：
+"清零只是为了下次复用变量，判断一律用 `have_conn`"；全仓
+`grep -nE 'conn_id[[:space:]]*(==|!=)[[:space:]]*0'` 在 hub_*.c 里**无命中**。
+
+### 8.2 收口改动（这一棒真正改了的东西）
+
+1. **契约 v1.2 口径残留**：`hub_frame.c` / `hub_frame.h` / `hub_glink.h` 里 5 处注释仍写
+   "残余 > 2058"，而代码（`HUB_RESID_MAX = HUB_FRAME_MAX*2` = **2068**）与契约 v1.2 §3.6
+   早已是 2068。注释改成 2068 并标明 v1.2，避免下一个人照注释"修"代码。
+2. **兑现一条没兑现的注释**：`hub_vnode.c` 的注释承诺"`tools/hub-selftest.py` 会从 hub_cfg.h
+   里把 fw 版本抠出来逐条断言"，但脚本里没有这一段，而且注释把宏名写成了不存在的
+   `VNODE_FW`（真名 `HUB_FW_VERSION`）。现在：注释改名，脚本新增
+   **"mock fw 版本一致性"** 一节，比对 `hub_vnode.c` 的 `VNODE_FW` 与 `hub_cfg.h` 的
+   `HUB_FW_VERSION`，不一致即 FAIL（已用反例验证它真的会红：把 `VNODE_FW` 改成 `9.9.9`
+   → `FAIL 两处 fw 不一致`）。为什么值得加：mock 帧与真帧的 `fw` 字段若悄悄分叉，
+   "日志证明 mock 聚合正确"这条验收就失去意义。
+3. **文档失真**：§4 的 mock 日志摘录里 `M2 (id=2) reply=111 bytes` 与实测（124）不符，
+   按重新生成的 `out/hub-mock-agg.log` 更正。
+
+## 9. 变更记录
 
 | 时间 | 变更 |
 |---|---|
 | 2026-10-18 | 首版：hub_client/hub_agg/hub_frame/hub_glink/hub_adv/hub_vnode + 自测 192 条 + 契约 11 帧逐字节回归；修 0x01 信封错误、`hub_wl_del` 返回值当结果码、环形队列少一槽、重传次数少一次、跌倒事件未边沿化 |
+| 2026-10-18 | attempt 4 收口：独立复现三项全绿（含出镜像 sha256 与 attempt 3 逐位相同）；注释 2058→2068（5 处）；`hub-selftest.py` 新增 mock fw 版本一致性断言（含反例验证）+ `hub_vnode.c` 注释宏名更正；doc §4 mock 日志摘录按实测更正 |

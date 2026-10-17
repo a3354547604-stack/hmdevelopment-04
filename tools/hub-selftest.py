@@ -190,6 +190,41 @@ def check_contract_frames(cc):
     return fails
 
 
+def check_fw_version_consistency():
+    """mock 帧与真帧的 `fw` 字段必须同源同值。
+
+    hub_vnode.c 刻意不 include hub_cfg.h（后者带 SDK 宏，会把"纯 C、主机可编译"拖没），
+    所以它硬写了一份 fw 字符串；那条注释承诺"hub-selftest.py 会抠出来逐条断言"。
+    本函数就是兑现这条注释：两处宏必须相等，否则 mock 聚合日志里的 fw 与上板帧不一致，
+    而"日志证明 mock 节点聚合正确"这个验收项就失去意义。
+    """
+    print("\n== mock fw 版本一致性（hub_vnode.c 的 VNODE_FW vs hub_cfg.h 的 HUB_FW_VERSION）==")
+
+    def grab(name, macro):
+        path = os.path.join(SRC, name)
+        if not os.path.isfile(path):
+            return None
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r'\s*#define\s+%s\s+"([^"]*)"' % re.escape(macro), line)
+                if m:
+                    return m.group(1)
+        return None
+
+    a = grab("hub_vnode.c", "VNODE_FW")
+    b = grab("hub_cfg.h", "HUB_FW_VERSION")
+    if a is None or b is None:
+        print("  FAIL  抠不到宏（hub_vnode.c VNODE_FW=%r，hub_cfg.h HUB_FW_VERSION=%r）"
+              % (a, b))
+        return 1
+    if a != b:
+        print('  FAIL  两处 fw 不一致：hub_vnode.c VNODE_FW="%s" != hub_cfg.h HUB_FW_VERSION="%s"' % (a, b))
+        print("        同一个固件里 mock 帧与真帧的 fw 字段必须同值（契约 §2.2）")
+        return 1
+    print('  PASS  VNODE_FW == HUB_FW_VERSION == "%s"' % a)
+    return 0
+
+
 def main():
     in_docker = "--inside-docker" in sys.argv
     cc = find_cc()
@@ -206,7 +241,8 @@ def main():
     if rc == 2:
         return 2
     cfail = check_contract_frames(cc)
-    total_bad = (1 if rc != 0 else 0) + cfail
+    fwfail = check_fw_version_consistency()
+    total_bad = (1 if rc != 0 else 0) + cfail + fwfail
     print("\n==== hub-selftest 总判定：%s ====" % ("PASS" if total_bad == 0 else "FAIL"))
     print("日志：ws63-firmware/out/hub-selftest.log；mock 聚合证据：ws63-firmware/out/hub-mock-agg.log")
     return 0 if total_bad == 0 else 1

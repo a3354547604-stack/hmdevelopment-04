@@ -6,7 +6,7 @@
 
 #include <string.h>
 
-#define HUB_RESID_MAX   (HUB_FRAME_MAX * 2u)   /* §3.6：残余 > 2058 字节 → 清空并计数 */
+#define HUB_RESID_MAX   (HUB_FRAME_MAX * 2u)   /* §3.6（v1.2）：残余 > 2068 字节 → 清空并计数 */
 
 uint16_t hub_crc16(const uint8_t *d, uint32_t n)
 {
@@ -182,7 +182,7 @@ int hub_parser_next(hub_parser_t *p, hub_frame_t *out, uint8_t *scratch, uint32_
     if (p == NULL || out == NULL || scratch == NULL || scratch_cap < HUB_PAYLOAD_MAX) {
         return -1;
     }
-    /* §3.6：残余 > 2058 字节仍未成帧 → 清空并计数 */
+    /* §3.6（v1.2）：残余 > 2068 字节仍未成帧 → 清空并计数 */
     if (p->len > HUB_RESID_MAX) {
         p->err_resync++;
         p->len = 0u;

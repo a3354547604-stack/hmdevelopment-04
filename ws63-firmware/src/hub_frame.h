@@ -94,10 +94,10 @@ typedef struct {
 /**
  * 增量分帧器。所有状态都在结构体里，便于主机单测逐字节喂数据。
  * 为什么自己写而不用 SDK 的解析：契约 §3.6 的容错规则（假 SOF 滑动、同 SEQ
- * 只回一次 NACK、残余 > 2058 清空）是**契约要求的行为**，必须能单测。
+ * 只回一次 NACK、残余 > 2068 清空）是**契约要求的行为**，必须能单测。
  */
 typedef struct {
-    uint8_t  buf[HUB_FRAME_MAX * 2u + 4u];   /* 2058+ 见 §3.6 */
+    uint8_t  buf[HUB_FRAME_MAX * 2u + 4u];   /* 2×(10+1024)=2068+ 见 §3.6 v1.2 */
     uint32_t len;
 
     /* 统计（对应 §3.6 的 err_cnt / gw_rx_miss） */
