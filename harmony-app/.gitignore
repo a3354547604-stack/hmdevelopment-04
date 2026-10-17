@@ -1,0 +1,12 @@
+# 构建产物与工具链缓存：不入库（提交后仓库会膨胀几十 MB，且每次构建都在变）
+/build/
+/entry/build/
+/.hvigor/
+/.cxx/
+/oh_modules/
+/entry/oh_modules/
+local.properties
+*.hap
+*.app
+# 预览图脚本用的 Edge 临时用户目录（一次性产物，不入库）
+.edge-profile/

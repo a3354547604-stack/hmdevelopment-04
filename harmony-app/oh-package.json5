@@ -1,0 +1,16 @@
+/**
+ * 工程级包描述（ohpm）。业务依赖为空——本工程只用 OpenHarmony 原生 API，
+ * 不引入任何第三方 npm/HAR 包。
+ */
+{
+  "modelVersion": "5.0.0",
+  "name": "eldercare-guardian",
+  "version": "1.0.0",
+  "description": "独居老人居家安全监测与应急辅助系统 · 鸿蒙客户端",
+  "main": "",
+  "author": "HMProgram",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {},
+  "dynamicDependencies": {}
+}

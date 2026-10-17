@@ -1,0 +1,42 @@
+/**
+ * 工程级构建配置（Stage 模型 · API 12 · OpenHarmony 北向）。
+ *
+ * 三条硬约束来自本机工具链实测（见 ~/harmony-toolchain/BUILD-NOTES.md 坑 5）：
+ *  ① compatibleSdkVersion / compileSdkVersion / targetSdkVersion 必须是**整数**，不能写 "5.0.0(12)"；
+ *  ② 三个都要显式给出，否则报 `Please configure compileSdkVersion in the product`；
+ *  ③ signingConfigs 为空数组时，product 里**不能**写 signingConfig，
+ *     否则报 `Cannot read properties of undefined (reading 'app')`。
+ *
+ * compatibleSdkVersion 定 12（不是 23）：兼容面最广，API 12+ 设备都能装。
+ * 签名材料由打包方另行注入，不入库（AGENTS.md：不提交证书）。
+ */
+{
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        "compatibleSdkVersion": 12,
+        "compileSdkVersion": 12,
+        "targetSdkVersion": 12,
+        "runtimeOS": "OpenHarmony"
+      }
+    ],
+    "buildModeSet": [
+      { "name": "debug" },
+      { "name": "release" }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": ["default"]
+        }
+      ]
+    }
+  ]
+}

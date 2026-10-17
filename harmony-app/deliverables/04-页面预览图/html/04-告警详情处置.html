@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>告警详情</title><style>
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; background: #F2F5F4; width: 360px;
+         font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif;
+         color: #1B2A26; font-size: 17.0px; }
+  .screen { width: 360px; min-height: 780px; display: flex; flex-direction: column; }
+  .topbar { background: #FFFFFF; padding: 8px 16px; display: flex;
+             align-items: center; gap: 8px; }
+  .topbar .name { flex: 1; font-weight: 500; max-width: 200px; white-space: nowrap;
+                   overflow: hidden; text-overflow: ellipsis; }
+  .chip { font-size: 13.0px; color: #0E7C66;
+           background: #F2F5F4; padding: 3px 8px; border-radius: 12.0px; }
+  .body { flex: 1; padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 12.0px; }
+  .card { background: #FFFFFF; border-radius: 12.0px; padding: 16.0px; }
+  .section { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 -4px; }
+  .section .t { font-size: 19.0px; font-weight: 500; }
+  .section .n { font-size: 13.0px; color: #93A19C; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .tile { flex: 1; background: #FFFFFF; border-radius: 12.0px;
+           padding: 10px; text-align: center; }
+  .tile .v { font-size: 22.0px; font-weight: bold; }
+  .tile .u { font-size: 14.0px; color: #5C6B66; }
+  .tile .l { font-size: 13.0px; color: #93A19C; margin-top: 2px; }
+  .kv { display: flex; justify-content: space-between; font-size: 14.0px; padding: 3px 0; }
+  .kv .k { color: #5C6B66; }
+  .hr { height: 1px; background: #E3E9E7; margin: 8px 0; }
+  .hint { font-size: 13.0px; color: #93A19C; }
+  .foot { text-align: center; font-size: 13.0px; color: #93A19C;
+           padding: 8px 0 14px; }
+  .tabbar { display: flex; background: #FFFFFF; border-top: 1px solid #E3E9E7;
+             height: 64px; align-items: center; }
+  .tab { flex: 1; text-align: center; font-size: 13.0px; color: #93A19C; position: relative; }
+  .tab.active { color: #0E7C66; font-weight: 500; }
+  .tab .ic { font-size: 22px; display: block; line-height: 26px; }
+  .badge { position: absolute; top: -2px; right: 24px; background: #D64545; color: #fff;
+            font-size: 10px; border-radius: 8px; padding: 0 4px; line-height: 16px; }
+  .pill { display: inline-block; font-size: 13.0px; padding: 2px 8px; border-radius: 10px; }
+  .lvl0 { color: #fff; background: #2E9E5B; }
+  .lvl1 { color: #fff; background: #E6A23C; }
+  .lvl2 { color: #fff; background: #D64545; }
+  .lvloff { color: #fff; background: #9AA5A1; }
+  .banner { border-radius: 12.0px; padding: 16.0px; color: #fff;
+             display: flex; gap: 10px; align-items: center; }
+  .btn { height: 48.0px; border-radius: 8.0px; background: #0E7C66;
+          color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 500; }
+  .btn.plain { background: #FFFFFF; color: #0E7C66;
+                border: 1px solid #0E7C66; }
+  .input { height: 48.0px; border-radius: 8.0px; background: #F2F5F4;
+            display: flex; align-items: center; padding: 0 12px; color: #1B2A26; }
+  .seg { display: flex; gap: 8px; }
+  .seg div { flex: 1; height: 36px; border-radius: 8.0px; background: #F2F5F4;
+              color: #5C6B66; display: flex; align-items: center; justify-content: center;
+              font-size: 14.0px; }
+  .seg div.on { background: #0E7C66; color: #fff; }
+  .bars { display: flex; align-items: flex-end; gap: 2px; height: 96px; padding-top: 6px; }
+  .bars i { flex: 1; background: #0E7C66; opacity: .85; border-radius: 2px 2px 0 0; display: block; }
+  .alertrow { display: flex; gap: 10px; align-items: flex-start; }
+  .alertrow .ttl { font-size: 17.0px; font-weight: 500; }
+  .stepper { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+  .stepper .op { width: 34px; height: 34px; border-radius: 17px; background: #F2F5F4;
+                  color: #0E7C66; display: flex; align-items: center; justify-content: center; }
+  .stepper .val { min-width: 76px; text-align: center; font-weight: 500; }
+  .swatch { position: absolute; left: 0; top: 0; }
+</style></head>
+<body><div class="screen">
+  <div class="topbar">
+    <span class="name">客厅网关 M0</span>
+    <span class="chip">Mock 离线演示</span>
+  </div>
+  <div class="body">
+      <div class="row" style="align-items:center">
+        <span style="color:#0E7C66;font-size:14.0px">◀ 返回</span>
+        <span style="flex:1;text-align:center;font-weight:500">告警详情</span>
+        <span style="color:#0E7C66;font-size:14.0px">刷新</span>
+      </div>
+      <div class="card">
+        <div class="row">
+          <span class="pill lvl2">L2</span>
+          <span style="font-size:19.0px;font-weight:bold">跌倒</span>
+          <span style="margin-left:auto;color:#D64545;font-size:14.0px">已读待处置</span>
+        </div>
+        <div class="hint" style="margin:6px 0 2px">卧室检测到跌倒</div>
+        <div class="hr"></div>
+        <div class="kv"><span class="k">发生时间</span><span>2026-10-17 21:04:31</span></div>
+        <div class="kv"><span class="k">距今</span><span>3 分钟前</span></div>
+        <div class="kv"><span class="k">来源节点</span><span>M2</span></div>
+        <div class="kv"><span class="k">重推次数</span><span>2 次</span></div>
+      </div>
+      <div class="section"><span class="t">处置</span><span class="n">选一个动作，备注选填</span></div>
+      <div class="card" style="display:flex;flex-direction:column;gap:8px">
+        <div class="input" style="font-size:14.0px;color:#93A19C">
+          备注：例如“电话过去，老人在洗澡，晚点再打”</div>
+        <div class="row">
+          <div class="btn" style="flex:1;background:#F2F5F4;color:#0E7C66;font-size:14.0px">已电话联系</div>
+          <div class="btn" style="flex:1;background:#F2F5F4;color:#0E7C66;font-size:14.0px">已上门查看</div>
+        </div>
+        <div class="row">
+          <div class="btn" style="flex:1;background:#F2F5F4;color:#E6A23C;font-size:14.0px">这是误报</div>
+          <div class="btn" style="flex:1;background:#F2F5F4;color:#0E7C66;font-size:14.0px">其它情况</div>
+        </div>
+      </div>
+      <div class="section"><span class="t">处置记录</span><span class="n">0 条</span></div>
+      <div class="card hint">还没有人处置这条告警</div>
+      <div class="section"><span class="t">告警后读数</span><span class="n">告警时刻之后 10 分钟</span></div>
+      <div class="card">
+        <div class="row" style="font-size:14.0px"><span class="hint" style="width:64px">21:04</span><span style="flex:1">燃气通道 2612 mV　24.6 °C / 54.3 %RH</span></div>
+        <div class="row" style="font-size:14.0px"><span class="hint" style="width:64px">21:05</span><span style="flex:1">燃气通道 2588 mV　24.6 °C / 54.4 %RH</span></div>
+      </div>
+      <div class="foot">GET /api/alerts/101　打开本页即把 pending 置为 confirmed（契约 §6.15）</div>
+    </div>
+  <div class="tabbar"><div class="tab"><span class="ic">🏠</span>首页</div><div class="tab active"><span class="ic">🔔</span>告警<span class="badge">3</span></div><div class="tab"><span class="ic">📊</span>报表</div><div class="tab"><span class="ic">⚙️</span>设置</div></div>
+</div></body></html>

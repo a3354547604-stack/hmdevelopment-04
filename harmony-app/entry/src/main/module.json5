@@ -1,0 +1,61 @@
+/**
+ * entry 模块清单（Stage 模型）。
+ *
+ * deviceTypes 必须写 ["default"]：SDK 的 ets/api/device-define/ 里只有
+ * default / liteWearable / tablet；写 phone 会报
+ * `The intersection of the system capability sets configured for multiple devices is empty`。
+ *
+ * 权限只声明 ohos.permission.INTERNET：本 App 的全部网络行为都是直连自建服务器的
+ * REST 轮询（契约 §6），不用定位/通讯录/相机/麦克风。权限清单是隐私面，多一条都要有理由。
+ * 注：调用 @ohos.net.http 时 SDK 会打 "need to apply for the permissions" WARN，
+ * 该校验不读本文件（在 ets-loader 的 api_check_define.js 里），消不掉也不该为它改清单。
+ */
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "default"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "action.system.home"
+            ]
+          }
+        ]
+      }
+    ],
+    "requestPermissions": [
+      {
+        // REST 轮询（契约 §6）：首页 10 s / 告警页 5 s / 进前台必拉 pending
+        "name": "ohos.permission.INTERNET",
+        "reason": "$string:reason_internet",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "inuse"
+        }
+      }
+    ]
+  }
+}

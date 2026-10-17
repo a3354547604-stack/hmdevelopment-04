@@ -1,0 +1,13 @@
+/**
+ * entry 模块构建配置（Stage 模型 · API 12）。本工程只有一个 target：主 HAP。
+ * 不建 ohosTest target：本阶段无设备可跑 hypium（见 README「本机不能做的事」）。
+ */
+{
+  "apiType": "stageMode",
+  "buildOption": {},
+  "targets": [
+    {
+      "name": "default"
+    }
+  ]
+}

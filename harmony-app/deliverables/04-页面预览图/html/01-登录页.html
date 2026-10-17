@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>登录</title><style>
+  * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; background: #F2F5F4; width: 360px;
+         font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif;
+         color: #1B2A26; font-size: 17.0px; }
+  .screen { width: 360px; min-height: 780px; display: flex; flex-direction: column; }
+  .topbar { background: #FFFFFF; padding: 8px 16px; display: flex;
+             align-items: center; gap: 8px; }
+  .topbar .name { flex: 1; font-weight: 500; max-width: 200px; white-space: nowrap;
+                   overflow: hidden; text-overflow: ellipsis; }
+  .chip { font-size: 13.0px; color: #0E7C66;
+           background: #F2F5F4; padding: 3px 8px; border-radius: 12.0px; }
+  .body { flex: 1; padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 12.0px; }
+  .card { background: #FFFFFF; border-radius: 12.0px; padding: 16.0px; }
+  .section { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 -4px; }
+  .section .t { font-size: 19.0px; font-weight: 500; }
+  .section .n { font-size: 13.0px; color: #93A19C; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .tile { flex: 1; background: #FFFFFF; border-radius: 12.0px;
+           padding: 10px; text-align: center; }
+  .tile .v { font-size: 22.0px; font-weight: bold; }
+  .tile .u { font-size: 14.0px; color: #5C6B66; }
+  .tile .l { font-size: 13.0px; color: #93A19C; margin-top: 2px; }
+  .kv { display: flex; justify-content: space-between; font-size: 14.0px; padding: 3px 0; }
+  .kv .k { color: #5C6B66; }
+  .hr { height: 1px; background: #E3E9E7; margin: 8px 0; }
+  .hint { font-size: 13.0px; color: #93A19C; }
+  .foot { text-align: center; font-size: 13.0px; color: #93A19C;
+           padding: 8px 0 14px; }
+  .tabbar { display: flex; background: #FFFFFF; border-top: 1px solid #E3E9E7;
+             height: 64px; align-items: center; }
+  .tab { flex: 1; text-align: center; font-size: 13.0px; color: #93A19C; position: relative; }
+  .tab.active { color: #0E7C66; font-weight: 500; }
+  .tab .ic { font-size: 22px; display: block; line-height: 26px; }
+  .badge { position: absolute; top: -2px; right: 24px; background: #D64545; color: #fff;
+            font-size: 10px; border-radius: 8px; padding: 0 4px; line-height: 16px; }
+  .pill { display: inline-block; font-size: 13.0px; padding: 2px 8px; border-radius: 10px; }
+  .lvl0 { color: #fff; background: #2E9E5B; }
+  .lvl1 { color: #fff; background: #E6A23C; }
+  .lvl2 { color: #fff; background: #D64545; }
+  .lvloff { color: #fff; background: #9AA5A1; }
+  .banner { border-radius: 12.0px; padding: 16.0px; color: #fff;
+             display: flex; gap: 10px; align-items: center; }
+  .btn { height: 48.0px; border-radius: 8.0px; background: #0E7C66;
+          color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 500; }
+  .btn.plain { background: #FFFFFF; color: #0E7C66;
+                border: 1px solid #0E7C66; }
+  .input { height: 48.0px; border-radius: 8.0px; background: #F2F5F4;
+            display: flex; align-items: center; padding: 0 12px; color: #1B2A26; }
+  .seg { display: flex; gap: 8px; }
+  .seg div { flex: 1; height: 36px; border-radius: 8.0px; background: #F2F5F4;
+              color: #5C6B66; display: flex; align-items: center; justify-content: center;
+              font-size: 14.0px; }
+  .seg div.on { background: #0E7C66; color: #fff; }
+  .bars { display: flex; align-items: flex-end; gap: 2px; height: 96px; padding-top: 6px; }
+  .bars i { flex: 1; background: #0E7C66; opacity: .85; border-radius: 2px 2px 0 0; display: block; }
+  .alertrow { display: flex; gap: 10px; align-items: flex-start; }
+  .alertrow .ttl { font-size: 17.0px; font-weight: 500; }
+  .stepper { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+  .stepper .op { width: 34px; height: 34px; border-radius: 17px; background: #F2F5F4;
+                  color: #0E7C66; display: flex; align-items: center; justify-content: center; }
+  .stepper .val { min-width: 76px; text-align: center; font-weight: 500; }
+  .swatch { position: absolute; left: 0; top: 0; }
+</style></head>
+<body><div class="screen">
+  <div class="topbar">
+    <span class="name">客厅网关 M0</span>
+    <span class="chip">Mock 离线演示</span>
+  </div>
+  <div class="body">
+      <div style="height:34px"></div>
+      <div style="text-align:center">
+        <div style="font-size:56px">🧓</div>
+        <div style="font-size:22.0px; font-weight:bold">居家安全守护</div>
+        <div class="hint">独居老人居家安全监测与应急辅助</div>
+      </div>
+      <div class="card" style="display:flex;flex-direction:column;gap:10px;margin-top:28px">
+        <span class="hint">用户名</span>
+        <div class="input">daughter01</div>
+        <span class="hint">密码（8–64 位）</span>
+        <div class="row">
+          <div class="input" style="flex:1">•••••••••</div>
+          <span style="color:#0E7C66;font-size:14.0px">显示</span>
+        </div>
+        <div class="btn" style="margin-top:6px">登录</div>
+      </div>
+      <div style="margin-top:12.0px">
+        <div style="color:#0E7C66;font-size:14.0px">离线演示模式</div>
+        <div class="hint">演示账号 daughter01 / 密码 P@ssw0rd!</div>
+        <div class="hint">数据源：Mock 离线演示（http://127.0.0.1:80/api）</div>
+      </div>
+      <div class="card" style="margin-top:12.0px;padding:12px 16.0px">
+        <div class="kv"><span class="k">接口规范</span><span>接口契约 v1.1 §6</span></div>
+        <div class="kv"><span class="k">App 版本</span><span>1.0.0（t6 骨架）</span></div>
+      </div>
+      <div class="foot">POST /api/auth/login（契约 §6.4）　登录后自动 GET /devices 取设备</div>
+    </div>
+  <div class="tabbar"><div class="tab"><span class="ic">🏠</span>首页</div><div class="tab"><span class="ic">🔔</span>告警</div><div class="tab"><span class="ic">📊</span>报表</div><div class="tab"><span class="ic">⚙️</span>设置</div></div>
+</div></body></html>

@@ -1,0 +1,35 @@
+HMProgram 应用端（harmony-app）无设备自检日志
+生成时间（UTC+8）：2026-10-17 21:14:22
+Node：v18.20.1　esbuild：0.28.2
+被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,MockTransport,SessionStore}.ets
+----------------------------------------------------------------------
+PASS  #01  POST /auth/register                    §6.3    code=   0 http=201  user_id=2 username=newuser
+PASS  #02  POST /auth/login                       §6.4    code=   0 http=200  token=mock.jwt… expires_in=604800 user=daughter01#1
+PASS  #03  GET /devices                           §6.5    code=   0 http=200  total=1 first=M0-3F1A2B/role=owner
+PASS  #04  POST /devices/bind                     §6.6    code=   0 http=201  device_id=1 role=owner
+PASS  #05  GET /devices/{id}/status               §6.7    code=   0 http=200  online=true alarm_state=2 nodes=3 pending=3 props=[presence,last_motion_ts,door,window,temp,humi,smoke,lpg,co,nodes_online,battery,alarm_state]
+PASS  #06  GET /devices/{id}/readings             §6.8    code=   0 http=200  total=12 first_payload_keys=smoke+temp+humi+adc_mv+warmup
+PASS  #07  GET /devices/{id}/settings             §6.9    code=   0 http=200  source=local keys=22
+PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792242863232
+PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792242863353-7 accepted=no_motion_min timeout_s=10
+PASS  #10  POST /devices/{id}/demo                §6.12   code=   0 http=200  event=gas accepted=demo_trigger
+PASS  #11  GET /alerts                            §6.13   code=   0 http=200  total=4 first=#101/gas/lv2
+PASS  #12  GET /alerts/{id}                       §6.14   code=   0 http=200  alert=#101/confirmed dispositions=0 before=5 after=5
+PASS  #13  POST /alerts/{id}/disposition          §6.15   code=   0 http=200  已写入处置记录
+PASS  #14  GET /reports/activity                  §6.16   code=   0 http=200  period=week total=730 hourly=0 daily=7
+PASS  #15  GET /reports/trend                     §6.17   code=   0 http=200  days=7 points=7 compare=128/160 今日活动频次较昨日下降 20%
+PASS  #16  GET /reports/summary                   §6.18   code=   0 http=200  activity.total=760 alerts.total=4 env.humi_avg=54.3
+PASS  #17  POST /push/register                    §6.19   code=   0 http=200  registered=true
+PASS  #18  GET /health                            §6.20   code=   0 http=200  ok=true version=1.0.0 clock=device db=ok
+PASS  #19  故障注入 network                           §9+Result.ets code=  -1 http=0  mock: 网络连接失败（故障注入）
+PASS  #20  故障注入 unauthorized                      §9.2    code=1101 http=401  登录已过期，请重新登录
+PASS  #21  401 后令牌已清除                             §9.2    code=   0 http=401  hasToken=false
+PASS  #22  故障注入 empty（空态）                         §6.13   code=   0 http=200  total=0
+PASS  #23  恢复正常后再次成功                              §6.7    code=   0 http=200  online=true
+
+合计 23 项，通过 23 项，失败 0 项
+说明：本自检跑的是「真实 HttpApiService + Mock 传输层」，证明 URL 拼接/鉴权头/错误码翻译/契约字段解析可跑通；不代表真实服务器可用。
+----------------------------------------------------------------------
+结论：以上为「真实 HttpApiService + Mock 传输层」的运行结果。
+      它证明 URL 拼接 / Authorization 头 / 错误码翻译 / 契约字段解析在无服务器时可用；
+      不代表 server/ 真实接口可用（需 server 就绪后按 README 复跑）。

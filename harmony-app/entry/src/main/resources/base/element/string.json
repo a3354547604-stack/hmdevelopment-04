@@ -1,0 +1,8 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "居家安全监测客户端主模块" },
+    { "name": "EntryAbility_desc", "value": "居家安全守护" },
+    { "name": "EntryAbility_label", "value": "居家安全守护" },
+    { "name": "reason_internet", "value": "登录、实时状态与告警轮询需要访问服务器" }
+  ]
+}

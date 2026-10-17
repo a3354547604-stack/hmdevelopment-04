@@ -1,0 +1,20 @@
+/**
+ * 应用级清单（AppScope）。
+ *
+ * ⚠️ 这个文件必须存在，且必须配 AppScope/resources/base/element/string.json（app_name）
+ *    与 AppScope/resources/base/media/app_icon.png。缺任一项时报错信息完全看不出原因
+ *    （`Cannot read properties of undefined (reading 'app')`，栈在 integrated-hsp-utils.js）。
+ *
+ * bundleName 冻结为 `com.hmprogram.eldercare`（本工程包名，与服务器 restful 无耦合）。
+ * vendor/label 一律使用项目中性名，**不写学校 / 团队 / 指导老师信息**（项目章程）。
+ */
+{
+  "app": {
+    "bundleName": "com.hmprogram.eldercare",
+    "vendor": "HMProgram",
+    "versionCode": 1000000,
+    "versionName": "1.0.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}
