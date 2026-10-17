@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/surface_alt"
+    android:padding="12dp"
+    android:layout_marginTop="6dp">
+
+    <TextView android:id="@+id/tvNodeName" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <TextView android:id="@+id/tvNodeMeta" style="@style/CardBody"
+        android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:layout_marginTop="4dp">
+        <Button android:id="@+id/btnBind" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/action_pair_bind" />
+        <Button android:id="@+id/btnUnbind" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            style="?android:attr/borderlessButtonStyle"
+            android:text="@string/action_pair_unbind" />
+    </LinearLayout>
+</LinearLayout>

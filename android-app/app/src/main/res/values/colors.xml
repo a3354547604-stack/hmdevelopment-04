@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#1565C0</color>
+    <color name="brand_dark">#0D47A1</color>
+    <color name="ok">#2E7D32</color>
+    <color name="warn">#EF6C00</color>
+    <color name="danger">#C62828</color>
+    <color name="muted">#616161</color>
+    <color name="surface_alt">#F5F5F5</color>
+    <color name="warn_bg">#FFF3E0</color>
+    <color name="ok_bg">#E8F5E9</color>
+    <color name="err_bg">#FFEBEE</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="black">#FF000000</color>
+</resources>

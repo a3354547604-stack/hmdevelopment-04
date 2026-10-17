@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/surface_alt"
+        android:padding="10dp"
+        android:text="@string/status_unknown"
+        android:textColor="@color/brand_dark" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="6dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- ① 连接热点 -->
+            <TextView style="@style/CardTitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="@string/step1_title" />
+            <TextView style="@style/CardBody" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="@string/step1_desc" />
+            <EditText android:id="@+id/etApPrefix" style="@style/Field"
+                android:hint="@string/hint_hotspot_prefix" android:inputType="text" />
+            <EditText android:id="@+id/etApPassword" style="@style/Field"
+                android:hint="@string/hint_ap_password" android:inputType="textPassword" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="4dp">
+                <Button android:id="@+id/btnScanHotspot" android:layout_width="0dp"
+                    android:layout_weight="1" android:layout_height="wrap_content"
+                    android:text="@string/action_scan_hotspot" />
+                <Button android:id="@+id/btnConnectHotspot" android:layout_width="0dp"
+                    android:layout_weight="1" android:layout_height="wrap_content"
+                    android:text="@string/action_connect_hotspot" />
+            </LinearLayout>
+            <Button android:id="@+id/btnWifiSettings" android:layout_width="match_parent"
+                android:layout_height="wrap_content" style="?android:attr/borderlessButtonStyle"
+                android:text="@string/action_open_wifi_settings" />
+
+            <!-- ② 提交家庭 Wi-Fi -->
+            <TextView style="@style/CardTitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="@string/step2_title" />
+            <EditText android:id="@+id/etSsid" style="@style/Field"
+                android:hint="@string/hint_ssid" android:inputType="text" />
+            <EditText android:id="@+id/etWifiPassword" style="@style/Field"
+                android:hint="@string/hint_wifi_password" android:inputType="textPassword" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="4dp">
+                <Button android:id="@+id/btnPickWifi" android:layout_width="0dp"
+                    android:layout_weight="1" android:layout_height="wrap_content"
+                    android:text="@string/action_pick_wifi" />
+                <Button android:id="@+id/btnSubmitWifi" android:layout_width="0dp"
+                    android:layout_weight="1" android:layout_height="wrap_content"
+                    android:text="@string/action_submit_wifi" />
+            </LinearLayout>
+            <CheckBox android:id="@+id/cbEchoPassword" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="@string/action_echo_password" />
+
+            <!-- ③ 绑定账号 -->
+            <TextView style="@style/CardTitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="@string/step3_title" />
+            <!-- 账号绑定走公网服务器：提交 Wi-Fi 后网关会关掉 SoftAP，本地 API 就不可达了 -->
+            <TextView android:id="@+id/tvBindAccountHint" style="@style/CardBody"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/msg_bind_account_needs_internet" />
+            <EditText android:id="@+id/etGatewaySn" style="@style/Field"
+                android:hint="@string/hint_gateway_sn" android:inputType="text" />
+            <EditText android:id="@+id/etBindCode" style="@style/Field"
+                android:hint="@string/hint_bind_code" android:inputType="number" />
+            <Button android:id="@+id/btnBindAccount" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="4dp"
+                android:text="@string/action_bind_account" />
+
+            <!-- ④ 扫描并绑定节点 -->
+            <TextView style="@style/CardTitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="@string/step4_title" />
+            <TextView android:id="@+id/tvPairHint" style="@style/CardBody"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:text="@string/pair_nodes_empty" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="4dp">
+                <Button android:id="@+id/btnPairScan" android:layout_width="0dp"
+                    android:layout_weight="1" android:layout_height="wrap_content"
+                    android:text="@string/action_pair_scan" />
+                <Button android:id="@+id/btnPairNodes" android:layout_width="0dp"
+                    android:layout_weight="1" android:layout_height="wrap_content"
+                    android:text="@string/action_refresh_list" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/listNodes" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical" />
+            <TextView android:id="@+id/tvBoundTitle" style="@style/CardBody"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" android:text="@string/label_bound_list" />
+            <LinearLayout android:id="@+id/listBound" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:orientation="vertical" />
+            <Button android:id="@+id/btnClearWhitelist" android:layout_width="match_parent"
+                android:layout_height="wrap_content" style="?android:attr/borderlessButtonStyle"
+                android:text="@string/action_clear_whitelist" />
+
+            <!-- 日志 -->
+            <TextView style="@style/CardTitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="@string/label_log" />
+            <TextView android:id="@+id/tvLog" style="@style/MonoLog"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:background="@color/surface_alt" android:padding="8dp"
+                android:minLines="6" android:text="" />
+        </LinearLayout>
+    </ScrollView>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <Button android:id="@+id/btnRefreshStatus" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/action_refresh_status" />
+        <Button android:id="@+id/btnCopyLog" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            style="?android:attr/borderlessButtonStyle" android:text="@string/action_copy_log" />
+    </LinearLayout>
+</LinearLayout>

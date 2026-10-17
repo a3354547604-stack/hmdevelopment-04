@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/title_login"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="@color/brand_dark" />
+
+        <TextView
+            android:id="@+id/tvServerHint"
+            style="@style/CardBody"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <EditText
+            android:id="@+id/etUsername"
+            style="@style/Field"
+            android:hint="@string/hint_username"
+            android:inputType="text"
+            android:autofillHints="username" />
+
+        <EditText
+            android:id="@+id/etPassword"
+            style="@style/Field"
+            android:hint="@string/hint_password"
+            android:inputType="textPassword"
+            android:autofillHints="password" />
+
+        <EditText
+            android:id="@+id/etPhone"
+            style="@style/Field"
+            android:hint="@string/hint_phone"
+            android:inputType="phone"
+            android:visibility="gone"
+            android:autofillHints="phone" />
+
+        <Button
+            android:id="@+id/btnSubmit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/action_login" />
+
+        <Button
+            android:id="@+id/btnSwitchMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            style="?android:attr/borderlessButtonStyle"
+            android:text="@string/action_switch_to_register" />
+
+        <Button
+            android:id="@+id/btnSkipLogin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            style="?android:attr/borderlessButtonStyle"
+            android:text="@string/action_skip_login" />
+
+        <TextView
+            android:id="@+id/tvNote"
+            style="@style/CardBody"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/login_note" />
+    </LinearLayout>
+</ScrollView>

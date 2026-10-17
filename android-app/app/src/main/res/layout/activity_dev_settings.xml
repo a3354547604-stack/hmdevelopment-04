@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView style="@style/CardTitle" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:text="@string/settings_server_title" />
+
+        <EditText android:id="@+id/etServerBase" style="@style/Field"
+            android:hint="@string/hint_server_base" android:inputType="textUri" />
+
+        <EditText android:id="@+id/etGatewayBase" style="@style/Field"
+            android:hint="@string/hint_gateway_base" android:inputType="textUri" />
+
+        <TextView style="@style/CardBody" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="6dp"
+            android:text="@string/settings_gateway_note" />
+
+        <CheckBox android:id="@+id/cbMock" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/settings_mock" />
+
+        <TextView style="@style/CardBody" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:text="@string/settings_mock_note" />
+
+        <Button android:id="@+id/btnSave" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="16dp"
+            android:text="@string/action_save" />
+
+        <Button android:id="@+id/btnReset" android:layout_width="match_parent"
+            android:layout_height="wrap_content" style="?android:attr/borderlessButtonStyle"
+            android:text="@string/action_reset_defaults" />
+
+        <TextView android:id="@+id/tvBuildInfo" style="@style/CardBody"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" android:text="" />
+
+        <Button android:id="@+id/btnClearLog" android:layout_width="match_parent"
+            android:layout_height="wrap_content" style="?android:attr/borderlessButtonStyle"
+            android:text="@string/action_clear_log" />
+    </LinearLayout>
+</ScrollView>

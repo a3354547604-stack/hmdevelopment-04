@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">老人居家配网</string>
+
+    <!-- 通用 -->
+    <string name="action_ok">确定</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_retry">重试</string>
+    <string name="action_back">返回</string>
+    <string name="action_next">下一步</string>
+    <string name="action_copy">复制</string>
+    <string name="action_save">保存</string>
+    <string name="action_reset_defaults">恢复默认</string>
+    <string name="action_clear_log">清空日志</string>
+
+    <!-- 登录 -->
+    <string name="title_login">登录</string>
+    <string name="title_register">注册</string>
+    <string name="hint_username">账号（3–32 位字母/数字/下划线）</string>
+    <string name="hint_password">密码（8–64 位）</string>
+    <string name="hint_phone">手机号（可空，11 位）</string>
+    <string name="action_login">登录</string>
+    <string name="action_register">注册</string>
+    <string name="action_switch_to_register">没有账号？去注册</string>
+    <string name="action_switch_to_login">已有账号？去登录</string>
+    <string name="action_skip_login">跳过登录（仅演示配网本地链路）</string>
+    <string name="login_note">说明：登录只用于「绑定账号」这一步。只演示「连通网关 + 绑定星闪节点」时可以不登录——网关本地 API 不需要账号。</string>
+
+    <!-- 主界面 -->
+    <string name="title_devices">我的设备</string>
+    <string name="action_add_device">添加设备（配网）</string>
+    <string name="action_dev_settings">开发者设置</string>
+    <string name="action_logout">退出登录</string>
+    <string name="action_provision_this">配网</string>
+    <string name="devices_empty">还没有绑定设备。点「添加设备」开始现场配网。</string>
+    <string name="mock_banner">当前为 MOCK 模式：所有网络请求都走本地假数据，不会真的连网关。</string>
+
+    <!-- 配网流程 -->
+    <string name="title_provision">设备配网</string>
+    <string name="title_wifi_scan">选择家庭 Wi-Fi</string>
+    <string name="title_pair_nodes">星闪节点绑定</string>
+    <string name="title_dev_settings">开发者设置</string>
+
+    <string name="step1_title">① 连接设备热点</string>
+    <string name="step1_desc">长按网关配对键 3 秒（声光双闪 2 次），再连上设备热点。连上后系统提示「已连接，无法访问互联网」是正常的——网关热点本来就不带外网。</string>
+    <string name="hint_hotspot_prefix">热点名前缀</string>
+    <string name="hint_ap_password">热点口令（8 位，见设备贴纸/串口日志）</string>
+    <string name="action_scan_hotspot">扫描附近热点</string>
+    <string name="action_connect_hotspot">自动连接该热点</string>
+    <string name="action_open_wifi_settings">打开系统 WLAN 设置</string>
+
+    <string name="step2_title">② 提交家庭 Wi-Fi（2.4G）</string>
+    <string name="action_pick_wifi">选择家庭 Wi-Fi</string>
+    <string name="hint_ssid">SSID</string>
+    <string name="hint_wifi_password">Wi-Fi 口令</string>
+    <string name="action_submit_wifi">提交给网关</string>
+    <string name="action_echo_password">口令回显（演示核对用，会显示在屏幕上）</string>
+
+    <string name="step3_title">③ 绑定到账号</string>
+    <string name="hint_gateway_sn">网关 SN（如 M0-3F1A2B）</string>
+    <string name="hint_bind_code">绑定码（6 位数字）</string>
+    <string name="action_bind_account">绑定到我的账号</string>
+
+    <string name="step4_title">④ 扫描并绑定星闪节点</string>
+    <string name="action_pair_scan">扫描附近节点</string>
+    <string name="action_pair_bind">绑定</string>
+    <string name="action_pair_unbind">解绑</string>
+    <string name="action_refresh_list">刷新列表</string>
+    <string name="action_refresh_status">刷新状态</string>
+    <string name="action_clear_whitelist">清空白名单（需二次确认）</string>
+    <string name="action_back_to_provision">返回配网页</string>
+    <string name="pair_nodes_empty">还没有扫描结果。点「扫描附近节点」。</string>
+    <string name="pair_gateway_hint">本页要求手机已连上网关热点（配网页 ① 做过即可）。扫描走网关本地 API，不需要外网。</string>
+
+    <string name="label_bound_list">已绑定节点</string>
+    <string name="label_log">操作日志</string>
+    <string name="action_copy_log">复制日志</string>
+    <string name="status_unknown">尚未读到网关状态</string>
+
+    <!-- Wi-Fi 扫描页 -->
+    <string name="wifi_scan_hint">选一个 2.4G 的家庭 Wi-Fi。列表里的 5G 项网关连不上，会直接失败。</string>
+    <string name="wifi_perm_banner">缺少定位/附近设备权限 → 扫描结果会一直是空的。点「重新扫描」时按提示授权。</string>
+    <string name="hint_manual_ssid">手动输入 SSID（隐藏网络或扫不到时用）</string>
+    <string name="action_rescan">重新扫描</string>
+    <string name="action_use_manual">用手输的 SSID</string>
+    <string name="wifi_list_empty">附近没有可用热点（或在设置里关掉了 Wi-Fi）。</string>
+
+    <!-- 开发者设置 -->
+    <string name="settings_server_title">服务器与网关地址</string>
+    <string name="hint_server_base">服务器 API 基址</string>
+    <string name="hint_gateway_base">网关本地 API 基址</string>
+    <string name="settings_gateway_note">网关本地 API 固定是 192.168.4.1（契约 §12.1）。只有在拿真实硬件做测试、改了网关侧监听地址时才需要动它。</string>
+    <string name="settings_mock">MOCK 模式（不联网，用本地假数据）</string>
+    <string name="settings_mock_note">打开后：登录用 demo/Passw0rd 以外的任意 8 位以上口令都会失败，正确口令是 Passw0rd；账号绑定需要绑定码 482913。这样可以在没有服务器、没有网关的情况下把整条界面流程走一遍。</string>
+    <!-- 运行期提示（代码里用到的） -->
+    <string name="err_username_len">账号长度需 3–32 位</string>
+    <string name="err_password_len">密码长度需 8–64 位</string>
+    <string name="err_no_hotspot">没扫到任何热点：先在系统里打开 Wi-Fi，并确认已授予定位/附近设备权限。</string>
+    <string name="err_no_ssid">还没有选 Wi-Fi 名称</string>
+    <string name="err_no_ap_pwd">还没填设备热点口令（见网关贴纸或串口日志）</string>
+    <string name="err_confirm_mismatch">确认词不对，什么都没改</string>
+    <string name="err_perm_denied">没有权限就扫不到热点。到「设置 → 应用 → 权限」里给本应用开启定位（Android 12 及以下）或附近设备（Android 13+）。</string>
+    <string name="err_wifi_off">手机的 Wi-Fi 开关是关的，扫描结果必然是空的：请先打开 Wi-Fi。</string>
+    <string name="msg_login_ok">登录成功：%1$s</string>
+    <string name="msg_register_ok">注册成功（user_id=%1$d），请登录</string>
+    <string name="msg_account">已登录：%1$s</string>
+    <string name="msg_no_account">未登录（只能做本地配网；「绑定到账号」需要先登录）</string>
+    <string name="msg_logout_confirm">退出后会清掉本机保存的登录态（不会解绑设备）。</string>
+    <string name="msg_copied">已复制</string>
+    <string name="msg_log_copied">日志已复制到剪贴板</string>
+    <string name="msg_saved">已保存</string>
+    <string name="msg_saved_restart_hint">已保存。MOCK 开关需要回到配网页重新打开才生效（已打开的页仍用旧链路）。</string>
+    <string name="msg_reset_done">已填回默认值，记得点「保存」</string>
+    <string name="msg_clear_log_hint">日志只存在配网页的内存里：重新进入配网页即可清空。</string>
+    <string name="msg_clear_whitelist_warning">清空后所有节点都会掉线、P0 闭环需要重新绑定。确认要继续吗？</string>
+
+    <string name="pair_scanning">正在扫描…（汇聚侧扫 15 s 左右，稍等）</string>
+    <string name="pair_done_fmt">扫描完成：发现 %1$d 个节点，已绑定 %2$d 个</string>
+    <string name="pair_done_detail">扫描完成：发现 %1$d 个节点，已绑定 %2$d 个，剩余槽位 %3$d</string>
+    <string name="pair_idle">还没扫描。点「扫描附近节点」开始。</string>
+    <string name="pair_no_result_tip">扫不到节点的常见原因：① 网关不在配网窗口内（长按配对键 3 秒重进）；② 节点没上电或没进配对模式；③ 汇聚与节点距离太远。</string>
+    <string name="label_bound_list_n">已绑定节点（%1$d 台）</string>
+    <string name="action_echo_password_on">口令回显：开（投屏时会显示，演示结束记得关）</string>
+
+    <!-- Wi-Fi 页补充 -->
+    <!-- 扫码添加设备 -->
+    <string name="action_scan_qr">扫码添加设备</string>
+    <string name="title_scan_qr">对准设备二维码</string>
+    <string name="err_qr_cancel">已取消扫码</string>
+    <string name="title_bind_device">绑定设备</string>
+    <string name="msg_bind_device_hint">确认 SN 与绑定码。绑定码在设备贴纸/运维单上，不预填——它是凭据，不该写进源码。</string>
+    <string name="hint_device_name">设备名称（可空，如「家里」）</string>
+    <string name="msg_scan_offline">相机不可用或未授权，可以手动输入 SN。</string>
+    <string name="err_qr_unknown">没从二维码里认出设备 SN：%1$s</string>
+    <string name="err_sn_or_code_empty">SN 与绑定码都不能为空</string>
+    <string name="err_need_login">绑定设备需要先登录</string>
+    <string name="msg_bind_ok">绑定成功：%1$s（id=%2$d）</string>
+    <string name="msg_bind_account_needs_internet">本步走公网服务器，必须先切回家庭 Wi-Fi 或蜂窝网络（网关 SoftAP 已关闭，本地地址 192.168.4.1 不再可达）。</string>
+    <string name="msg_need_switch_network">先把手机 Wi-Fi 切回家里/蜂窝网络：网关已切到 STA，本地配网地址不可达。</string>
+</resources>
+
+

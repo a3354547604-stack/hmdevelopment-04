@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView android:id="@+id/tvWifiHint" style="@style/CardBody"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/wifi_scan_hint" />
+
+    <TextView android:id="@+id/tvPermBanner" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:background="@color/warn_bg"
+        android:padding="8dp" android:textColor="@color/warn"
+        android:text="@string/wifi_perm_banner" android:visibility="gone" />
+
+    <EditText android:id="@+id/etManualSsid" style="@style/Field"
+        android:hint="@string/hint_manual_ssid" android:inputType="text" />
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:layout_marginTop="4dp">
+        <Button android:id="@+id/btnRescan" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/action_rescan" />
+        <Button android:id="@+id/btnUseManual" android:layout_width="0dp"
+            android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/action_use_manual" />
+    </LinearLayout>
+
+    <TextView android:id="@+id/tvEmpty" style="@style/CardBody"
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:text="@string/wifi_list_empty" />
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:layout_marginTop="6dp">
+        <LinearLayout android:id="@+id/listWifi" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:orientation="vertical" />
+    </ScrollView>
+</LinearLayout>

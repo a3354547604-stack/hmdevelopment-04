@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  为什么全局放开明文 HTTP
+
+  本 App 要访问两类明文地址，而它们的 host 在打包时都不可知：
+    ① 网关 SoftAP 本地 API  http://192.168.4.1/api（契约 §12.1，明文是网关侧的有意取舍）
+    ② 自建服务器 REST API    http://<现场笔记本IP>/api（契约 §6.1，Nginx 内网 http 80）
+  ② 的 IP 每次现场都不一样，App 内可改（开发者设置），所以无法预先枚举域。
+  Android 9+ 默认禁明文，用 <domain> 白名单会出现「在家能用、到现场改了 IP 就连不上」的
+  随机故障——演示最怕这种问题，因此这里选择全局放开，并在运行期用「Base URL 必须是 http(s)
+  且由用户显式填写」来兜住风险。
+  上生产（或改用 443 + 证书）时应把本文件恢复成只放行 192.168.4.1 的 domain-config。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

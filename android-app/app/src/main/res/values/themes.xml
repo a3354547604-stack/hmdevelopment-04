@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- 现场演示要看得清：字号整体放大一档，方便讲解时投屏 -->
+    <style name="Theme.ElderCare.Provision" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand</item>
+        <item name="colorPrimaryDark">@color/brand_dark</item>
+        <item name="colorAccent">@color/brand</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:windowBackground">@color/white</item>
+    </style>
+
+    <style name="CardTitle">
+        <item name="android:textSize">18sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/brand_dark</item>
+        <item name="android:layout_marginTop">12dp</item>
+    </style>
+
+    <style name="CardBody">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/muted</item>
+    </style>
+
+    <style name="Field">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">8dp</item>
+    </style>
+
+    <style name="MonoLog" tools:ignore="UnusedResources">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:textIsSelectable">true</item>
+    </style>
+</resources>

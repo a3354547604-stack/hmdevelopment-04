@@ -1,0 +1,23 @@
+// WSL 上构建本工程时用的 init script（Windows 侧 / 原生 Linux 不需要）。
+//
+// 为什么需要它：本仓库放在 /mnt/c（WSL 的 DrvFs，9p 转发到 NTFS）。AGP 8.4 的增量构建会
+// 去读一个**空目录** `app/build/intermediates/merged_jni_libs/debug/mergeDebugJniLibFolders/out`，
+// 而 DrvFs 上空目录/权限位语义与 ext4 不一致，gradle 直接报：
+//     Execution failed for task ':app:mergeDebugJniLibFolders'.
+//     > Cannot access output property 'outputDir' ... Accessing unreadable inputs or outputs is not supported.
+// 把构建产物整个放到 Linux 侧文件系统（ext4）就绕过了这个问题，顺带比 DrvFs 快好几倍。
+//
+// 用法：
+//   gradle -I android-app/tools/wsl-build-dir.init.gradle -p android-app assembleDebug
+// 产物目录：$HOME/eldercare-build/app/outputs/apk/debug/app-debug.apk
+// 想换位置：export ELDERCARE_BUILD_DIR=/tmp/xxx
+//
+// 注意：这是**本机 WSL 的变通**，不是工程配置的一部分——所以它不在 build.gradle.kts 里，
+// 免得 Android Studio（Windows 原生 / macOS）也被改掉默认产物路径。
+
+def outRoot = System.getenv("ELDERCARE_BUILD_DIR") ?: "${System.getProperty('user.home')}/eldercare-build"
+
+gradle.allprojects { p ->
+    def name = p.path == ':' ? 'root' : p.path.replace(':', '_')
+    p.layout.buildDirectory.set(new File(outRoot, name))
+}

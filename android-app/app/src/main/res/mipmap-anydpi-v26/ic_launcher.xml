@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标（API 26+ 才有）；本工程 minSdk=26，因此不需要再放 PNG 兜底图 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/brand_dark" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
