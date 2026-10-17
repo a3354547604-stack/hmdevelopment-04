@@ -1,7 +1,12 @@
 # 构建与验证日志（t11 · Android 配网 App）
 
 本文件记录**本机真实执行过的命令与输出**，供验收核对。不是「应该能编」的说明——命令在这里都跑过，
-原始日志留在本机 `/tmp/final-test.log`、`/tmp/final-asm.log`，产物在 `android-app/dist/`。
+产物在 `android-app/dist/`。
+
+> **证据在哪（t38 收口 F-01）**：日志不再只留在本机 `/tmp`——`/tmp/final-test.log`、`/tmp/final-asm.log`
+> 已随重启丢失，复核者只能重建一遍。入库的证据快照在 **`android-app/docs/evidence/`**，由
+> `bash android-app/tools/make-evidence.sh --with-gradle` 生成，**每份带提交号 + UTC 时点**，
+> 重跑同一条命令即可再产出。下面每节末尾的「**时点**」行说明该数字对应哪个提交。
 
 ## 0. 环境（本机实测）
 
@@ -47,6 +52,9 @@ JUnit XML 汇总（`~/eldercare-build/_app/test-results/testDebugUnitTest/`，�
 | `TransportTest` | 5 | 0 |
 | **合计** | **29** | **0**（跳过 0） |
 
+**时点**：上表是 `188654a`（t11）时点的结果。t38 在 `f7055b0` 工作树上 `--rerun` 复跑，结果相同
+（29/0/0，BUILD SUCCESSFUL in 23s）——原始输出在 `docs/evidence/` 快照里。
+
 ## 2. 出 APK
 
 ```bash
@@ -69,24 +77,37 @@ BUILD SUCCESSFUL in 4s
 sha256  31dbc08a99ff299ec42a63d3cf43210693c4bb37807ad381212af86c06a0aa01
 ```
 
-> `android-app/dist/` 被仓库根 `.gitignore` 的 `dist/` 规则忽略——APK **不进 git**（构建产物），
-> 但留在本机可直接 `adb install`。要重新产出就是上面两条命令。
+> **时点**：字节数/sha256 是 `188654a`（t11）产出的；t38 在 `f7055b0` 上重跑 `assembleDebug`，
+> 两者**不变**（同样的 7 069 346 B 与 `31dbc08a…0aa01`）。`dist/` 被根 `.gitignore` 忽略——
+> APK **不进 git**（构建产物），但留在本机可直接 `adb install`。要重新产出就是上面两条命令。
 
 ## 3. 契约同步检查（不需要 SDK）
 
 ```bash
 $ python3 android-app/tools/check_error_codes.py
-契约 §9.2 错误码 33 条；ContractErrors.kt 文案 33 条；带操作指引 7 条
-一致：错误码表与契约 §9.2 逐条对齐，1600–1606 都带现场操作指引
+契约 §9.2 错误码 33 条；ContractErrors.kt 文案 33 条；配网码 7 条（1600–1606，带 hint() 操作指引 7 条）
+提示：9 条码的 App 文案与契约 `message` 列措辞不同（**不计入失败**，App 是面向用户的措辞）：
+   - 1101: 契约「凭证已过期」/ App「凭证已过期，请重新登录」
+   …（其余 8 条同理，逐条列在脚本输出里）
+一致：错误码集合、code=0 登记、配网码操作指引、常量声明与契约 §9.2 逐条对齐；文案文本不比对（措辞差异见上「提示」行）
 （退出码 0）
 
 $ python3 android-app/tools/check_local_api.py
 契约 §12 接口 5 个：GET /api/provision/status, POST /api/provision/wifi, POST /api/pair/scan, GET /api/pair/nodes, POST /api/pair/bind
-契约字段：请求 11 个、响应 24 个（嵌套字段由各自小节核对）
+契约字段：请求 11 个、响应 31 个（嵌套字段由各自小节核对）
 GatewayApi.kt 实际调用 5 处；请求字段 11 个；模型属性 57 个
 一致：接口集合、请求字段名、响应字段名与契约 §12 逐条对齐（未发明接口或字段）
 （退出码 0）
 ```
+
+> **时点与判断标准（t38 收口 F-02）**：`响应 31 个` 是 **`f7055b0`（t38 时点）** 的值；
+> `188654a`（t11）时点是 `响应 24 个`（t26 复核用 `git archive 188654a` 沙箱在两个版本上都复跑过，
+> 输出逐字一致）。**数字随契约升级/脚本演进必然变化，判断标准是退出码 0，不是数字相同**；
+> 数字不手抄——`docs/evidence/` 的快照每次运行都重新产出并记下对应的提交号与时点。
+>
+> `check_error_codes.py` 的**覆盖范围**写在脚本头部（t38 收口 F-03）：只比 **码集合 / code=0 登记 /
+> 配网码 hint() 指引 / 常量声明**，**不比对文案文本**——契约 `message` 列是 API 响应原文，
+> App 文案是面向用户的措辞，两者不要求逐字相同；措辞差异只作为「提示」打印，不计入失败。
 
 ## 4. 构建过程中真实踩到的两个坑（已修，写在这里省下一次排查）
 

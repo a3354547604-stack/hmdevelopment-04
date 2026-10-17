@@ -68,6 +68,8 @@ class ProvisionViewModelTest {
     @Test
     fun `提交 Wi-Fi 时口令只进请求体_日志里是掩码_会话里只留 SSID`() = runBlocking {
         val e = Env()
+        // 合成测试值（t26 F-04）：不是真实 Wi-Fi 口令，只用来验证「口令只进请求体、
+        // 日志里是掩码、会话里只留 SSID」这条行为——请勿替换成现场真实口令。
         val password = "Home-2.4G-Pass"
 
         val d = e.vm.submitWifi("HOME-2.4G", password)

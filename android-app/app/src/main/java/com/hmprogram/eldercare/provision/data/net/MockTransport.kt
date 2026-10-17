@@ -191,6 +191,8 @@ private class FakeServerBackend {
     private data class UserNone(val id: Long, val username: String, val phone: String?)
 
     companion object {
+        // 合成测试值（t26 F-04）：MOCK_PASSWORD / MOCK_BIND_CODE 只在 mock 传输层内部比对，
+        // 不是任何真实口令或绑定码，也不参与真实配网——扫描工具报「凭据泄漏」时按本行豁免。
         const val MOCK_PASSWORD = "Passw0rd"
         const val MOCK_BIND_CODE = "482913"
     }
