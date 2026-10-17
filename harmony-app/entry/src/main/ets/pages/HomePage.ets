@@ -272,7 +272,11 @@ export struct HomePage {
         EmptyView({
           icon: '📱',
           title: '尚未绑定设备',
-          hint: '请先在服务器端把设备绑定到当前账号，再回到本页'
+          // 配网交接（PM 裁定 F-02 / ADR-0001）：P0 的配网由手机浏览器直连网关 SoftAP
+          // 的 H5 页面完成，App 内配网页是 P1 —— 空态是用户找"添加设备"的地方，
+          // 必须在这里就说清楚去哪儿配，否则用户会一直找 App 里不存在的按钮。
+          hint: '请先在服务器端把设备绑定到当前账号，再回到本页\n'
+            + '配网（P0）：手机浏览器打开网关热点页面 http://192.168.4.1/ ；App 内配网页为 P1'
         })
       } else if (this.state.loading && this.state.updatedAt === 0) {
         LoadingView({ hint: '正在获取实时状态…' })
