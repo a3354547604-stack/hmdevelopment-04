@@ -1,5 +1,5 @@
 HMProgram 应用端（harmony-app）无设备自检日志
-生成时间（UTC+8）：2026-10-17 21:14:22
+生成时间（UTC+8）：2026-10-17 21:24:57
 Node：v18.20.1　esbuild：0.28.2
 被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,MockTransport,SessionStore}.ets
 ----------------------------------------------------------------------
@@ -10,8 +10,8 @@ PASS  #04  POST /devices/bind                     §6.6    code=   0 http=201  d
 PASS  #05  GET /devices/{id}/status               §6.7    code=   0 http=200  online=true alarm_state=2 nodes=3 pending=3 props=[presence,last_motion_ts,door,window,temp,humi,smoke,lpg,co,nodes_online,battery,alarm_state]
 PASS  #06  GET /devices/{id}/readings             §6.8    code=   0 http=200  total=12 first_payload_keys=smoke+temp+humi+adc_mv+warmup
 PASS  #07  GET /devices/{id}/settings             §6.9    code=   0 http=200  source=local keys=22
-PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792242863232
-PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792242863353-7 accepted=no_motion_min timeout_s=10
+PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792243498857
+PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792243498978-7 accepted=no_motion_min timeout_s=10
 PASS  #10  POST /devices/{id}/demo                §6.12   code=   0 http=200  event=gas accepted=demo_trigger
 PASS  #11  GET /alerts                            §6.13   code=   0 http=200  total=4 first=#101/gas/lv2
 PASS  #12  GET /alerts/{id}                       §6.14   code=   0 http=200  alert=#101/confirmed dispositions=0 before=5 after=5
