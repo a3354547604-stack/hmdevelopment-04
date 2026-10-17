@@ -20,17 +20,21 @@ Gson 解析不到字段只会得到默认值（§12.8 的节点会显示成 SN �
      页面里没有编译器兜底，写错路径/字段名浏览器只会在控制台静默出错，
      所以从 HTML/内联 JS/本地外链 JS 里静态提取：
      1) `fetch("/api/...")` / `XMLHttpRequest.open()` / `axios.get("/api/...")` 的路径与动词；
-     2) 请求体（`JSON.stringify({...})`、`body: {...}`、`.append("x")`）的键名；
-     3) 响应字段访问（`json.x`、`data.y`、`r.z`、`data.nodes.forEach(n => n.sn)` 等）。
+     2) 请求体（`JSON.stringify({...})`、`body: {...}`、`.append("x")`、简写属性 `{ ssid, password }`）的键名；
+     3) 响应字段访问（`json.x`、`data.y`、`r.z`、`data.nodes.forEach(n => n.sn)`，
+        含可选链 `json?.data?.mode`）等。
      凡调用了 §12 之外的本地接口、或出现 §12.5–§12.9 里没有的字段名，一律报红并退出码 1。
+     报错行号指到**真正的来源文件**：内联块算页面、外链脚本算它自己的文件。
+     拿不准的情况（页面没调某接口、拼接路径、`json['data']` 这种下标写法）只打印提示不改退出码；
+     但「一条 /api 路径都没提取到」会报红——那等于什么都没核，不能算「一致」。
 
 不需要 Android SDK、不需要联网，只读契约与被检文件。
 
 用法：
   python3 android-app/tools/check_local_api.py
   python3 android-app/tools/check_local_api.py --contract docs/技术/接口契约.md
-  python3 android-app/tools/check_local_api.py --js rk2206-gateway/web/index.html
-  python3 android-app/tools/check_local_api.py --self-test     # 自带正/负样例自检
+  python3 android-app/tools/check_local_api.py --js rk2206-gateway/web/index.html   # H5 页面落地后的路径
+  python3 android-app/tools/check_local_api.py --self-test     # 自带正/负样例自检（3 个样例）
 
 退出码：0 = 一致；1 = 有差异（多调接口、字段名不一致、或调用 §12 之外的本地接口）
 """
@@ -297,7 +301,10 @@ def strip_js_comments(src: str) -> str:
             continue
         if ch == "/" and i + 1 < n and src[i + 1] == "*":
             end = src.find("*/", i + 2)
-            i = n if end < 0 else end + 2
+            stop = n if end < 0 else end + 2
+            # 块注释里可能有换行：删掉正文但把换行原样补回来，否则注释之后的报错行号会整体前移。
+            out.append("\n" * src.count("\n", i, stop))
+            i = stop
             continue
         out.append(ch)
         i += 1
@@ -373,14 +380,26 @@ def top_level_keys(body: str) -> list[str]:
                     keys.append(word)
                 i = j + 1
                 continue
+            if j < n and body[j] in ",}":
+                # 简写属性：`JSON.stringify({ ssid, password })` 里两个键不带冒号，
+                # 只抓 `key:` 的写法会把整份请求体看成「没有字段」——正是最危险的假绿。
+                # 用「前一个非空白字符是 { 或 ,」把「冒号后的值」和展开 `{...payload}` 排除掉。
+                k = i - 1
+                while k >= 0 and body[k] in " \t\r\n":
+                    k -= 1
+                if k >= 0 and body[k] in "{," and word not in keys:
+                    keys.append(word)
             i = j
             continue
         i += 1
     return keys
 
 
-def read_js_source(path: str) -> tuple[str, list[str], list[str]]:
-    """读被检文件 → (JS 正文, 提示, 问题)。
+def read_js_source(path: str) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    """读被检文件 → ([(来源文件, JS 正文), …], 提示, 问题)。
+
+    带上「来源文件」是为了报错行号指对人：外链脚本里的错误若统一按页面文件名报，
+    现场会拿着错误的行号去看 HTML（`bad.html:3` 其实是 `app.js:3`）。
 
     .js 直接读；.html 取 <script> 内联块 + 同目录的本地外链（契约 §12.11 约束 1 要求单文件
     内联，所以外链本身记一条提示，但内容照样核，避免「只有一个 CDN 引用」时漏检）。
@@ -390,7 +409,7 @@ def read_js_source(path: str) -> tuple[str, list[str], list[str]]:
     problems: list[str] = []
     ext = os.path.splitext(path)[1].lower()
     if ext in (".js", ".mjs", ".cjs"):
-        return src, [f"输入按 JS 源文件处理（{os.path.basename(path)}）"], problems
+        return [(path, src)], [f"输入按 JS 源文件处理（{os.path.basename(path)}）"], problems
 
     base = os.path.dirname(os.path.abspath(path))
     # §12.11 #1/#2：单文件、无 CDN/外网依赖（AP 模式下取不到任何外部资源，页面会缺样式/图标）
@@ -402,7 +421,7 @@ def read_js_source(path: str) -> tuple[str, list[str], list[str]]:
         problems.append(f"CSS 里 @import 了外部样式 {m.group(2)}：§12.11 #2 要求全离线")
     for m in re.finditer(r"url\(\s*[\"']?(https?:)?//([^\"')]+)", src, re.I):
         problems.append(f"样式里引用了外部资源 {m.group(2)}（字体/图标库）：§12.11 #1 要求内联")
-    blocks: list[str] = []
+    blocks: list[tuple[str, str]] = []
     for m in re.finditer(r"<script\b([^>]*)>(.*?)</script\s*>", src, re.S | re.I):
         attrs, body = m.group(1), m.group(2)
         type_m = re.search(r"type\s*=\s*[\"']([^\"']+)[\"']", attrs, re.I)
@@ -418,18 +437,18 @@ def read_js_source(path: str) -> tuple[str, list[str], list[str]]:
                 continue
             local = os.path.normpath(os.path.join(base, ref))
             if os.path.isfile(local):
-                blocks.append(read(local))
+                blocks.append((local, read(local)))
                 notes.append(f"已读入外链脚本 {ref}（§12.11 要求单文件内联，建议内联进页面）")
             else:
                 notes.append(f"外链脚本 {ref} 不在仓库里，本次没核到它的接口/字段")
             continue
-        blocks.append(body)
+        blocks.append((path, body))
 
     if not blocks:
         # 没有 <script> 标签：可能被检的是片段或纯 JS，整份按 JS 处理（宁可多核一遍）
         notes.append("页面里没有 <script> 块，按整份文本处理")
-        blocks = [src]
-    return "\n".join(blocks), notes, problems
+        blocks = [(path, src)]
+    return blocks, notes, problems
 
 
 def enclosing_call(text: str, idx: int) -> dict | None:
@@ -503,10 +522,10 @@ def parse_js_calls(text: str) -> list[dict]:
     return calls
 
 
-def parse_js_request_keys(text: str, calls: list[dict]) -> list[tuple[str, int]]:
-    """请求体键名（key, 行号）。只认 fetch/XHR 调用内部、`body: {...}` 与命名像请求体的变量，
+def parse_js_request_keys(text: str, calls: list[dict]) -> list[tuple[str, int, int]]:
+    """请求体键名（key, 行号, 字符下标）。只认 fetch/XHR 调用内部、`body: {...}` 与命名像请求体的变量，
     否则页面上任何 `JSON.stringify({a:1})`（比如写 localStorage）都会变成假红。"""
-    out: list[tuple[str, int]] = []
+    out: list[tuple[str, int, int]] = []
     spans = [(c["start"], c["end"]) for c in calls]
 
     def inside_call(idx: int) -> bool:
@@ -516,37 +535,41 @@ def parse_js_request_keys(text: str, calls: list[dict]) -> list[tuple[str, int]]
         if not inside_call(m.start()):
             continue
         for k in top_level_keys(balanced(text, m.end() - 1)):
-            out.append((k, line_of(text, m.start())))
+            out.append((k, line_of(text, m.start()), m.start()))
     for m in re.finditer(r"body\s*:\s*\{", text):
-        for k in top_level_keys(balanced(text, text.index("{", m.start()))):
-            out.append((k, line_of(text, m.start())))
+        # balanced() 返回的是**括号里面**的文本；top_level_keys 靠「第 1 层」判顶层键，
+        # 少了外层花括号就永远停在深度 0 —— 这会让 `body: {...}` 里的字段一个都核不到（假绿）。
+        for k in top_level_keys("{" + balanced(text, text.index("{", m.start())) + "}"):
+            out.append((k, line_of(text, m.start()), m.start()))
     for m in re.finditer(r"\.append\s*\(\s*[\"'](\w+)[\"']", text):
-        out.append((m.group(1), line_of(text, m.start())))
+        out.append((m.group(1), line_of(text, m.start()), m.start()))
     for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*\{", text):
         name = m.group(1)
         if not re.search(r"body|payload|req|param", name, re.I):
             continue
-        for k in top_level_keys(balanced(text, text.index("{", m.start()))):
-            out.append((k, line_of(text, m.start())))
+        for k in top_level_keys("{" + balanced(text, text.index("{", m.start())) + "}"):
+            out.append((k, line_of(text, m.start()), m.start()))
     return out
 
 
-def parse_js_response_roots(text: str) -> tuple[set[str], set[str], list[str]]:
+def parse_js_response_roots(text: str) -> tuple[set[str], set[str], list[tuple[str, int]]]:
     """响应根变量：`const json = await res.json()`、`JSON.parse(...)`、`.then(j => ...)`、
     以及本地小函数 `return json.data` 的结果变量（H5 常见的 `api()` 包装）。
 
-    返回 (根变量集合, 包装函数集合, 解构出来的字段名列表)。
+    返回 (根变量集合, 包装函数集合, 解构出来的 (字段名, 字符下标) 列表)。
     """
     roots: set[str] = set(JS_ROOT_LITERALS)
-    destructured: list[str] = []
-    for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?[\w$.\[\]]*\.json\s*\(", text):
+    destructured: list[tuple[str, int]] = []
+    for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*[^;\n]*?\.json\s*\(", text):
+        # `[^;\n]*?` 而不是 `[\w$.\[\]]*`：真页面几乎都写 `await (await fetch(...)).json()`，
+        # 中间有括号和引号，旧模式匹配不到 → 那个变量不被当成响应根 → 它的字段访问全部漏检（假绿）。
         roots.add(m.group(1))
     for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*JSON\.parse\s*\(", text):
         roots.add(m.group(1))
     for m in re.finditer(r"\.then\s*\(\s*(\w+)\s*=>", text):
         roots.add(m.group(1))
     for m in re.finditer(r"(?:const|let|var)\s*\{([^}]*)\}\s*=\s*(?:await\s+)?[\w$.\[\]]*\.json\s*\(", text):
-        destructured += [w for w in re.findall(r"[A-Za-z_$][\w$]*", m.group(1))]
+        destructured += [(w, m.start()) for w in re.findall(r"[A-Za-z_$][\w$]*", m.group(1))]
     wrappers: set[str] = set()
     for m in re.finditer(
         r"(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(?[^()]*\)?\s*=>)", text
@@ -560,7 +583,7 @@ def parse_js_response_roots(text: str) -> tuple[set[str], set[str], list[str]]:
             body = balanced(text, brace)
         else:  # 表达式体箭头函数：`p => fetch(p).then(r => r.json())`
             body = text[m.end(): semi if semi != -1 else m.end() + 200]
-        if re.search(r"return\s+[\w$.\[\]]*\.data\b", body):
+        if re.search(r"return\s+[\w$?.\[\]]*\.\s*data\b", body):
             wrappers.add(name)
     for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?([\w$]+)\s*\(", text):
         if m.group(2) in wrappers:
@@ -568,23 +591,26 @@ def parse_js_response_roots(text: str) -> tuple[set[str], set[str], list[str]]:
     return roots, wrappers, destructured
 
 
-def js_field_accesses(text: str, roots: set[str]) -> tuple[list[tuple[str, str, int]], list[tuple[int, int]]]:
-    """响应字段访问 → ([(容器说明, 字段名, 行号)], 已归属数组元素的字符区间)。
+def js_field_accesses(text: str, roots: set[str]) -> tuple[list[tuple[str, str, int, int]], list[tuple[int, int]]]:
+    """响应字段访问 → ([(容器说明, 字段名, 行号, 字符下标)], 已归属数组元素的字符区间)。
 
     容器说明用于报错时指路（`json.x` / `nodes[].sn`）。第二项让调用方知道哪些位置已经
     按「数组元素」归属过了：同一个局部变量名（如 `b`）既可能是响应根、又可能是 `bound`
-    的元素，不排除就会把 `b.mac` 当成响应根字段报假红。
+    的元素，不排除就会把 `b.mac` 当成响应根字段报假红。第四项（字符下标）用于把错误
+    指到**真正的来源文件**——页面内联块与外链脚本混在一起时行号会张冠李戴。
     """
-    out: list[tuple[str, str, int]] = []
+    out: list[tuple[str, str, int, int]] = []
     attributed: list[tuple[int, int]] = []
+    # 可选链 `json?.data?.mode` 在真页面里很常见：所有「点号」都要写成 `\s*\??\.` 才匹配得到。
+    # 漏掉它的后果不是报红而是**假绿**——整份页面提取出 0 处字段访问，却照样打印「一致」。
     # 顺序要紧：先做「数组元素」归属（§12.8 的 nodes[]/bound[]），再扫响应根。
     # §12.6 的 precheck 子对象：`data.precheck.ap_found`
-    for m in re.finditer(r"\bprecheck\s*\.\s*([A-Za-z_$][\w$]*)", text):
-        out.append(("precheck", m.group(1), line_of(text, m.start())))
-    # §12.8 的数组元素：`data.nodes.forEach(n => n.sn)` / `nodes.map(({sn, mac}) => ...)` / `nodes[0].sn`
+    for m in re.finditer(r"\bprecheck\s*\??\.\s*([A-Za-z_$][\w$]*)", text):
+        out.append(("precheck", m.group(1), line_of(text, m.start()), m.start()))
+    # §12.8 的数组元素：`data.nodes.forEach(n => n.sn)` / `nodes.map(({sn, mac}) => ...)` / `nodes?.[0]?.sn`
     for parent in JS_ARRAY_PARENTS:
         for m in re.finditer(
-            rf"\.{parent}\s*\.\s*(?:forEach|map|filter|find|some|every|flatMap)\s*\(",
+            rf"\.{parent}\s*\??\.\s*(?:forEach|map|filter|find|some|every|flatMap)\s*\(",
             text,
         ):
             open_idx = text.index("(", m.end() - 1)
@@ -597,20 +623,20 @@ def js_field_accesses(text: str, roots: set[str]) -> tuple[list[tuple[str, str, 
                 continue  # `nodes.forEach(function (n) {...})`：别把关键字当元素变量
             # 只在回调体里查这个别名：页面上另外几处同名局部变量（比如另一个接口的响应 `b`）
             # 不属于 nodes[]/bound[]，扫全文会把它们误判成 `bound[].bound` 这种假红。
-            for am in re.finditer(rf"\b{re.escape(alias)}\s*\.\s*([A-Za-z_$][\w$]*)", region):
+            for am in re.finditer(rf"\b{re.escape(alias)}\s*\??\.\s*([A-Za-z_$][\w$]*)", region):
                 idx = open_idx + 1 + am.start()
-                out.append((f"{parent}[]", am.group(1), line_of(text, idx)))
+                out.append((f"{parent}[]", am.group(1), line_of(text, idx), idx))
                 attributed.append((idx, idx + len(am.group(0))))
-        for m in re.finditer(rf"\.{parent}\s*\.\s*(?:forEach|map)\s*\(\s*\(\s*\{{([^}}]*)\}}", text):
+        for m in re.finditer(rf"\.{parent}\s*\??\.\s*(?:forEach|map)\s*\(\s*\(\s*\{{([^}}]*)\}}", text):
             for field in re.findall(r"[A-Za-z_$][\w$]*", m.group(1)):
-                out.append((f"{parent}[]", field, line_of(text, m.start())))
-        for m in re.finditer(rf"\.{parent}\s*\[[^\]]*\]\s*\.\s*([A-Za-z_$][\w$]*)", text):
-            out.append((f"{parent}[]", m.group(1), line_of(text, m.start())))
+                out.append((f"{parent}[]", field, line_of(text, m.start()), m.start()))
+        for m in re.finditer(rf"\.{parent}\s*\??\.?\s*\[[^\]]*\]\s*\??\.\s*([A-Za-z_$][\w$]*)", text):
+            out.append((f"{parent}[]", m.group(1), line_of(text, m.start()), m.start()))
     for root in sorted(roots):
-        for m in re.finditer(rf"\b{re.escape(root)}\s*\.\s*([A-Za-z_$][\w$]*)", text):
+        for m in re.finditer(rf"\b{re.escape(root)}\s*\??\.\s*([A-Za-z_$][\w$]*)", text):
             if any(s <= m.start() < e for s, e in attributed):
                 continue  # 这处已经按数组元素归属过了，别当成响应根字段再报一次
-            out.append((root, m.group(1), line_of(text, m.start())))
+            out.append((root, m.group(1), line_of(text, m.start()), m.start()))
     return out, attributed
 
 
@@ -628,8 +654,34 @@ def check_js(path: str, contract_path: str) -> int:
     nested_parents = {"precheck", "nodes", "bound"}
     allowed_top = resp_fields | nested_parents | JS_ENVELOPE | JS_BUILTINS
 
-    js_raw, notes, problems = read_js_source(path)
-    js = strip_js_comments(js_raw)
+    blocks, notes, problems = read_js_source(path)
+    # 逐块去注释后再拼：去注释会删掉字符，先拼再删会让「字符下标 → 行号」整体错位。
+    parts: list[str] = []
+    segs: list[tuple[int, str]] = []  # (该块在拼接文本里的起点, 来源文件)
+    pos = 0
+    for origin, text in blocks:
+        segs.append((pos, origin))
+        stripped = strip_js_comments(text)
+        parts.append(stripped)
+        pos += len(stripped) + 1  # "\n".join 的分隔符
+    js = "\n".join(parts)
+
+    def loc(idx: int) -> str:
+        """字符下标 → 「来源文件:行号」。
+
+        外链脚本必须指到它自己的文件：否则 `app.js` 里的错会报成 `index.html:3`，
+        现场拿着页面文件找不到那一行（比不报还费时间）。
+        """
+        seg = segs[0]
+        for s in segs:
+            if s[0] <= idx:
+                seg = s
+            else:
+                break
+        line = line_of(js, idx) - line_of(js, seg[0]) + 1
+        origin = os.path.relpath(seg[1], ROOT) if os.path.isabs(seg[1]) else seg[1]
+        return f"{origin}:{line}"
+
     calls = parse_js_calls(js)
     # 按路径归并：同一条路径上出现过的动词集合（推不出动词就记 None）
     by_path: dict[str, dict] = {}
@@ -646,8 +698,7 @@ def check_js(path: str, contract_path: str) -> int:
 
     for p in sorted(by_path):
         rec = by_path[p]
-        line = rec["call"]["line"]
-        where = f"{path}:{line}"
+        where = loc(rec["call"]["start"])
         if p not in want_by_path:
             shown = "/".join(sorted(rec["methods"])) or "动词未定"
             if not re.match(r"^/(provision|pair)\b", p):
@@ -668,11 +719,17 @@ def check_js(path: str, contract_path: str) -> int:
                     f"动词与契约不符：{p} 契约是 {want_by_path[p]}，页面写 {'/'.join(wrong)}（{where}）"
                 )
     missing = sorted(p for p in want_by_path if p not in by_path)
+    if not by_path:
+        # 一条路径都提不到 = 这条链路根本没核过，必须报红，不能悄悄打印「一致」。
+        problems.append(
+            "没有从被检文件里提取到任何 /api/ 路径：本工具只做静态核对，"
+            "若页面用变量/拼接构造 URL，请改成字面量，或人工核对"
+        )
 
     put_keys = parse_js_request_keys(js, calls)
-    bad_req = sorted({(k, ln) for k, ln in put_keys if k not in req_fields})
-    for k, ln in bad_req:
-        problems.append(f"页面请求字段 `{k}` 不在 §12 请求表里（{path}:{ln}）")
+    bad_req = sorted({(k, idx) for k, _line, idx in put_keys if k not in req_fields})
+    for k, idx in bad_req:
+        problems.append(f"页面请求字段 `{k}` 不在 §12 请求表里（{loc(idx)}）")
         similar = [f for f in req_fields if f.lower() == k.lower() or f.replace("_", "") == k.replace("_", "").lower()]
         if similar:
             problems.append(f"   ↳ 是不是想写 `{similar[0]}`？")
@@ -680,25 +737,24 @@ def check_js(path: str, contract_path: str) -> int:
     roots, wrappers, destructured = parse_js_response_roots(js)
     accesses, _elem_spans = js_field_accesses(js, roots)
     unknown: dict[tuple[str, str], int] = {}
-    for container, field, line in accesses:
+    for container, field, _line, idx in accesses:
         if container == "precheck":
             if field not in JS_NESTED_FIELDS["precheck"] | JS_BUILTINS:
-                unknown.setdefault((container, field), line)
+                unknown.setdefault((container, field), idx)
             continue
         if container.endswith("[]"):
             parent = container[:-2]
             if field not in JS_NESTED_FIELDS[parent] | JS_BUILTINS:
-                unknown.setdefault((container, field), line)
+                unknown.setdefault((container, field), idx)
             continue
         if field not in allowed_top:
-            unknown.setdefault((container, field), line)
-    for field in destructured:
+            unknown.setdefault((container, field), idx)
+    for field, idx in destructured:
         if field not in allowed_top and field not in JS_BUILTINS:
-            unknown.setdefault(("解构", field), 0)
-    for (container, field), line in sorted(unknown.items()):
-        where = f"{path}:{line}" if line else path
+            unknown.setdefault(("解构", field), idx)
+    for (container, field), idx in sorted(unknown.items()):
         problems.append(
-            f"响应字段 `{container}.{field}` 不在契约 §12.5–§12.9 里（{where}）"
+            f"响应字段 `{container}.{field}` 不在契约 §12.5–§12.9 里（{loc(idx)}）"
         )
         similar = [f for f in resp_fields if f.lower() == field.lower() or f.replace("_", "") == field.replace("_", "").lower()]
         if similar:
@@ -721,15 +777,20 @@ def check_js(path: str, contract_path: str) -> int:
         print(f"提示：以下路径由字符串拼接而成，静态核对只看得到前缀：{', '.join(spliced)}")
     if wrappers:
         print(f"提示：识别到本地包装函数 {', '.join(sorted(wrappers))}（其返回值按响应根处理）")
-    print(f"请求字段 {len(set(k for k, _ in put_keys))} 个："
-          f"{', '.join(sorted(set(k for k, _ in put_keys))) or '无'}")
-    print(f"响应字段访问 {len(accesses)} 处，覆盖 {len({f for _, f, _ in accesses})} 个字段名")
+    req_names = sorted({k for k, _line, _idx in put_keys})
+    print(f"请求字段 {len(req_names)} 个：{', '.join(req_names) or '无'}")
+    print(f"响应字段访问 {len(accesses)} 处，覆盖 {len({f for _, f, _line, _idx in accesses})} 个字段名")
+    if by_path and not accesses:
+        # 防「工具自己坏了却报绿」：一处字段都没核到就不该让人以为核过了。
+        print("提示（不算失败）：页面调了本地接口，但一处响应字段访问都没提取到——"
+              "要么页面只发请求不看返回，要么用了本工具不认识的写法（如 json['data']），请人工再核一遍")
     if problems:
         print(f"!! 发现 {len(problems)} 处不一致：")
         for p in problems:
             print("   -", p)
         return 1
-    print("一致：页面只调 §12 的本地接口，请求/响应字段名与契约 §12.4–§12.9 对齐")
+    print(f"一致：页面只调 §12 的本地接口，请求/响应字段名与契约 §12.4–§12.9 对齐"
+          f"（已核请求字段 {len(req_names)} 个、响应字段访问 {len(accesses)} 处）")
     return 0
 
 
@@ -740,16 +801,36 @@ def run_self_test(contract_path: str) -> int:
     """负向验证：故意写错的样例必须报红，正确样例必须报绿。
 
     这个自检防的是「工具自己坏了却一直报绿」——比页面写错更危险，
-    因为它会让后面所有人都以为已经核过了。
+    因为它会让后面所有人都以为已经核过了。三个样例分别盯：
+    good.html 正确页面、bad.html 路径/动词/字段名写错、bad2.html 可选链与简写属性写法。
     """
     good = os.path.join(SAMPLES_DIR, "good.html")
     bad = os.path.join(SAMPLES_DIR, "bad.html")
-    print("== 自检 1/2：正确样例（期望退出码 0）")
+    bad2 = os.path.join(SAMPLES_DIR, "bad2.html")
+    print("== 自检 1/3：正确样例（期望退出码 0）")
     good_rc = check_js(good, contract_path)
-    print("\n== 自检 2/2：故意写错的样例（期望退出码 1）")
+    print("\n== 自检 2/3：故意写错的样例（期望退出码 1）")
     bad_rc = check_js(bad, contract_path)
-    ok = good_rc == 0 and bad_rc == 1
-    print(f"\n自检结果：正确样例 rc={good_rc}（期望 0）、错误样例 rc={bad_rc}（期望 1）→ {'通过' if ok else '失败'}")
+    print("\n== 自检 3/3：可选链 + 简写属性的错误样例（期望退出码 1）")
+    bad2_rc = check_js(bad2, contract_path)
+
+    # 再直接问一遍解析器：正确样例必须真的核出东西。否则「一致」可能只是「什么都没提取到」，
+    # 而这不依赖任何样例内容，纯靠断言兜住。
+    blocks, _notes, _problems = read_js_source(good)
+    js = strip_js_comments("\n".join(text for _origin, text in blocks))
+    roots, _wrappers, _destructured = parse_js_response_roots(js)
+    calls = parse_js_calls(js)
+    accesses, _spans = js_field_accesses(js, roots)
+    req_keys = parse_js_request_keys(js, calls)
+    n_resp = len({f for _, f, _line, _idx in accesses})
+    n_req = len({k for k, _line, _idx in req_keys})
+    extracted_ok = n_resp >= 10 and n_req >= 8
+    print(f"\n自检附加断言：正确样例提取到请求字段 {n_req} 个（期望 ≥8）、响应字段 {n_resp} 个（期望 ≥10）"
+          f" → {'通过' if extracted_ok else '失败（提取为空，会假绿）'}")
+
+    ok = good_rc == 0 and bad_rc == 1 and bad2_rc == 1 and extracted_ok
+    print(f"自检结果：正确样例 rc={good_rc}（期望 0）、错误样例 rc={bad_rc}（期望 1）、"
+          f"可选链样例 rc={bad2_rc}（期望 1）→ {'通过' if ok else '失败'}")
     return 0 if ok else 1
 
 

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>H5 字段核对负向样例 2：可选链与简写属性</title></head>
+<body>
+  <div id="out">…</div>
+  <script>
+    // 这份样例专门盯两类「最容易假绿」的写法，两种都必须被提取到并把错字段报红：
+    //   1) 可选链 `json?.data?.remaiin_s`——早先的点号模式只匹配 `json.`，整份页面会提取出
+    //      0 处响应字段访问，而输出照样打印「一致」（工具自己假绿，比页面写错更危险）。
+    //   2) 简写属性 `const body = { ssid, passwd, timeoutS }`——早先只抓 `key:` 写法，
+    //      于是请求字段一个都核不到，请求侧的错字段全部漏过。
+    // 期望：退出码 1，且同时报出 `remaiin_s`（响应）与 `passwd`、`timeoutS`（请求）。
+    // 注意 ssid 是合法键：它出现在报告里就说明简写属性被正常提取（不该被当成错）。
+    async function poll() {
+      const json = await (await fetch('/api/provision/status', { method: 'GET' })).json();
+      document.getElementById('out').textContent = json?.data?.remaiin_s;
+    }
+
+    async function submit(ssid, password) {
+      const body = { ssid, passwd, timeoutS };
+      return fetch('/api/provision/wifi', { method: 'POST', body: JSON.stringify(body) });
+    }
+
+    poll();
+  </script>
+</body>
+</html>

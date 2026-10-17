@@ -143,6 +143,29 @@ async function clearWhitelist() {
   log('clear op=' + c.op + ' 剩余 ' + c.slots_free + ' 槽位');
 }
 
+// 老固件可能少给可选字段：页面统一用可选链兜底。本工具必须认得 `?.`，
+// 否则整份页面会提取出 0 处字段访问却打印「一致」（反例见 bad2.html）。
+async function statusTolerant() {
+  const env = await (await fetch('/api/provision/status', { method: 'GET' })).json();
+  const d = env?.data;
+  log('mode=' + d?.mode + ' remain=' + d?.remain_s + ' hub_online=' + d?.hub_online
+      + ' bound_count=' + d?.bound_count + ' slots_free=' + d?.slots_free + ' busy=' + d?.busy);
+}
+
+// §12.9 简写属性（ES6）：`{ op, sn, mac }` 不带冒号，请求键名同样要能核出来
+async function bindShort(sn, mac) {
+  const op = 'add';
+  const b = await api('/api/pair/bind', { method: 'POST', body: JSON.stringify({ op, sn, mac }) });
+  log('bind-short connected=' + b.connected);
+}
+
+// §12.6 响应的 precheck 子对象（可选链写法）
+async function submitTolerant(ssid, password) {
+  const r = await api('/api/provision/wifi', { method: 'POST', body: JSON.stringify({ ssid, password }) });
+  log('saved=' + r?.saved + ' connecting=' + r?.connecting + ' settle_s=' + r?.settle_s
+      + ' ap_found=' + r?.precheck?.ap_found + ' ch=' + r?.precheck?.ch);
+}
+
 document.getElementById('btn-wifi').addEventListener('click', () => {
   submitWifi().catch(e => log('提交失败：' + e.message));
 });
