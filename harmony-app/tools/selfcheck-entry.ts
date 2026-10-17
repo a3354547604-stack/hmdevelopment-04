@@ -18,10 +18,11 @@ import { SessionStore } from '../ets/service/SessionStore';
 import { ApiResult, NETWORK_ERROR_CODE } from '../ets/model/Result';
 import {
   ActivityReport, AlertDetail, AlertListResult, BindResult, CommandResult, DemoResult,
-  DeviceListResult, DeviceSettings, DeviceStatus, HealthResult, LoginResult, PushRegisterResult,
-  ReadingListResult, RegisterResult, SummaryReport, TrendReport
+  DeviceListResult, DeviceSettings, DeviceStatus, GatewayProperties, HealthResult, LoginResult,
+  NodeItem, PushRegisterResult, ReadingListResult, RegisterResult, SummaryReport, TrendReport
 } from '../ets/model/Types';
 import { SettingsItems } from '../ets/model/Types';
+import { Formatter } from '../ets/common/Formatter';
 
 /**
  * ArkUI 全局对象的 Node 替身。
@@ -199,6 +200,46 @@ class Runner {
       seq: 23, name: '恢复正常后再次成功', contract: '§6.7', ok: back.ok,
       code: back.code, httpStatus: back.httpStatus, detail: `online=${back.data === undefined ? '-' : back.data.online}`
     });
+
+    // ---- t22 收口回归：把 t15 复核的 F-01/F-03/F-05 三条各钉一个探针，
+    //      以后有人改回旧行为，这里会红。
+    const st2: ApiResult<DeviceStatus> = await this.api.deviceStatus(1);
+    const props: GatewayProperties | undefined = st2.data === undefined ? undefined : st2.data.properties;
+    // F-01：§4.3 v1.1 的第 13/14 个属性必须解析出来（旧实现只解 12 个）
+    const bn: string | undefined = props === undefined ? undefined : props.bound_nodes;
+    const ps2: string | undefined = props === undefined ? undefined : props.pair_state;
+    this.cases.push({
+      seq: 24, name: '§4.3 十四属性含 bound_nodes/pair_state',
+      contract: '§4.3',
+      ok: bn === '["M1","M2","M4"]' && ps2 === 'sta',
+      code: st2.code, httpStatus: st2.httpStatus,
+      detail: `bound_nodes=${bn === undefined ? '-' : bn} pair_state=${ps2 === undefined ? '-' : ps2}`
+        + ` 文案=${Formatter.boundNodesText(bn)}/${Formatter.pairStateText(ps2)}`
+    });
+    // F-05：§4.3.1 的 mac（M1/M2 有、M4 缺省 —— 与真实 CAL-13 情形一致）
+    const macs: string = st2.data === undefined ? '-' : st2.data.nodes
+      .map((n: NodeItem) => `${n.sn}:${n.mac === undefined ? '缺省' : n.mac}`).join(' ');
+    this.cases.push({
+      seq: 25, name: '§4.3.1 mac 解析（缺省不报错）', contract: '§4.3.1',
+      ok: st2.data !== undefined && st2.data.nodes.length === 3
+        && st2.data.nodes[0].mac === '11:22:33:44:55:01'
+        && st2.data.nodes[1].mac === '11:22:33:44:55:02'
+        && st2.data.nodes[2].mac === undefined,
+      code: st2.code, httpStatus: st2.httpStatus, detail: macs
+    });
+    // F-03：1002 的 field/allowed 必须透传到用户可见文案（不能只剩中文直译）
+    const oob: ApiResult<DeviceSettings> = await this.api.putSettings(1, { no_motion_min: 999 });
+    const oobText: string = oob.message;
+    this.cases.push({
+      seq: 26, name: '§6.10 越界 message 透传（F-03）', contract: '§9.2',
+      ok: !oob.ok && oob.code === 1002 && oob.httpStatus === 400
+        && oobText.indexOf('参数超出允许范围') >= 0 && oobText.indexOf('no_motion_min') >= 0
+        && oobText.indexOf('allowed') >= 0,
+      code: oob.code, httpStatus: oob.httpStatus, detail: oobText
+    });
+    // 注：§6.10 的 1003「未知键」无法从 App 侧触发 —— HttpApiService.settingsBody()
+    // 只序列化契约 §6.9 的 22 个键名，压根构造不出未知键的请求体（这是好事）。
+    // mock 仍保留该校验，用于将来手工构造请求体时的自证。
   }
 
   report(): void {

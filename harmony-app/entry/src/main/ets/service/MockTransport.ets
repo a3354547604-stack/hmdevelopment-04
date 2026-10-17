@@ -17,6 +17,7 @@
 import { HttpPort, HttpMethod, HttpRequest, HttpResponse } from './HttpClient';
 import { MockData, MockStore, errorEnvelope } from './MockData';
 import { JsonObject, asObject, optStr } from '../common/JsonUtil';
+import { SettingSpec, SETTING_KEYS, specOf } from '../common/SettingsSchema';
 
 /** 故障注入模式：为了让「错误态 / 空态」在无服务器时也能被验收看到。 */
 export type FaultMode = 'none' | 'network' | 'unauthorized' | 'empty';
@@ -170,6 +171,24 @@ export class MockTransport implements HttpPort {
     const keys: string[] = Object.keys(items);
     if (keys.length === 0) {
       return MockTransport.json(400, errorEnvelope(1000, 'missing items'));
+    }
+    // §6.10 的三种拒绝必须真的能返回（否则「越界提示」这条 App 路径永远测不到）：
+    //   1003 未知键名、1002 越界（带 field/allowed，正是 F-03 要透传给用户的信息）、
+    //   1104 非 owner（mock 里固定 owner，不模拟）。
+    for (const key of keys) {
+      if (SETTING_KEYS.indexOf(key) < 0) {
+        return MockTransport.json(400, errorEnvelope(1003, `unknown key: ${key}`));
+      }
+      const value: Object | undefined = items[key];
+      const spec: SettingSpec | undefined = specOf(key);
+      // alert_repush_s 是数组、gas_l1_to_l2_s 不在规格表里 → 只校验键名合法，不做范围判断
+      if (spec === undefined || typeof value !== 'number') {
+        continue;
+      }
+      if (value < spec.min || value > spec.max) {
+        return MockTransport.json(400,
+          errorEnvelope(1002, `field=${key} allowed=${spec.min}..${spec.max}`));
+      }
     }
     MockStore.patchSettings(items);
     MockStore.bumpUpdatedAt();

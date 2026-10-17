@@ -249,28 +249,37 @@ export function toResult<T>(status: number, env: Envelope, parsed: T): ApiResult
   return fail<T>(kindOfStatus(status), env.code, describe(status, env.code, env.message), status);
 }
 
-/** 生成面向用户的一句话（业务码优先，其次 HTTP 类别）。 */
+/**
+ * 生成面向用户的一句话：**中文直译 + 服务器原文**。
+ *
+ * 为什么必须带上服务器 message（t15 复核 F-03）：
+ *  契约 §9.2 把细节放在 message 里——1002 带 `field`/`allowed`（哪个键、允许多少）、
+ *  1000 带 `missing`（缺哪个参数）、1302 带合法 action 列表。只回中文直译的话，
+ *  用户看到「参数超出允许范围」却不知道该改哪一项；开发排障也没有线索。
+ *  原文统一加「（服务器：…）」前缀，避免与直译混淆；message 为空时不加尾巴。
+ */
 export function describe(status: number, code: number, serverMessage: string): string {
+  const detail: string = serverMessage.length > 0 ? '（服务器：' + serverMessage + '）' : '';
   if (code !== 0) {
-    return codeText(code);
+    return codeText(code) + detail;
   }
   if (status === 0) {
-    return networkText();
+    return networkText() + detail;
   }
   if (status === 401) {
-    return '请先登录';
+    return '请先登录' + detail;
   }
   if (status === 403) {
-    return '没有操作权限';
+    return '没有操作权限' + detail;
   }
   if (status === 404) {
-    return '请求的资源不存在';
+    return '请求的资源不存在' + detail;
   }
   if (status === 429) {
-    return '操作太频繁，请稍后再试';
+    return '操作太频繁，请稍后再试' + detail;
   }
   if (status >= 500) {
-    return `服务器异常（HTTP ${status}）`;
+    return `服务器异常（HTTP ${status}）` + detail;
   }
-  return `请求失败（HTTP ${status}${serverMessage.length > 0 ? ' ' + serverMessage : ''}）`;
+  return `请求失败（HTTP ${status}${detail.length > 0 ? ' ' + detail : ''}）`;
 }

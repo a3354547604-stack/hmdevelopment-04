@@ -127,3 +127,25 @@ export function patchOf(key: string, value: number): SettingsItems {
   raw[key] = value;
   return parseSettingsItems(raw);
 }
+
+/**
+ * 按 key 查规格；查不到说明该键不在可编辑的 20 项里
+ * （`alert_repush_s` 是数组、`gas_l1_to_l2_s` 待 PM 确认，两者都不入表）。
+ * 给 mock 的 §6.10 校验用：越界要能像真服务器一样回 1002。
+ */
+export function specOf(key: string): SettingSpec | undefined {
+  return SETTING_SPECS.find((s: SettingSpec) => s.key === key);
+}
+
+/**
+ * §6.9 的 22 个合法键名。
+ * 为什么单独列：mock 要区分「越界(1002)」与「未知键(1003)」，
+ * 而 SETTING_SPECS 只有可编辑的 20 项，用它的长度当键集合会把两个合法键误判成未知。
+ */
+export const SETTING_KEYS: string[] = [
+  'no_motion_min', 'presence_hold_s', 'gas_t1_mv', 'gas_t2_mv', 'gas_l1_hold_s',
+  'gas_l2_hold_s', 'gas_l1_to_l2_s', 'gas_recover_mv', 'gas_recover_hold_s',
+  'away_after_open_s', 'door_open_alarm_s', 'report_interval_s', 'node_offline_timeout_s',
+  'gateway_offline_timeout_s', 'temp_high_c', 'temp_low_c', 'humi_high_pct', 'humi_low_pct',
+  'env_hold_min', 'alert_repush_s', 'alert_suppress_s', 'fall_suppress_s'
+];

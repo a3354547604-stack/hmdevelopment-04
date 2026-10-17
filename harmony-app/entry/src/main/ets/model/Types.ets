@@ -65,7 +65,10 @@ export interface BindResult {
 }
 
 // ============================================================ §6.7 实时状态
-/** §4.3 属性快照：除 alarm_state/battery 外全部可能缺省（P0 只装 MQ-2，无 lpg/co）。 */
+/**
+ * §4.3 属性快照（v1.1 共 **14** 项）：除 alarm_state/battery 外全部可能缺省
+ * （P0 只装 MQ-2，无 lpg/co）。字段名与 §4.3 表逐字一致，便于静态核对。
+ */
 export interface GatewayProperties {
   presence?: boolean;
   last_motion_ts?: number;
@@ -84,6 +87,18 @@ export interface GatewayProperties {
   /** 0–100，255 = 市电（§4.3） */
   battery?: number;
   alarm_state?: number;
+  /**
+   * §4.3（v1.1）：已绑定节点白名单，**JSON 文本数组**（如 `["M1","M2"]`）。
+   * 与 nodes_online 一样契约给的是字符串而非真数组（原样透传 0x23 白名单），
+   * 所以展示统一走 Formatter.boundNodesText()——解析失败也不能让界面炸。
+   */
+  bound_nodes?: string;
+  /**
+   * §4.3（v1.1）：网关配网状态，枚举字符串 `idle`/`ap`/`sta`/`ap_sta`（§12）。
+   * App 的配网页按 PM 裁定降为 P1（P0 用手机浏览器直连 192.168.4.1），
+   * 这里只做只读展示，不发起配网。
+   */
+  pair_state?: string;
 }
 
 export interface NodeItem {
@@ -93,6 +108,11 @@ export interface NodeItem {
   location: string;
   online: boolean;
   last_seen: number;
+  /**
+   * §4.3.1（v1.1）：SLE 6 字节地址，形如 `11:22:33:44:55:02`，可缺省
+   * （CAL-13：`0x21`/`0x24` 读不到时服务器不写该字段）。
+   */
+  mac?: string;
   /** dBm，读不到时缺省（契约 §4.3.1 / CAL-13） */
   rssi?: number;
   /** %，255 = 不适用（§2.4.5） */
@@ -138,7 +158,7 @@ export interface SettingsItems {
   gas_t2_mv?: number;
   gas_l1_hold_s?: number;
   gas_l2_hold_s?: number;
-  /** §8.2 有、§6.9 示例无 → 待 PM/云端确认后启用（见核对表 D-03） */
+  /** §8.2 有、§6.9 示例无 → 待 PM/云端确认后启用（见核对表 D-01） */
   gas_l1_to_l2_s?: number;
   gas_recover_mv?: number;
   gas_recover_hold_s?: number;
@@ -410,6 +430,10 @@ export function parseProperties(o: JsonObject): GatewayProperties {
   p.nodes_online = optStr(o, 'nodes_online');
   p.battery = optNum(o, 'battery');
   p.alarm_state = optNum(o, 'alarm_state');
+  // v1.1 增补的两个属性（§4.3 第 13/14 项）：都是字符串，按可选键解析。
+  // 用 optStr 而不是 str：老网关（v1.0 固件）不发这两个字段，不能因此整条 status 解析失败。
+  p.bound_nodes = optStr(o, 'bound_nodes');
+  p.pair_state = optStr(o, 'pair_state');
   return p;
 }
 
@@ -426,6 +450,7 @@ export function parseNodeItem(o: JsonObject): NodeItem {
     location: optStr(o, 'location') ?? '',
     online: bool(o, 'online', 'data.nodes[]'),
     last_seen: num(o, 'last_seen', 'data.nodes[]'),
+    mac: optStr(o, 'mac'),
     rssi: optNum(o, 'rssi'),
     battery: optNum(o, 'battery')
   };

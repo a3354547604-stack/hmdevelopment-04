@@ -34,7 +34,7 @@ mkdir -p "$(dirname "$OUT")"
   echo "SDK：$(ls "$OHOS_BASE_SDK_HOME" 2>/dev/null | tr '\n' ' ')"
   echo
   echo "=============================================================="
-  echo "[1/2] 编译门禁自证：注入未定义常量，必须 BUILD FAILED"
+  echo "[1/2] 编译门禁自证：注入未定义常量，必须 BUILD FAILED（hvigor --max-workers=2，见 AGENTS.md 资源上限）"
   echo "=============================================================="
 } > "$OUT"
 
@@ -49,7 +49,7 @@ io.open(path, 'w', encoding='utf-8').write(s)
 PY
 
 cd "$REPO"
-hvigorw --no-daemon assembleHap 2>&1 | grep -E "ArkTS:ERROR|Cannot find name|BUILD (FAILED|SUCCESSFUL)" \
+hvigorw --no-daemon --no-analyze --max-workers=2 assembleHap 2>&1 | grep -E "ArkTS:ERROR|Cannot find name|BUILD (FAILED|SUCCESSFUL)" \
   | tee -a "$OUT"
 restore_probe
 echo "回退注入：grep 计数 = $(grep -c 'NOT_DEFINED_CONST' "$PROBE_FILE" || true)（应为 0）" | tee -a "$OUT"
@@ -57,10 +57,10 @@ echo "回退注入：grep 计数 = $(grep -c 'NOT_DEFINED_CONST' "$PROBE_FILE" |
 {
   echo
   echo "=============================================================="
-  echo "[2/2] 正式构建：hvigorw --no-daemon assembleHap"
+  echo "[2/2] 正式构建：hvigorw --no-daemon --no-analyze --max-workers=2 assembleHap"
   echo "=============================================================="
 } >> "$OUT"
-hvigorw --no-daemon assembleHap 2>&1 | tee -a "$OUT" | grep -E "BUILD|WARN|ERROR" || true
+hvigorw --no-daemon --no-analyze --max-workers=2 assembleHap 2>&1 | tee -a "$OUT" | grep -E "BUILD|WARN|ERROR" || true
 
 {
   echo

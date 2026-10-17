@@ -115,8 +115,9 @@ export class MockData {
 
   // ---------------------------------------------------------------- §6.7 实时状态
   /**
-   * 属性快照按 §4.3 的 12 个属性构造；`lpg`/`co` **故意缺省**——
+   * 属性快照按 §4.3 的 **14** 个属性构造；`lpg`/`co` **故意缺省**——
    * P0 未装 MQ-5/MQ-7，契约要求「未装则缺省该属性」，App 必须能显示缺省态而非 0。
+   * v1.1 的 `bound_nodes`/`pair_state` 一律给出，用来验证新增的可选字段真能解析出来。
    */
   static statusBody(): string {
     const props: JsonObject = {
@@ -129,15 +130,20 @@ export class MockData {
       'smoke': 320,
       'nodes_online': '{"M1":true,"M2":true,"M4":false}',
       'battery': 255,
-      'alarm_state': 2
+      'alarm_state': 2,
+      // §4.3 第 13/14 项（v1.1）：白名单是 JSON 文本数组、配网状态是枚举字符串
+      'bound_nodes': '["M1","M2","M4"]',
+      'pair_state': 'sta'
     };
+    // mac 是 §4.3.1 的 v1.1 可选字段（0x21/0x24 原样透传）；M4 故意不给 mac，
+    // 复现 CAL-13「读不到时缺省」的情形，防止页面把缺省画成 "undefined"。
     const m1: JsonObject = {
       'sn': 'M1', 'type': 'gas', 'location': '厨房', 'online': true,
-      'last_seen': ago(0), 'rssi': -62, 'battery': 255
+      'last_seen': ago(0), 'mac': '11:22:33:44:55:01', 'rssi': -62, 'battery': 255
     };
     const m2: JsonObject = {
       'sn': 'M2', 'type': 'fall', 'location': '卧室', 'online': true,
-      'last_seen': ago(0), 'rssi': -55, 'battery': 255
+      'last_seen': ago(0), 'mac': '11:22:33:44:55:02', 'rssi': -55, 'battery': 255
     };
     // M4 离线示例：验证「节点离线」与「网关在线」是两个独立维度（契约 §8.7）
     const m4: JsonObject = {

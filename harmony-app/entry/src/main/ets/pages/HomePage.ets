@@ -15,7 +15,7 @@ import { HomeViewModel, HomeState } from '../viewmodel/HomeViewModel';
 import { AppTheme, LiteralConstants } from '../common/AppTheme';
 import { Formatter } from '../common/Formatter';
 import { SensorCard } from '../components/SensorCard';
-import { SectionTitle, StatTile, DividerLine } from '../components/CommonViews';
+import { SectionTitle, StatTile, DividerLine, InfoRow } from '../components/CommonViews';
 import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
 import { DeviceStatus, GatewayProperties, NodeItem } from '../model/Types';
 
@@ -209,6 +209,12 @@ export struct HomePage {
                 + `　电池 ${Formatter.fmtBattery(node.battery)}`)
                 .fontSize(AppTheme.FONT_CAPTION - 1)
                 .fontColor(AppTheme.COLOR_TEXT_HINT)
+              // SLE 地址是 §4.3.1 的可选字段：有就显示（排障时能对上实物），没有就整行不占位
+              if (node.mac !== undefined && node.mac.length > 0) {
+                Text(`SLE ${Formatter.fmtMac(node.mac)}`)
+                  .fontSize(AppTheme.FONT_CAPTION - 2)
+                  .fontColor(AppTheme.COLOR_TEXT_HINT)
+              }
             }
             .alignItems(HorizontalAlign.Start)
             .layoutWeight(1)
@@ -229,6 +235,35 @@ export struct HomePage {
     .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
     .backgroundColor(AppTheme.COLOR_SURFACE)
     .borderRadius(AppTheme.CARD_RADIUS)
+  }
+
+  // ------------------------------------------------------------- 网关 v1.1 属性（只读）
+  /**
+   * `bound_nodes` / `pair_state` 是 §4.3 v1.1 新增的第 13/14 个属性。
+   * 它们在 P0 只用于**展示与排障**：配网由手机浏览器直连网关 SoftAP 完成（PM 裁定），
+   * App 内配网页属 P1，所以这里不提供任何"配网/解绑"按钮，避免给出做不到的承诺。
+   */
+  @Builder
+  gatewayInfo() {
+    Column({ space: 8 }) {
+      SectionTitle({ text: '网关', note: '§4.3 v1.1 属性' })
+      Column({ space: 0 }) {
+        InfoRow({
+          label: '配网状态',
+          value: Formatter.pairStateText(this.state.status.properties.pair_state)
+        })
+        DividerLine()
+        InfoRow({
+          label: '已绑定节点',
+          value: Formatter.boundNodesText(this.state.status.properties.bound_nodes)
+        })
+      }
+      .width('100%')
+      .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
+      .backgroundColor(AppTheme.COLOR_SURFACE)
+      .borderRadius(AppTheme.CARD_RADIUS)
+    }
+    .width('100%')
   }
 
   build() {
@@ -291,6 +326,10 @@ export struct HomePage {
               } else {
                 this.nodeList(this.state.status.nodes)
               }
+
+              // §4.3（v1.1）的第 13/14 个属性：加网白名单与配网状态都是**只读展示**——
+              // P0 的配网由手机浏览器直连网关 SoftAP 完成（PM 裁定），App 内配网页属 P1。
+              this.gatewayInfo()
 
               Text(`接口：GET /api/devices/${this.deviceId}/status　` +
                 `更新于 ${Formatter.fmtDateTime(this.state.updatedAt)}　每 10 s 自动刷新`)

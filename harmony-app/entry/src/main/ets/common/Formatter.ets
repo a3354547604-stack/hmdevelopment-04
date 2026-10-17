@@ -164,6 +164,60 @@ export class Formatter {
     return `${v} dBm`;
   }
 
+  /** SLE 6 字节地址（§4.3.1 v1.1）。缺省说明读不到（CAL-13），显示占位符而不是空串。 */
+  static fmtMac(v: string | undefined): string {
+    if (v === undefined || v.length === 0) {
+      return LiteralConstants.PLACEHOLDER;
+    }
+    return v;
+  }
+
+  // ---------------------------------------------------------------- v1.1 两个字符串属性的文案
+  /**
+   * `bound_nodes` 是**JSON 文本数组**（§4.3），不是真数组；解析失败时退回原文，
+   * 因为「显示一行看不懂的 JSON」远好过「显示空白让人以为没有绑定节点」。
+   */
+  static boundNodesText(jsonText: string | undefined): string {
+    if (jsonText === undefined || jsonText.length === 0) {
+      return LiteralConstants.PLACEHOLDER;
+    }
+    try {
+      const parsed: Object = JSON.parse(jsonText);
+      if (!Array.isArray(parsed)) {
+        return jsonText;
+      }
+      const arr: Object[] = parsed;
+      const names: string[] = [];
+      for (const e of arr) {
+        names.push(typeof e === 'string' ? e : `${e}`);
+      }
+      return names.length === 0 ? '（无）' : names.join('、');
+    } catch (e) {
+      return jsonText;
+    }
+  }
+
+  /** `pair_state` 枚举（§4.3 / §12）：只做只读展示，App 不发起配网（P1）。 */
+  static pairStateText(v: string | undefined): string {
+    if (v === undefined || v.length === 0) {
+      return LiteralConstants.PLACEHOLDER;
+    }
+    if (v === 'idle') {
+      return '空闲（未在配网）';
+    }
+    if (v === 'ap') {
+      return '配网热点已开启';
+    }
+    if (v === 'sta') {
+      return '已连家庭 Wi-Fi';
+    }
+    if (v === 'ap_sta') {
+      return '热点与 Wi-Fi 并存';
+    }
+    // 不认识的枚举值原样显示：契约新增取值时界面不会假装成已知状态
+    return v;
+  }
+
   // ---------------------------------------------------------------- 枚举文案（契约 §8.1 等）
   /** 在线状态文案。 */
   static onlineText(online: boolean): string {
