@@ -1,0 +1,6 @@
+file=master
+extra_build_args=
+bytes=1457768
+sha256=c932a2ab64d4e1794d658d6cffed362ac6e5de04d7342c4134c1327552819535
+built_at=2026-10-17T20:44:48+08:00
+role_marker=SPIKE-ROLE=MASTER count=1

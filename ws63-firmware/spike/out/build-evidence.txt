@@ -1,0 +1,127 @@
+星闪双板冒烟固件 —— 构建与核对证据（t8）
+生成时间：2026-10-17 20:45 (+08:00)  |  机器：WSL / Docker 镜像 ws63wsl:latest
+SDK：/home/qinyixiang/ws63/fbb_ws63-master
+（本文件是命令输出的原文留存；*.log 被 .gitignore 忽略，所以原文抄在这里。）
+
+================================================================================
+[1] 复现命令
+================================================================================
+$ cd /mnt/c/Users/Administrator/Desktop/HMProgram
+$ bash tools/spike-build.sh all          # 约 5~6 分钟：两次 Docker 全量编译 + 角色断言 + 还原生产源
+$ python3 tools/spike-compile-check.py   # 约 0.5 秒：3 源文件 × 2 角色，SDK 同款工具链与 -Werror
+
+================================================================================
+[2] bash tools/spike-build.sh all 的输出（exit 0）
+================================================================================
+[spike-build] 已暂存生产源文件 → /home/qinyixiang/ws63/fbb_ws63-master/.spike-stash
+[spike-build] 已安装冒烟源码：spike_client.c spike_server.c spike_server_adv.c
+[spike-build] ==== 编译 master（extra=''）→ 日志 ws63-firmware/spike/out/build-master.log
+[spike-build] master 角色断言通过：'[SPIKE-SRV]'×38，'SPIKE-ROLE=MASTER'×1，'SPIKE-ROLE=SLAVE'×0（必须为 0）
+file=master
+extra_build_args=
+bytes=1457768
+sha256=c932a2ab64d4e1794d658d6cffed362ac6e5de04d7342c4134c1327552819535
+built_at=2026-10-17T20:44:48+08:00
+role_marker=SPIKE-ROLE=MASTER count=1
+[spike-build] master 产物：ws63-firmware/spike/out/SPIKE_MASTER.fwpkg
+[spike-build] ==== 编译 slave（extra='-def=SPIKE_ROLE=2'）→ 日志 ws63-firmware/spike/out/build-slave.log
+[spike-build] slave 角色断言通过：'[SPIKE-CLI]'×44，'SPIKE-ROLE=SLAVE'×1，'SPIKE-ROLE=MASTER'×0（必须为 0）
+file=slave
+extra_build_args=-def=SPIKE_ROLE=2
+bytes=1458664
+sha256=a27ca845adf670f45e55f1a0daa2ecad908ed07ca625e3ee09c0aa6aeb49f4fe
+built_at=2026-10-17T20:45:13+08:00
+role_marker=SPIKE-ROLE=SLAVE count=1
+[spike-build] slave 产物：ws63-firmware/spike/out/SPIKE_SLAVE.fwpkg
+[spike-build] 完成。烧录与验收见 ws63-firmware/spike/施工单-双板星闪冒烟.md
+[spike-build] 已还原 /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom（生产固件源码与 CMakeLists 回到编译前状态）
+
+两次编译的 SDK 收尾（build-master.log / build-slave.log 末行）：
+packet ing...
+['/usr/bin/python3', '/sdk/src/tools/pkg/packet.py', 'ws63', 'ws63-liteos-app', '']
+packet success!
+packet ing...
+['/usr/bin/python3', '/sdk/src/tools/pkg/packet.py', 'ws63', 'ws63-liteos-app', 'SPIKE_ROLE=2']
+packet success!
+
+================================================================================
+[3] 独立核对（不用构建脚本自己的 grep——方括号在正则里是字符集，
+    `grep "[SPIKE-SRV]"` 会退化成“命中任意一个字母”的假计数，见技术笔记坑 2）
+================================================================================
+$ python3 - <<'PY'   # 直接数原始字节
+for n in ['SPIKE_MASTER.fwpkg','SPIKE_SLAVE.fwpkg']:
+    d=open(base+n,'rb').read(); print(n, len(d), sha256(d)); count role markers/tags
+PY
+
+SPIKE_MASTER.fwpkg bytes=1457768 sha256=c932a2ab64d4e1794d658d6cffed362ac6e5de04d7342c4134c1327552819535
+    [SPIKE-SRV]  x 38
+    [SPIKE-CLI]  x 0
+    SPIKE-ROLE=MASTER x 1
+    SPIKE-ROLE=SLAVE x 0
+    SPIKE_SRV_NODE_1 x 2
+SPIKE_SLAVE.fwpkg bytes=1458664 sha256=a27ca845adf670f45e55f1a0daa2ecad908ed07ca625e3ee09c0aa6aeb49f4fe
+    [SPIKE-SRV]  x 1        ← 从端“一帧都没收到”的提示里合法印出主端标签一次
+    [SPIKE-CLI]  x 44
+    SPIKE-ROLE=MASTER x 0
+    SPIKE-ROLE=SLAVE x 1
+    SPIKE_SRV_NODE_1 x 1
+
+两个包 sha256 不同、字节数不同 ⇒ 不是同镜像改名。
+角色标记互斥（主包无 SLAVE、从包无 MASTER）⇒ 不会出现“两块板烧成同一角色”。
+
+================================================================================
+[4] 生产源码是否被污染（构建脚本的还原检查）
+================================================================================
+$ for f in radar_hub.c sensor_hub.c sle_hub.c sle_hub.h sle_hub_adv.c sle_hub_adv.h wifi_hub.c; do
+    diff -q /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom/$f ws63-firmware/src/$f; done
+  same: radar_hub.c
+  same: sensor_hub.c
+  same: sle_hub.c
+  same: sle_hub.h
+  same: sle_hub_adv.c
+  same: sle_hub_adv.h
+  same: wifi_hub.c
+$ ls -la /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom/
+  CMakeLists.txt 640B · radar_hub.c · sensor_hub.c · sle_hub.c · sle_hub.h
+  sle_hub_adv.c · sle_hub_adv.h · wifi_hub.c      （无任何 spike_* 残留）
+
+================================================================================
+[5] python3 tools/spike-compile-check.py 的输出（exit 0）
+================================================================================
+模板条目：/sdk/src/application/samples/custom/spike_server.c
+SDK：/home/qinyixiang/ws63/fbb_ws63-master
+OK    [server] spike_client.c
+OK    [server] spike_server.c
+OK    [server] spike_server_adv.c
+OK    [client] spike_client.c
+OK    [client] spike_server.c
+OK    [client] spike_server_adv.c
+共 3 个源文件 × 2 个角色，失败 0 个
+编译自检通过（含 SDK 的 -Werror 级别警告）。出镜像仍须 tools/spike-build.sh
+real 0m0.512s
+
+================================================================================
+[6] 构建日志里的 error/warning 归属（避免“看到 warning 就以为代码有问题”）
+================================================================================
+$ grep -nE "(: (error|warning|fatal error):|\[-Werror)" ws63-firmware/spike/out/build-master.log | wc -l
+48        ← 全部位于 SDK 自带 open_source（mbedtls / libcoap），与本次代码无关
+$ grep -nE "spike_[a-z]+\.(c|h):[0-9]+:.*(warning|error)" ws63-firmware/spike/out/build-master.log ws63-firmware/spike/out/build-slave.log
+(无输出)  ← 冒烟源码零告警
+其余匹配 "error|warning" 的行是 zlib/distutils 的 DeprecationWarning 与目标名 error_code。
+
+================================================================================
+[7] 构建期真实修掉的一个 bug（记录在此，防复发）
+================================================================================
+第一次编 slave 时失败：
+  .../custom/spike_client.c:462:13: error: 'spike_cli_find_structure_cmp_cbk'
+      defined but not used [-Werror=unused-function]
+根因：漏在 spike_cli_ssapc_register_cbks() 里注册服务结构比较回调，
+      SDK 的结构体字段名是 find_structure_cmp_cb
+      （src/include/middleware/services/bts/sle/sle_ssap_client.h:446-466）。
+修法：把注册函数移到回调定义之后，并补上 g_ssapc_cbk.find_structure_cmp_cb = ...;
+
+================================================================================
+[8] 未完成 / 待用户
+================================================================================
+两套固件**尚未上板**。“能不能连上、每秒是否到齐、有没有丢包”必须待施工单
+第 6 节的日志回传后才能判定；本节之前的一切结论仅覆盖“编译与镜像内容”这一层。
