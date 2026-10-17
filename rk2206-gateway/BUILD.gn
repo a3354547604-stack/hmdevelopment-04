@@ -1,0 +1,51 @@
+# RK2206 网关组件构建脚本（OpenHarmony 3.0 LTS / LiteOS-M，hb build 体系）
+#
+# 为什么长这样：
+#   1. GN 要求目标必须在**源码树内**，而本仓库（HMProgram/rk2206-gateway）不在 SDK 树里，
+#      所以 tools/gw-build.sh 会在构建前把 src/* 暂存到
+#      <SDK>/vendor/lockzhiner/rk2206/samples/t4_gateway/，构建后立刻还原 vendor 树。
+#      → include_dirs 里的 "//vendor/lockzhiner/rk2206/samples/t4_gateway" 就是那个暂存目录。
+#   2. include_dirs 逐条来自官方样例 d8_iot_cloud_TH（IoTDA 联网）与 b16_iot_pwm（PWM）
+#      与 b7_wifi_tcp（lwip/socket）：paho、cJSON、lwip、iot_pwm、board 各有各的路径，
+#      少一条就会以 "No such file or directory: MQTTClient.h / cJSON.h / iot_pwm.h" 收场。
+#   3. deps 只留 hardware:hardware：paho 与 cJSON 已经由
+#      //device/rockchip/rk2206/sdk_liteos/BUILD.gn 全局链进镜像（libpahomqtt_static.a /
+#      libcjson_static.a），这里再 deps 一次也不会更强，反而容易与 SDK 内部版本撞车。
+
+import("//build/lite/config/component/lite_component.gni")
+
+static_library("gateway_app") {
+    sources = [
+        "gw_main.c",        # 入口 + 任务编排 + 汇聚帧分派（契约 §3.8）
+        "gw_proto.c",       # 帧编解码 + CRC16/MODBUS + 分帧容错（§3）
+        "gw_rules.c",       # 燃气/跌倒/无活动/离线/去重状态机（§8）
+        "gw_iotda.c",       # 属性/事件/明细/命令响应报文（§4.3–§4.6）
+        "gw_cloud.c",       # paho MQTT：一机一密鉴权、QoS1、keepalive 120（§4.1）
+        "gw_cache.c",       # 断网缓存 2000 条（§4.7）
+        "gw_timesync.c",    # 联网后取 UTC（HTTP /api/time → NTP），取不到就不连云
+        "gw_crypto.c",      # SHA-256 / HMAC-SHA256（Password 计算）
+        "gw_time.c",        # UTC 格式化、event_id、时间外推
+        "gw_alarm.c",       # 声光与静音（§8.1/§4.5/§4.7）
+        "gw_433.c",         # 433 求助输入：中断 + 200 ms 复查 + 3 s 去重
+        "gw_plat.c",        # 引脚/外设适配（UART0、GPIO、PWM、Flash）
+    ]
+
+    include_dirs = [
+        "//vendor/lockzhiner/rk2206/samples/t4_gateway",
+        "//utils/native/lite/include",
+        "//device/rockchip/rk2206/adapter/include",
+        "//device/rockchip/rk2206/adapter/include/lz_hardware/",
+        "//device/rockchip/rk2206/sdk_liteos/board/include",
+        "//kernel/liteos_m/kernel/include",
+        "//base/iot_hardware/peripheral/interfaces/kits",
+        "//third_party/cJSON",
+        "//third_party/musl/porting/liteos_m/kernel/include",
+        "//third_party/paho_mqtt/MQTTPacket/src",
+        "//third_party/paho_mqtt/MQTTClient-C/src",
+        "//third_party/lwip/src/include/lwip",
+    ]
+
+    deps = [
+        "//device/rockchip/hardware:hardware",
+    ]
+}
