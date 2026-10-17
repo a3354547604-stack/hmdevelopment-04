@@ -10,6 +10,10 @@
  *   2. 样例在连接状态回调里 destroy/create 发包线程；这里改成**一个常驻线程**，
  *      每秒看一眼「连上没有」，连上就发。避免 force-destroy 正在跑的任务带来的竞态。
  *
+ * t16 修的一处根因（t12 上板实测暴露）：发包线程原来用 `g_conn_hdl == 0` 判「没连上」，
+ * 而本 SDK 第一条连接的 conn_id 就是 0x0 → 守卫恒真、90 秒一帧未发（日志只有
+ * `alive … tx=0 err=0`）。现在改用独立的 `g_connected` 标志，conn_id 允许是 0。
+ *
  * ⚠️ 本文件是 spike，不替代 ws63-firmware/src/sle_hub.c（生产汇聚固件）。
  */
 #include "app_init.h"
@@ -45,7 +49,11 @@
 
 static const uint8_t g_srv_mac[6] = SPIKE_MAC_SERVER_INIT;
 
-static uint16_t g_conn_hdl = 0;         /* 0 = 当前无对端 */
+static uint16_t g_conn_hdl = 0;         /* 对端句柄；**0 是合法值**，不能当「没连上」用 */
+/* 「连上了没有」必须单独用一个标志。
+ * 为什么：本 SDK 给第一条连接的 conn_id 就是 0x0（实测两端日志都打 conn_id:00），
+ * 所以 `g_conn_hdl == 0` 表达不了「无连接」——t12 上板实测时它让发包线程 90 秒一帧未发。 */
+static volatile uint8_t g_connected = 0;
 static uint8_t  g_server_id = 0;
 static uint16_t g_service_handle = 0;
 static uint16_t g_property_handle = 0;
@@ -108,7 +116,8 @@ static void spike_srv_notify_thread(void)
         errcode_t ret;
 
         osal_msleep(SPIKE_NOTIFY_PERIOD_MS);
-        if (g_conn_hdl == 0 || g_property_handle == 0) {
+        /* 只看「连上没有」和「属性句柄有没有建出来」；conn_id 允许是 0。 */
+        if (!g_connected || g_property_handle == 0) {
             continue;
         }
         t10 = spike_temp_d10(g_tx_seq);
@@ -325,6 +334,7 @@ static void spike_srv_connect_state_changed_cbk(uint16_t conn_id, const sle_addr
     if (conn_state == SLE_ACB_STATE_CONNECTED) {
         sle_connection_param_update_t parame = {0};
         g_conn_hdl = conn_id;
+        g_connected = 1;
         parame.conn_id = conn_id;
         parame.interval_min = SPIKE_CONN_INTERVAL;
         parame.interval_max = SPIKE_CONN_INTERVAL;
@@ -335,6 +345,7 @@ static void spike_srv_connect_state_changed_cbk(uint16_t conn_id, const sle_addr
         osal_printk(SPIKE_TAG_SRV "will notify every %dms from seq=%u\r\n",
             SPIKE_NOTIFY_PERIOD_MS, (unsigned)g_tx_seq);
     } else if (conn_state == SLE_ACB_STATE_DISCONNECTED) {
+        g_connected = 0;
         g_conn_hdl = 0;
         osal_printk(SPIKE_TAG_SRV "PEER DISCONNECTED (tx=%u err=%u) -> restart announce\r\n",
             (unsigned)g_tx_seq, (unsigned)g_tx_err);
@@ -406,8 +417,8 @@ static void spike_srv_alive_thread(void)
 {
     while (1) {
         osal_msleep(SPIKE_MSG_INTERVAL_MS);
-        osal_printk(SPIKE_TAG_SRV "alive conn=0x%x tx=%u err=%u\r\n",
-            g_conn_hdl, (unsigned)g_tx_seq, (unsigned)g_tx_err);
+        osal_printk(SPIKE_TAG_SRV "alive conn=0x%x tx=%u err=%u link=%u\r\n",
+            g_conn_hdl, (unsigned)g_tx_seq, (unsigned)g_tx_err, (unsigned)g_connected);
     }
 }
 

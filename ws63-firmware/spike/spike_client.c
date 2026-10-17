@@ -9,9 +9,15 @@
  *   1. **已配对分支**：样例只在 pair_state==SLE_PAIR_NONE 时配对，配对完成后才发起服务发现；
  *      一旦两块板子第二次连接（双方已配对），样例会永远停在「连上了但什么都不做」。
  *      这里加了 else 分支：已配对就直接进服务发现。
- *   2. **订阅重试**：样例靠对端 READ 触发发送，从端什么都不用做；本包主端是「连上就自己发」，
- *      从端仍主动写一次 CCCD（尽力而为，失败不算测试失败——主端不看订阅状态）。
+ *   2. **订阅时机与重试**：样例靠对端 READ 触发发送，从端什么都不用做；本包主端是「连上就自己发」，
+ *      从端仍主动写一次 CCCD。**订阅在「属性轮发现结束」之后才写**，并由心跳线程每 5 秒兜底重试
+ *      （最多 5 次）——发现进行中写会被协议栈拒。
  *   3. **丢包统计**：样例只统计收包速率，这里统计 seq 跳号，直接对上验收标准「不丢包」。
+ *
+ * t16 修的一处根因（t12 上板实测暴露）：发现完成回调原来不看 `structure_result->type`，
+ * 无论哪一轮完成都再发起一次「找属性」，属性轮完成时又发起属性轮 → ~12 Hz 自我重入、
+ * 90 秒里 1096 次，从端永远走不到订阅那一步（日志只有 `structure discovery DONE type=3`）。
+ * 现在按类型收尾：服务轮（type=1）= 发起属性发现；属性轮（type=3）= 写 CCCD 订阅，一轮一次。
  *
  * ⚠️ 本文件是 spike。生产节点固件（1 主 5 从）照搬本文件的扫描/发现/订阅逻辑时，
  *    记得把 SPIKE_MAC_SERVER_INIT 换成汇聚节点的实际地址。
@@ -57,13 +63,18 @@ static sle_connection_callbacks_t    g_connect_cbk = {0};
 static ssapc_callbacks_t             g_ssapc_cbk = {0};
 
 static sle_addr_t g_remote_addr = {0};
-static uint16_t   g_conn_id = 0;
+static uint16_t   g_conn_id = 0;            /* 对端句柄；**0 是合法值**（本 SDK 首条连接就是 0） */
+/* 「连上了没有」单独用标志，不能拿 g_conn_id == 0 当判据——原因同 spike_server.c。 */
+static volatile uint8_t g_cli_connected = 0;
 static uint8_t    g_seeking = 0;            /* 正在扫描，防止重复起扫 */
 static uint8_t    g_found_peer = 0;         /* 已经匹配到目标地址并停扫 */
+static uint8_t    g_prop_discovery_started = 0;  /* 属性轮只发起一次，防发现回调自我重入 */
 static uint16_t   g_svc_start_hdl = 0;
 static uint16_t   g_svc_end_hdl = 0;
 static uint16_t   g_prop_handle = 0;
 static uint8_t    g_subscribed = 0;
+static uint8_t    g_subscribe_attempts = 0;
+#define SPIKE_SUBSCRIBE_MAX_TRIES  5        /* CCCD 最多重试几次（5s 一次，见心跳线程） */
 
 /* ---- 收包统计（验收就看这几个数） ---- */
 static uint32_t g_rx = 0;
@@ -288,6 +299,11 @@ static void spike_cli_connect_state_changed_cbk(uint16_t conn_id, const sle_addr
         conn_id, conn_state, pair_state, disc_reason);
     if (conn_state == SLE_ACB_STATE_CONNECTED) {
         g_conn_id = conn_id;
+        g_cli_connected = 1;
+        g_prop_discovery_started = 0;
+        g_subscribed = 0;
+        g_subscribe_attempts = 0;
+        g_prop_handle = 0;
         spike_cli_dump_mac("CONNECTED to", addr->addr);
         if (pair_state == SLE_PAIR_NONE) {
             osal_printk(SPIKE_TAG_CLI "not paired yet -> pair\r\n");
@@ -298,8 +314,11 @@ static void spike_cli_connect_state_changed_cbk(uint16_t conn_id, const sle_addr
             spike_cli_start_discover();
         }
     } else if (conn_state == SLE_ACB_STATE_DISCONNECTED) {
+        g_cli_connected = 0;
         g_conn_id = 0;
         g_subscribed = 0;
+        g_prop_discovery_started = 0;
+        g_subscribe_attempts = 0;
         spike_cli_print_stats("disconnected");
         osal_printk(SPIKE_TAG_CLI "DISCONNECTED -> rescan\r\n");
         spike_cli_start_seek();
@@ -395,14 +414,39 @@ static void spike_cli_find_structure_cbk(uint8_t client_id, uint16_t conn_id,
     g_svc_end_hdl = service->end_hdl;
 }
 
+/* 写 CCCD 订阅通知。属于「尽力而为」：本包主端是连上就发、不看订阅状态，
+ * 所以这步失败也照样能收到通知——施工单据此判读，别把它当失败标志。
+ * 只在「属性轮发现结束」之后调用（发现进行中写会被协议栈拒，t12 实测 status=0x4），
+ * 未成功时由心跳线程每 5 秒重试，最多 SPIKE_SUBSCRIBE_MAX_TRIES 次。 */
+static void spike_cli_subscribe(uint16_t conn_id)
+{
+    uint8_t cccd[2] = {0x01, 0x00};     /* 0x0001 = 打开通知 */
+    ssapc_write_param_t param = {0};
+
+    if (g_subscribed) {
+        return;
+    }
+    if (g_prop_handle == 0) {
+        osal_printk(SPIKE_TAG_CLI "no target property found, skip subscribe\r\n");
+        return;
+    }
+    g_subscribe_attempts++;
+    param.handle = (uint16_t)(g_prop_handle + 1);       /* CCCD 紧跟属性句柄 */
+    param.type = SSAP_DESCRIPTOR_CLIENT_CONFIGURATION;
+    param.data_len = sizeof(cccd);
+    param.data = cccd;
+    osal_printk(SPIKE_TAG_CLI "subscribe: write CCCD handle=0x%x value=0x0001 attempt=%u\r\n",
+        param.handle, (unsigned)g_subscribe_attempts);
+    (void)ssapc_write_req(0, conn_id, &param);
+}
+
 static void spike_cli_find_property_cbk(uint8_t client_id, uint16_t conn_id,
     ssapc_find_property_result_t *property, errcode_t status)
 {
     uint16_t uuid16 = 0;
-    uint8_t cccd[2] = {0x01, 0x00};      /* 0x0001 = 打开通知 */
-    ssapc_write_param_t param = {0};
 
     unused(client_id);
+    unused(conn_id);
     if (property->uuid.len == SPIKE_UUID_LEN_2) {
         uuid16 = (uint16_t)((uint16_t)property->uuid.uuid[15] << 8 | property->uuid.uuid[14]);
     }
@@ -414,15 +458,7 @@ static void spike_cli_find_property_cbk(uint8_t client_id, uint16_t conn_id,
     }
     g_prop_handle = property->handle;
     osal_printk(SPIKE_TAG_CLI "TARGET property 0x%04x at handle 0x%x\r\n", SPIKE_PROP_UUID, property->handle);
-
-    /* 写 CCCD 订阅通知。属于「尽力而为」：本包主端是连上就发，不看订阅状态，
-     * 所以这步失败也照样能收到通知——施工单据此判读，别把它当失败标志。 */
-    param.handle = (uint16_t)(property->handle + 1);
-    param.type = SSAP_DESCRIPTOR_CLIENT_CONFIGURATION;
-    param.data_len = sizeof(cccd);
-    param.data = cccd;
-    osal_printk(SPIKE_TAG_CLI "subscribe: write CCCD handle=0x%x value=0x0001\r\n", param.handle);
-    (void)ssapc_write_req(0, conn_id, &param);
+    /* 订阅留到属性轮结束（spike_cli_subscribe），不在这里写——见该函数的注释。 */
 }
 
 static void spike_cli_write_cfm_cbk(uint8_t client_id, uint16_t conn_id, ssapc_write_result_t *result,
@@ -446,7 +482,14 @@ static void spike_cli_read_cfm_cbk(uint8_t client_id, uint16_t conn_id, ssapc_ha
         client_id, conn_id, read_data->handle, read_data->data_len, status);
 }
 
-/* find_structure 全部上报完 → 在服务句柄区间里找属性 */
+/* find_structure 全部上报完 → 按本轮类型决定下一步。
+ *
+ * t16 修的根因（t12 实测：90 秒里本回调跑了 1096 次、从端从未订阅上）：
+ * 原实现不看 `structure_result->type`，无论哪一轮完成都再发起一次「找属性」——
+ * 属性轮完成时又发起属性轮，自我重入成一个 ~12 Hz 的死循环，永远走不到订阅那一步。
+ *
+ * 类型取值（实测日志）：服务轮完成 = 1（SSAP_FIND_TYPE_PRIMARY_SERVICE），
+ * 属性轮完成 = 3（SSAP_FIND_TYPE_PROPERTY）。按类型收尾，各走一次。 */
 static void spike_cli_find_structure_cmp_cbk(uint8_t client_id, uint16_t conn_id,
     ssapc_find_structure_result_t *structure_result, errcode_t status)
 {
@@ -455,12 +498,24 @@ static void spike_cli_find_structure_cmp_cbk(uint8_t client_id, uint16_t conn_id
     osal_printk(SPIKE_TAG_CLI "structure discovery DONE type=%d uuid_len=%d status=0x%x\r\n",
         structure_result->type, structure_result->uuid.len, status);
 
-    find_param.type = SSAP_FIND_TYPE_PROPERTY;
-    find_param.start_hdl = (g_svc_start_hdl != 0) ? g_svc_start_hdl : 1;
-    find_param.end_hdl = (g_svc_end_hdl != 0) ? g_svc_end_hdl : 0xFFFF;
-    (void)ssapc_find_structure(0, conn_id, &find_param);
-    osal_printk(SPIKE_TAG_CLI "discovering properties in [0x%x..0x%x] ...\r\n",
-        find_param.start_hdl, find_param.end_hdl);
+    if (structure_result->type != SSAP_FIND_TYPE_PROPERTY) {
+        /* 服务轮结束 → 只发起一次属性发现；再收到非属性轮就收手，绝不重入。 */
+        if (g_prop_discovery_started) {
+            return;
+        }
+        g_prop_discovery_started = 1;
+        find_param.type = SSAP_FIND_TYPE_PROPERTY;
+        find_param.start_hdl = (g_svc_start_hdl != 0) ? g_svc_start_hdl : 1;
+        find_param.end_hdl = (g_svc_end_hdl != 0) ? g_svc_end_hdl : 0xFFFF;
+        (void)ssapc_find_structure(0, conn_id, &find_param);
+        osal_printk(SPIKE_TAG_CLI "discovering properties in [0x%x..0x%x] ...\r\n",
+            find_param.start_hdl, find_param.end_hdl);
+        return;
+    }
+
+    /* 属性轮结束 = 服务发现流程走完，到这里才写 CCCD。
+     * 为什么不在 property 回调里写：发现还在进行中，协议栈会拒（t12 实测 write cfm status=0x4）。 */
+    spike_cli_subscribe(conn_id);
 }
 
 /* 注册放在所有回调定义之后：「发现完成」回调是服务发现的下一步起点，
@@ -481,14 +536,21 @@ static void spike_cli_ssapc_register_cbks(void)
 
 /* ------------------------------------------------------------ 心跳线程 */
 
-/* 每 5 秒一行；连上却一直 rx=0 时额外给一行告警，省得对着空串口猜。 */
+/* 每 5 秒一行；连上却一直 rx=0 时额外给一行告警，省得对着空串口猜。
+ * 顺带兜底重订阅：CCCD 写有可能赶在协议栈还没准备好的时候失败（t12 实测 status=0x4），
+ * 这里每 5 秒重试一次，最多 SPIKE_SUBSCRIBE_MAX_TRIES 次；成功就不再写。 */
 static void spike_cli_alive_thread(void)
 {
     while (1) {
         osal_msleep(SPIKE_ALIVE_INTERVAL_MS);
-        osal_printk(SPIKE_TAG_CLI "alive conn=0x%x sub=%d prop=0x%x rx=%u lost=%u\r\n",
-            g_conn_id, g_subscribed, g_prop_handle, (unsigned)g_rx, (unsigned)g_lost);
-        if (g_conn_id != 0 && g_rx == 0) {
+        osal_printk(SPIKE_TAG_CLI "alive conn=0x%x sub=%d prop=0x%x rx=%u lost=%u link=%u\r\n",
+            g_conn_id, g_subscribed, g_prop_handle, (unsigned)g_rx, (unsigned)g_lost,
+            (unsigned)g_cli_connected);
+        if (g_cli_connected && !g_subscribed && g_prop_handle != 0 &&
+            g_subscribe_attempts > 0 && g_subscribe_attempts < SPIKE_SUBSCRIBE_MAX_TRIES) {
+            spike_cli_subscribe(g_conn_id);
+        }
+        if (g_cli_connected && g_rx == 0) {
             osal_printk(SPIKE_TAG_CLI "WARN: 已连接但 5s 内一帧都没收到 —— 先看主端 [SPIKE-SRV] tx 有没有在发\r\n");
         }
     }
