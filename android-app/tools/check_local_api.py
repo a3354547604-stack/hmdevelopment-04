@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""契约 §12（网关本地 API）保真检查：证明本 App 只调 §12 的 5 个接口、且字段名逐个对齐契约。
+"""契约 §12（网关本地 API）保真检查：证明前端只调 §12 的 5 个接口、且字段名逐个对齐契约。
 
 为什么需要它（PM 口径 F-02）：P0 主路径是网关内置 H5 页面，安卓 App 是 P1「更漂亮的壳」。
-两个前端**同源同字段**才叫同一条链路；一旦 App 自己发明一个路径或把 `timeout_s` 写成 `timeoutS`，
+两个前端**同源同字段**才叫同一条链路；一旦某一侧自己发明一个路径或把 `timeout_s` 写成 `timeoutS`，
 现场就会出现「H5 能用、App 报 1602」这种最难查的偏差。而这类错误**编译期不报**：
 Gson 解析不到字段只会得到默认值（§12.8 的节点会显示成 SN 未知、MAC 空），
 所以必须用脚本对着契约正文核一遍。
 
-检查三件事：
-  1) 接口集合与 HTTP 方法：契约 §12.4 总表 5 条 == GatewayApi.kt 里实际调用的 `http.get/post`；
-  2) 请求字段名：§12.6 / §12.7 / §12.9 的请求表字段，必须在 GatewayApi.kt 里以 `put("同名")` 出现；
-  3) 响应字段名：§12.5 / §12.6 / §12.7 / §12.8 / §12.9 的一级字段，
-     必须在 ApiModels.kt 里有同名属性（Gson 靠字段名匹配，改名即静默丢数据）。
+两种模式：
 
-不需要 Android SDK、不需要联网，只读三个文件。
+  A) 默认（安卓 App，读 Kotlin 源码）——检查三件事：
+     1) 接口集合与 HTTP 方法：契约 §12.4 总表 5 条 == GatewayApi.kt 里实际调用的 `http.get/post`；
+     2) 请求字段名：§12.6 / §12.7 / §12.9 的请求表字段，必须在 GatewayApi.kt 里以 `put("同名")` 出现；
+     3) 响应字段名：§12.5 / §12.6 / §12.7 / §12.8 / §12.9 的一级字段，
+        必须在 ApiModels.kt 里有同名属性（Gson 靠字段名匹配，改名即静默丢数据）。
+
+  B) `--js <file>`（网关 H5 页面，P0 主路径）——不需要 Kotlin、不需要 Android SDK：
+     页面里没有编译器兜底，写错路径/字段名浏览器只会在控制台静默出错，
+     所以从 HTML/内联 JS/本地外链 JS 里静态提取：
+     1) `fetch("/api/...")` / `XMLHttpRequest.open()` / `axios.get("/api/...")` 的路径与动词；
+     2) 请求体（`JSON.stringify({...})`、`body: {...}`、`.append("x")`）的键名；
+     3) 响应字段访问（`json.x`、`data.y`、`r.z`、`data.nodes.forEach(n => n.sn)` 等）。
+     凡调用了 §12 之外的本地接口、或出现 §12.5–§12.9 里没有的字段名，一律报红并退出码 1。
+
+不需要 Android SDK、不需要联网，只读契约与被检文件。
 
 用法：
   python3 android-app/tools/check_local_api.py
   python3 android-app/tools/check_local_api.py --contract docs/技术/接口契约.md
+  python3 android-app/tools/check_local_api.py --js rk2206-gateway/web/index.html
+  python3 android-app/tools/check_local_api.py --self-test     # 自带正/负样例自检
 
-退出码：0 = 一致；1 = 有差异（多调/漏调接口、字段名不一致）
+退出码：0 = 一致；1 = 有差异（多调接口、字段名不一致、或调用 §12 之外的本地接口）
 """
 
 from __future__ import annotations
@@ -82,7 +94,9 @@ def parse_section_tables(contract: str) -> dict[str, dict[str, list[str]]]:
         if not m:
             raise SystemExit(f"!! 契约里找不到 §{sec}，结构可能变了")
         body = m.group(1)
-        cut = re.search(r"^\s*响应", body, re.M)
+        # 切分点不能只认行首的「响应」：§12.8 写成「请求：无参数。响应 `data`：」，
+        # 行首匹配会切空，导致 §12.8 的响应字段一个都核不到（这正是本工具要防的那类静默漏检）。
+        cut = re.search(r"响应", body)
         req_part = body[: cut.start()] if cut else ""
         resp_part = body[cut.start():] if cut else ""
         sections[sec] = {
@@ -135,11 +149,18 @@ def parse_model_properties(src: str) -> set[str]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description="契约 §12 保真检查（安卓 App 源码 / 网关 H5 页面）")
     ap.add_argument("--contract", default=DEFAULT_CONTRACT)
     ap.add_argument("--gateway", default=DEFAULT_GATEWAY)
     ap.add_argument("--models", default=DEFAULT_MODELS)
+    ap.add_argument("--js", metavar="FILE", help="核对网关 H5 页面：.html（含内联/本地外链 JS）或 .js")
+    ap.add_argument("--self-test", action="store_true", help="跑内置正/负样例，验证 --js 会报绿/报红")
     args = ap.parse_args()
+
+    if args.self_test:
+        return run_self_test(args.contract)
+    if args.js:
+        return check_js(args.js, args.contract)
 
     contract = read(args.contract)
     gateway_src = read(args.gateway)
@@ -194,6 +215,542 @@ def main() -> int:
         return 1
     print("一致：接口集合、请求字段名、响应字段名与契约 §12 逐条对齐（未发明接口或字段）")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# 模式 B：网关 H5 页面（--js）
+#
+# 为什么把字段名检查也搬到 H5 上：H5 是 P0 主路径，但它是**纯解释执行**——路径写错只是 404、
+# 字段名写错只是 `undefined`（页面上显示成空白或 NaN），没有任何编译期或运行期报错。
+# 现场第一次暴露就是在评委面前。所以用同一份契约表静态核一遍。
+#
+# 静态分析必然保守：拿不准的地方只给「提示」不改退出码，只有**确定越界**（§12 之外的接口、
+# 契约里没有的字段名）才报红。白名单 JS_BUILTINS 就是为了不让 `data.length`、
+# `el.textContent` 这类 JS/DOM 内置成员变成假红。
+# ---------------------------------------------------------------------------
+
+JS_ROOT_LITERALS = ("json", "data")  # 契约信封：json.data.* 是最常见写法
+JS_ENVELOPE = {"code", "message", "data", "ts"}
+JS_ARRAY_PARENTS = ("nodes", "bound")
+JS_NESTED_FIELDS = {
+    "precheck": {"ap_found", "rssi", "ch"},
+    "nodes": {"sn", "mac", "rssi", "bind", "role", "online", "last_seen"},
+    "bound": {"sn", "mac", "alias"},
+}
+
+# JS 语言 / DOM / 数组的内置成员：出现在响应变量后面不算「发明字段」
+JS_BUILTINS = {
+    "length", "map", "filter", "forEach", "find", "findIndex", "some", "every", "reduce",
+    "push", "pop", "shift", "unshift", "splice", "slice", "concat", "join", "reverse", "sort",
+    "indexOf", "lastIndexOf", "includes", "keys", "values", "entries", "flat", "at",
+    "toString", "valueOf", "toFixed", "toUpperCase", "toLowerCase", "trim", "trimStart",
+    "trimEnd", "split", "replace", "replaceAll", "startsWith", "endsWith", "padStart",
+    "padEnd", "charAt", "substring", "substr", "repeat", "match", "search", "localeCompare",
+    "then", "catch", "finally", "json", "text", "blob", "arrayBuffer", "clone", "ok",
+    "status", "statusText", "headers", "body", "url", "type", "name", "message", "stack",
+    "hasOwnProperty", "constructor", "prototype", "call", "apply", "bind",
+    "textContent", "innerText", "innerHTML", "outerHTML", "className", "classList", "style",
+    "dataset", "value", "checked", "disabled", "selectedIndex", "options", "files",
+    "href", "src", "alt", "title", "id", "tagName", "children", "parentNode", "parentElement",
+    "firstChild", "lastChild", "nextSibling", "childNodes", "appendChild", "removeChild",
+    "insertBefore", "setAttribute", "getAttribute", "removeAttribute", "addEventListener",
+    "removeEventListener", "querySelector", "querySelectorAll", "closest", "matches",
+    "getElementById", "getElementsByClassName", "createElement", "createTextNode",
+    "insertAdjacentHTML", "scrollIntoView", "focus", "blur", "click", "submit", "reset",
+    "preventDefault", "stopPropagation", "dispatchEvent", "remove", "contains", "replaceChildren",
+    "toLocaleString", "toISOString", "getTime", "getFullYear", "getMonth", "getDate",
+    "getHours", "getMinutes", "getSeconds", "now", "setTimeout", "setInterval", "clearTimeout",
+    "clearInterval", "stringify", "parse", "assign", "freeze", "from", "of", "isArray",
+    "getItem", "setItem", "removeItem", "clear", "protocol", "host", "hostname", "port",
+    "pathname", "search", "hash", "origin", "searchParams", "textContent_", "localStorage",
+    "sessionStorage", "location", "history", "reload", "replace_", "state", "error", "cause",
+}
+
+
+def strip_js_comments(src: str) -> str:
+    """删掉 JS 注释（字符串内部的 `//` 不能动，否则会把 URL 切掉）。
+
+    注释必须删：注释里常写着 `// fetch("/api/pair/nodes")` 之类示例，留着会造假红。
+    """
+    out: list[str] = []
+    i, n = 0, len(src)
+    while i < n:
+        ch = src[i]
+        if ch in "\"'`":
+            quote = ch
+            out.append(ch)
+            i += 1
+            while i < n:
+                if src[i] == "\\":
+                    out.append(src[i:i + 2])
+                    i += 2
+                    continue
+                out.append(src[i])
+                if src[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if ch == "/" and i + 1 < n and src[i + 1] == "/":
+            while i < n and src[i] != "\n":
+                i += 1
+            continue
+        if ch == "/" and i + 1 < n and src[i + 1] == "*":
+            end = src.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def balanced(text: str, open_idx: int) -> str:
+    """返回 text[open_idx] 这一对括号/花括号内部的原文（假定注释已删、字符串已按引号跳过）。"""
+    opener = text[open_idx]
+    closer = {"(": ")", "{": "}", "[": "]"}[opener]
+    depth, i, n = 0, open_idx, len(text)
+    while i < n:
+        ch = text[i]
+        if ch in "\"'`":
+            quote = ch
+            i += 1
+            while i < n:
+                if text[i] == "\\":
+                    i += 2
+                    continue
+                if text[i] == quote:
+                    break
+                i += 1
+            i += 1
+            continue
+        if ch in "({[":
+            depth += 1
+        elif ch in ")}]":
+            depth -= 1
+            if depth == 0:
+                return text[open_idx + 1:i]
+        i += 1
+    return text[open_idx + 1:]
+
+
+def line_of(text: str, idx: int) -> int:
+    return text.count("\n", 0, idx) + 1
+
+
+def top_level_keys(body: str) -> list[str]:
+    """取对象字面量第一层的键名（`{ssid, password: p, nested: {a:1}}` → ssid, password, nested）。
+
+    只取第一层：嵌套对象（如 §12.6 的 precheck）在契约里是独立字段，混在一起会把
+    `precheck.ap_found` 误判成请求字段。
+    """
+    keys: list[str] = []
+    depth, i, n = 0, 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch in "{[":
+            depth += 1
+            i += 1
+            continue
+        if ch in "}]":
+            depth -= 1
+            i += 1
+            continue
+        if ch in "\"'`":
+            quote = ch
+            i += 1
+            while i < n and body[i] != quote:
+                i += 2 if body[i] == "\\" else 1
+            i += 1
+            continue
+        if depth == 1 and (ch.isalpha() or ch in "_$"):
+            m = re.match(r"[A-Za-z_$][\w$]*", body[i:])
+            word = m.group(0)
+            j = i + len(word)
+            while j < n and body[j] in " \t\r\n":
+                j += 1
+            if j < n and body[j] == ":" and body[j:j + 2] != "::":
+                if word not in keys:
+                    keys.append(word)
+                i = j + 1
+                continue
+            i = j
+            continue
+        i += 1
+    return keys
+
+
+def read_js_source(path: str) -> tuple[str, list[str], list[str]]:
+    """读被检文件 → (JS 正文, 提示, 问题)。
+
+    .js 直接读；.html 取 <script> 内联块 + 同目录的本地外链（契约 §12.11 约束 1 要求单文件
+    内联，所以外链本身记一条提示，但内容照样核，避免「只有一个 CDN 引用」时漏检）。
+    """
+    src = read(path)
+    notes: list[str] = []
+    problems: list[str] = []
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".js", ".mjs", ".cjs"):
+        return src, [f"输入按 JS 源文件处理（{os.path.basename(path)}）"], problems
+
+    base = os.path.dirname(os.path.abspath(path))
+    # §12.11 #1/#2：单文件、无 CDN/外网依赖（AP 模式下取不到任何外部资源，页面会缺样式/图标）
+    for m in re.finditer(r"<link\b[^>]*href\s*=\s*[\"'](https?:)?//([^\"']+)", src, re.I):
+        problems.append(
+            f"页面引用了外部资源 {m.group(2)}：§12.11 要求单文件内联、全离线（AP 下取不到会缺样式）"
+        )
+    for m in re.finditer(r"@import\s+(?:url\()?[\"']?(https?:)?//([^\"')]+)", src, re.I):
+        problems.append(f"CSS 里 @import 了外部样式 {m.group(2)}：§12.11 #2 要求全离线")
+    for m in re.finditer(r"url\(\s*[\"']?(https?:)?//([^\"')]+)", src, re.I):
+        problems.append(f"样式里引用了外部资源 {m.group(2)}（字体/图标库）：§12.11 #1 要求内联")
+    blocks: list[str] = []
+    for m in re.finditer(r"<script\b([^>]*)>(.*?)</script\s*>", src, re.S | re.I):
+        attrs, body = m.group(1), m.group(2)
+        type_m = re.search(r"type\s*=\s*[\"']([^\"']+)[\"']", attrs, re.I)
+        if type_m and not re.search(r"javascript|module|^$", type_m.group(1), re.I):
+            continue  # 模板/json 块不是 JS
+        src_m = re.search(r"src\s*=\s*[\"']([^\"']+)[\"']", attrs, re.I)
+        if src_m:
+            ref = src_m.group(1)
+            if re.match(r"https?://|//", ref):
+                problems.append(
+                    f"页面引用了外部脚本 {ref}：§12.11 要求单文件内联、全离线，去掉 CDN/外链"
+                )
+                continue
+            local = os.path.normpath(os.path.join(base, ref))
+            if os.path.isfile(local):
+                blocks.append(read(local))
+                notes.append(f"已读入外链脚本 {ref}（§12.11 要求单文件内联，建议内联进页面）")
+            else:
+                notes.append(f"外链脚本 {ref} 不在仓库里，本次没核到它的接口/字段")
+            continue
+        blocks.append(body)
+
+    if not blocks:
+        # 没有 <script> 标签：可能被检的是片段或纯 JS，整份按 JS 处理（宁可多核一遍）
+        notes.append("页面里没有 <script> 块，按整份文本处理")
+        blocks = [src]
+    return "\n".join(blocks), notes, problems
+
+
+def enclosing_call(text: str, idx: int) -> dict | None:
+    """找到下标 idx 处字面量所属的那一层调用（`api('/api/x', {...})` → name=api, args=`'/api/x', {...}`）。
+
+    为什么要往上找一层：真页面几乎都会把 fetch 收进一个 `api()`/`request()` 小函数，
+    路径字面量出现在**包装函数的调用点**，只认 `fetch(` 会一条路径都提取不到（假绿）。
+    """
+    i, depth = idx, 0
+    while i >= 0:
+        ch = text[i]
+        if ch in ")]}":
+            depth += 1
+        elif ch in "([{":
+            if depth == 0 and ch == "(":
+                j = i - 1
+                while j >= 0 and text[j] in " \t\r\n":
+                    j -= 1
+                k = j
+                while k >= 0 and (text[k].isalnum() or text[k] in "_$.[]"):
+                    k -= 1
+                callee = text[k + 1:j + 1]
+                return {
+                    "name": callee.split(".")[-1].strip("[]"),
+                    "start": k + 1,
+                    "args": balanced(text, i),
+                }
+            depth -= 1
+        i -= 1
+    return None
+
+
+def parse_js_calls(text: str) -> list[dict]:
+    """提取调用的本地接口 → [{kind,method,path,start,end,line}]。
+
+    主路径是**按 `/api/...` 字面量反查所属调用**（这样包装函数、fetch、XHR 三种写法都能覆盖）；
+    method 从同一层调用里的 `method: "POST"` / `.open("POST", …)` / `.post(…)` 推。
+    推不出来的记 None —— 宁可说「动词未定」，也不要假设成 GET 造成假红/假绿。
+    """
+    calls: list[dict] = []
+    for pm in re.finditer(r"[\"'`](/api/[^\"'`\s]+)[\"'`]", text):
+        path = pm.group(1).split("?")[0]
+        call = enclosing_call(text, pm.start())
+        method: str | None = None
+        kind = "wrapper"  # 默认：路径字面量写在本地包装函数的调用点（H5 最常见的写法）
+        start, end = pm.start(), pm.end()
+        if call:
+            args = call["args"]
+            name = call["name"]
+            if name == "fetch":
+                kind = "fetch"
+            elif name == "open":  # xhr.open("POST", "/api/…")
+                kind = "xhr"
+            elif name.lower() in ("get", "post", "put", "delete"):
+                kind = "call"
+            found = re.findall(r"method\s*:\s*[\"']([A-Za-z]+)[\"']", args)
+            if found:
+                method = found[0].upper()
+            elif kind == "call":
+                method = name.upper()
+            elif kind == "xhr":
+                m2 = re.match(r"\s*[\"']([A-Za-z]+)[\"']", args)
+                method = m2.group(1).upper() if m2 else None
+            elif kind == "fetch":
+                method = "GET"  # fetch 不给 method 就是 GET，这条是契约 §12.4 的 GET 接口
+            start, end = call["start"], call["start"] + len(args) + 1
+        calls.append({
+            "kind": kind, "method": method, "path": path,
+            "start": start, "end": end, "line": line_of(text, pm.start()),
+        })
+    return calls
+
+
+def parse_js_request_keys(text: str, calls: list[dict]) -> list[tuple[str, int]]:
+    """请求体键名（key, 行号）。只认 fetch/XHR 调用内部、`body: {...}` 与命名像请求体的变量，
+    否则页面上任何 `JSON.stringify({a:1})`（比如写 localStorage）都会变成假红。"""
+    out: list[tuple[str, int]] = []
+    spans = [(c["start"], c["end"]) for c in calls]
+
+    def inside_call(idx: int) -> bool:
+        return any(s <= idx <= e for s, e in spans)
+
+    for m in re.finditer(r"JSON\.stringify\s*\(", text):
+        if not inside_call(m.start()):
+            continue
+        for k in top_level_keys(balanced(text, m.end() - 1)):
+            out.append((k, line_of(text, m.start())))
+    for m in re.finditer(r"body\s*:\s*\{", text):
+        for k in top_level_keys(balanced(text, text.index("{", m.start()))):
+            out.append((k, line_of(text, m.start())))
+    for m in re.finditer(r"\.append\s*\(\s*[\"'](\w+)[\"']", text):
+        out.append((m.group(1), line_of(text, m.start())))
+    for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*\{", text):
+        name = m.group(1)
+        if not re.search(r"body|payload|req|param", name, re.I):
+            continue
+        for k in top_level_keys(balanced(text, text.index("{", m.start()))):
+            out.append((k, line_of(text, m.start())))
+    return out
+
+
+def parse_js_response_roots(text: str) -> tuple[set[str], set[str], list[str]]:
+    """响应根变量：`const json = await res.json()`、`JSON.parse(...)`、`.then(j => ...)`、
+    以及本地小函数 `return json.data` 的结果变量（H5 常见的 `api()` 包装）。
+
+    返回 (根变量集合, 包装函数集合, 解构出来的字段名列表)。
+    """
+    roots: set[str] = set(JS_ROOT_LITERALS)
+    destructured: list[str] = []
+    for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?[\w$.\[\]]*\.json\s*\(", text):
+        roots.add(m.group(1))
+    for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*JSON\.parse\s*\(", text):
+        roots.add(m.group(1))
+    for m in re.finditer(r"\.then\s*\(\s*(\w+)\s*=>", text):
+        roots.add(m.group(1))
+    for m in re.finditer(r"(?:const|let|var)\s*\{([^}]*)\}\s*=\s*(?:await\s+)?[\w$.\[\]]*\.json\s*\(", text):
+        destructured += [w for w in re.findall(r"[A-Za-z_$][\w$]*", m.group(1))]
+    wrappers: set[str] = set()
+    for m in re.finditer(
+        r"(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(?[^()]*\)?\s*=>)", text
+    ):
+        name = m.group(1) or m.group(2)
+        # 只看这个函数**自己的函数体**：早先取「头之后 600 字符」，会把后面那个真包装函数
+        # 的 `return x.data` 算到前一个函数头上，于是每个普通函数都被标成包装函数。
+        brace = text.find("{", m.end())
+        semi = text.find(";", m.end())
+        if brace != -1 and (semi == -1 or brace < semi) and brace - m.end() < 80:
+            body = balanced(text, brace)
+        else:  # 表达式体箭头函数：`p => fetch(p).then(r => r.json())`
+            body = text[m.end(): semi if semi != -1 else m.end() + 200]
+        if re.search(r"return\s+[\w$.\[\]]*\.data\b", body):
+            wrappers.add(name)
+    for m in re.finditer(r"(?:const|let|var)\s+(\w+)\s*=\s*(?:await\s+)?([\w$]+)\s*\(", text):
+        if m.group(2) in wrappers:
+            roots.add(m.group(1))
+    return roots, wrappers, destructured
+
+
+def js_field_accesses(text: str, roots: set[str]) -> tuple[list[tuple[str, str, int]], list[tuple[int, int]]]:
+    """响应字段访问 → ([(容器说明, 字段名, 行号)], 已归属数组元素的字符区间)。
+
+    容器说明用于报错时指路（`json.x` / `nodes[].sn`）。第二项让调用方知道哪些位置已经
+    按「数组元素」归属过了：同一个局部变量名（如 `b`）既可能是响应根、又可能是 `bound`
+    的元素，不排除就会把 `b.mac` 当成响应根字段报假红。
+    """
+    out: list[tuple[str, str, int]] = []
+    attributed: list[tuple[int, int]] = []
+    # 顺序要紧：先做「数组元素」归属（§12.8 的 nodes[]/bound[]），再扫响应根。
+    # §12.6 的 precheck 子对象：`data.precheck.ap_found`
+    for m in re.finditer(r"\bprecheck\s*\.\s*([A-Za-z_$][\w$]*)", text):
+        out.append(("precheck", m.group(1), line_of(text, m.start())))
+    # §12.8 的数组元素：`data.nodes.forEach(n => n.sn)` / `nodes.map(({sn, mac}) => ...)` / `nodes[0].sn`
+    for parent in JS_ARRAY_PARENTS:
+        for m in re.finditer(
+            rf"\.{parent}\s*\.\s*(?:forEach|map|filter|find|some|every|flatMap)\s*\(",
+            text,
+        ):
+            open_idx = text.index("(", m.end() - 1)
+            region = balanced(text, open_idx)
+            head = re.match(r"\s*\(?\s*(\w+)", region)
+            if not head:
+                continue
+            alias = head.group(1)
+            if alias in ("function", "async", "new") or alias in JS_BUILTINS:
+                continue  # `nodes.forEach(function (n) {...})`：别把关键字当元素变量
+            # 只在回调体里查这个别名：页面上另外几处同名局部变量（比如另一个接口的响应 `b`）
+            # 不属于 nodes[]/bound[]，扫全文会把它们误判成 `bound[].bound` 这种假红。
+            for am in re.finditer(rf"\b{re.escape(alias)}\s*\.\s*([A-Za-z_$][\w$]*)", region):
+                idx = open_idx + 1 + am.start()
+                out.append((f"{parent}[]", am.group(1), line_of(text, idx)))
+                attributed.append((idx, idx + len(am.group(0))))
+        for m in re.finditer(rf"\.{parent}\s*\.\s*(?:forEach|map)\s*\(\s*\(\s*\{{([^}}]*)\}}", text):
+            for field in re.findall(r"[A-Za-z_$][\w$]*", m.group(1)):
+                out.append((f"{parent}[]", field, line_of(text, m.start())))
+        for m in re.finditer(rf"\.{parent}\s*\[[^\]]*\]\s*\.\s*([A-Za-z_$][\w$]*)", text):
+            out.append((f"{parent}[]", m.group(1), line_of(text, m.start())))
+    for root in sorted(roots):
+        for m in re.finditer(rf"\b{re.escape(root)}\s*\.\s*([A-Za-z_$][\w$]*)", text):
+            if any(s <= m.start() < e for s, e in attributed):
+                continue  # 这处已经按数组元素归属过了，别当成响应根字段再报一次
+            out.append((root, m.group(1), line_of(text, m.start())))
+    return out, attributed
+
+
+def check_js(path: str, contract_path: str) -> int:
+    if not os.path.isfile(path):
+        print(f"!! 找不到被检文件：{path}")
+        return 1
+    contract = read(contract_path)
+    endpoints = parse_endpoints(contract)
+    sections = parse_section_tables(contract)
+    want = {(m, _norm_path(p)) for m, p in endpoints}
+    resp_fields = {f for sec in RESPONSE_SECTIONS for f in sections[sec]["response"]}
+    req_fields = {f for sec in REQUEST_SECTIONS for f in sections[sec]["request"]}
+    # 嵌套字段的父名（契约表里只有 `precheck.ap_found` 这种行，父名本身不是一行）也要放行
+    nested_parents = {"precheck", "nodes", "bound"}
+    allowed_top = resp_fields | nested_parents | JS_ENVELOPE | JS_BUILTINS
+
+    js_raw, notes, problems = read_js_source(path)
+    js = strip_js_comments(js_raw)
+    calls = parse_js_calls(js)
+    # 按路径归并：同一条路径上出现过的动词集合（推不出动词就记 None）
+    by_path: dict[str, dict] = {}
+    for c in calls:
+        p = _norm_path(c["path"])
+        rec = by_path.setdefault(p, {"methods": set(), "call": c})
+        if c["method"]:
+            rec["methods"].add(c["method"])
+        if rec["call"]["method"] is None and c["method"] is not None:
+            rec["call"] = c  # 报行号时优先用能看出动词的那一处
+    want_by_path = {_norm_path(p): m for m, p in endpoints}
+    unknown_method = sorted(p for p, r in by_path.items() if not r["methods"])
+    spliced = sorted(p for p in by_path if p.endswith("/"))
+
+    for p in sorted(by_path):
+        rec = by_path[p]
+        line = rec["call"]["line"]
+        where = f"{path}:{line}"
+        if p not in want_by_path:
+            shown = "/".join(sorted(rec["methods"])) or "动词未定"
+            if not re.match(r"^/(provision|pair)\b", p):
+                # 首段不是 §12 的 provision/pair → 基本就是 §6 云端 REST（§12.11 #3 禁止 H5 调）
+                problems.append(
+                    f"页面调了 §12 之外的接口（很可能是 §6 云端 REST，§12.11 #3 禁止 H5 调用）："
+                    f"{shown} {p}（{where}）"
+                )
+            else:
+                problems.append(f"调用了 §12 之外的本地接口：{shown} {p}（{where}）")
+            close = [q for q in want_by_path if q.startswith(p.rstrip("/"))]
+            if close:
+                problems.append(f"   ↳ 最接近的契约路径：{'/api' + close[0]}（是不是想调它？）")
+        else:
+            wrong = sorted(m for m in rec["methods"] if m != want_by_path[p])
+            if wrong:
+                problems.append(
+                    f"动词与契约不符：{p} 契约是 {want_by_path[p]}，页面写 {'/'.join(wrong)}（{where}）"
+                )
+    missing = sorted(p for p in want_by_path if p not in by_path)
+
+    put_keys = parse_js_request_keys(js, calls)
+    bad_req = sorted({(k, ln) for k, ln in put_keys if k not in req_fields})
+    for k, ln in bad_req:
+        problems.append(f"页面请求字段 `{k}` 不在 §12 请求表里（{path}:{ln}）")
+        similar = [f for f in req_fields if f.lower() == k.lower() or f.replace("_", "") == k.replace("_", "").lower()]
+        if similar:
+            problems.append(f"   ↳ 是不是想写 `{similar[0]}`？")
+
+    roots, wrappers, destructured = parse_js_response_roots(js)
+    accesses, _elem_spans = js_field_accesses(js, roots)
+    unknown: dict[tuple[str, str], int] = {}
+    for container, field, line in accesses:
+        if container == "precheck":
+            if field not in JS_NESTED_FIELDS["precheck"] | JS_BUILTINS:
+                unknown.setdefault((container, field), line)
+            continue
+        if container.endswith("[]"):
+            parent = container[:-2]
+            if field not in JS_NESTED_FIELDS[parent] | JS_BUILTINS:
+                unknown.setdefault((container, field), line)
+            continue
+        if field not in allowed_top:
+            unknown.setdefault((container, field), line)
+    for field in destructured:
+        if field not in allowed_top and field not in JS_BUILTINS:
+            unknown.setdefault(("解构", field), 0)
+    for (container, field), line in sorted(unknown.items()):
+        where = f"{path}:{line}" if line else path
+        problems.append(
+            f"响应字段 `{container}.{field}` 不在契约 §12.5–§12.9 里（{where}）"
+        )
+        similar = [f for f in resp_fields if f.lower() == field.lower() or f.replace("_", "") == field.replace("_", "").lower()]
+        if similar:
+            problems.append(f"   ↳ 是不是想写 `{similar[0]}`？")
+
+    print(f"H5 核对：{os.path.relpath(path, ROOT) if os.path.isabs(path) else path}")
+    for n in notes:
+        print(f"  · {n}")
+    print(f"契约 §12 接口 {len(endpoints)} 个：{', '.join(m + ' ' + p for m, p in endpoints)}")
+    kinds = sorted({c["kind"] for c in calls})
+    have_shown = [f"{'/'.join(sorted(by_path[p]['methods'])) or '?'} {p}" for p in sorted(by_path)]
+    print(f"页面调用 {len(by_path)} 条路径（{'/'.join(kinds) or '无'}）：{', '.join(have_shown) or '无'}")
+    if missing:
+        print("提示（不算失败，页面可以只实现其中几步）：契约有、页面没调："
+              + ", ".join(f"{want_by_path[p]} {p}" for p in missing))
+    if unknown_method:
+        print(f"提示：以下路径的动词静态推不出（包装函数里没写 method），只核了路径："
+              f"{', '.join(unknown_method)}")
+    if spliced:
+        print(f"提示：以下路径由字符串拼接而成，静态核对只看得到前缀：{', '.join(spliced)}")
+    if wrappers:
+        print(f"提示：识别到本地包装函数 {', '.join(sorted(wrappers))}（其返回值按响应根处理）")
+    print(f"请求字段 {len(set(k for k, _ in put_keys))} 个："
+          f"{', '.join(sorted(set(k for k, _ in put_keys))) or '无'}")
+    print(f"响应字段访问 {len(accesses)} 处，覆盖 {len({f for _, f, _ in accesses})} 个字段名")
+    if problems:
+        print(f"!! 发现 {len(problems)} 处不一致：")
+        for p in problems:
+            print("   -", p)
+        return 1
+    print("一致：页面只调 §12 的本地接口，请求/响应字段名与契约 §12.4–§12.9 对齐")
+    return 0
+
+
+SAMPLES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "h5_samples")
+
+
+def run_self_test(contract_path: str) -> int:
+    """负向验证：故意写错的样例必须报红，正确样例必须报绿。
+
+    这个自检防的是「工具自己坏了却一直报绿」——比页面写错更危险，
+    因为它会让后面所有人都以为已经核过了。
+    """
+    good = os.path.join(SAMPLES_DIR, "good.html")
+    bad = os.path.join(SAMPLES_DIR, "bad.html")
+    print("== 自检 1/2：正确样例（期望退出码 0）")
+    good_rc = check_js(good, contract_path)
+    print("\n== 自检 2/2：故意写错的样例（期望退出码 1）")
+    bad_rc = check_js(bad, contract_path)
+    ok = good_rc == 0 and bad_rc == 1
+    print(f"\n自检结果：正确样例 rc={good_rc}（期望 0）、错误样例 rc={bad_rc}（期望 1）→ {'通过' if ok else '失败'}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

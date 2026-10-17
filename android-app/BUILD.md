@@ -89,12 +89,20 @@ $G -I "$(pwd)/android-app/tools/wsl-build-dir.init.gradle" -p android-app assemb
 ```bash
 python3 android-app/tools/check_error_codes.py   # 错误码表 vs 契约 §9.2（33 条）
 python3 android-app/tools/check_local_api.py     # 接口与字段名 vs 契约 §12.4–§12.9
+python3 android-app/tools/check_local_api.py --js rk2206-gateway/web/index.html   # 换成 H5 页面
+python3 android-app/tools/check_local_api.py --self-test                          # 自带正/负样例
 ```
 
 两个脚本都是**只读契约 + 只读源码**，不需要 Android SDK、不需要联网。它们防的是同一类事故：
 契约改了而 App 没跟上——错误码只报「未知错误码 16xx」，字段名写错则被 Gson 静默丢成默认值
 （节点列表显示成「SN 未知、MAC 空」，编译期一句话都不报）。`check_local_api.py` 还会盯住
 「App 有没有偷偷调 §12 之外的本地接口」。两者都通过时输出 `一致：…`，退出码 0。
+
+`--js` 是给**网关 H5 页面（P0 主路径）**用的：页面没有编译器兜底，写错字段名浏览器只在控制台
+静默出错，所以脚本从 HTML/内联/本地外链 JS 里静态提取 `fetch`/XHR 的 `/api/...` 路径与
+`json.x` / `data.y` / `data.nodes.forEach(n => n.sn)` 这类字段访问，再按契约 §12.4–§12.9 核一遍；
+调了 §12 之外的本地接口、或字段名不在契约里，一律报红并退出码 1。包装函数里没写 `method`
+的调用只能核路径，脚本会单列一行「动词静态推不出」，不猜。
 
 ### 2.3 Android Studio
 
@@ -146,10 +154,15 @@ debug 包的 `applicationId` 带 `.debug` 后缀（`com.hmprogram.eldercare.prov
 * 服务器侧：固定口令 `Passw0rd`，绑定码 `482913`；
 * 网关侧：`mode=ap`、SSID `ElderCare-1A2B`、三个节点（其中一个是老固件 `sn="?"`）；
 * 扫描结果按轮询次数推进，**不用真等 15 s**，现场演示节奏可控；
-* SSID 里带 `5G` 会稳定复现 `1602`（最容易踩的错），白名单上限 8 会复现 `1606`。
+* SSID 里带 `5G` 会稳定复现 `1602`（最容易踩的错）；扫描还没出结果就点「绑定」复现 `1604`；
+* `1606`（白名单满）**在 MOCK 里复现不了**：MOCK 只种了 3 个节点、且按 MAC 去重，
+  `bound.size` 最多 3，永远到不了上限 8。它只能靠真网关（或临时把 `MockTransport.kt`
+  里 `bound.size >= 8` 的上限改小演示一次，演示完**必须改回**）。
 
 MOCK 走的是**同一套信封解析与错误码路径**，不是假的返回值，所以它能证明解析代码是对的，
 但不能证明网关固件是对的——上真机时务必再跑一遍 B2 全流程。
+
+现场照着做的那一页纸（装机、MOCK 三类错误、2.4G、切网）：[`现场装机说明.md`](现场装机说明.md)。
 
 ---
 

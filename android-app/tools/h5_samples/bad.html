@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!--
+  样例 H5（故意写错）：给 android-app/tools/check_local_api.py --js 的负向验证用，必须报红。
+  四处错误对应现场最容易踩的坑：
+    ① 路径：把 §12.6 写成 /api/provision/wifi/connect（多一段）——真实网关回 404；
+    ② 请求字段：timeoutS（应为 timeout_s）、passwd（应为 password）——网关回 1601「缺少必填参数」；
+    ③ 响应字段：remaining_s（应为 remain_s）、precheck.chan（应为 precheck.ch）——页面静默显示 undefined；
+    ④ 数组元素字段：n.signal（应为 n.rssi）——列表里信号永远空白；
+    ⑤ 外网依赖：引了 CDN 图标库，AP 模式下取不到，页面上图标全空；
+    ⑥ 越界调用：顺手调了 §6 的云端接口 /api/devices/bind——窗口期内没有公网，必然超时。
+-->
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://cdn.example.com/iconfont.css">
+  <title>配网（错误样例）</title>
+</head>
+<body>
+  <div id="status"></div>
+  <ul id="nodes"></ul>
+<script>
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const json = await res.json();
+  return json.data;
+}
+
+async function pollStatus() {
+  const st = await api('/api/provision/status');
+  document.getElementById('status').textContent =
+    st.mode + ' 剩余 ' + st.remaining_s + ' 秒';
+}
+
+async function submitWifi() {
+  const r = await api('/api/provision/wifi/connect', {
+    method: 'POST',
+    body: JSON.stringify({ ssid: 'HOME-2.4G', passwd: 'P@ssw0rd8', timeoutS: 30 }),
+  });
+  document.getElementById('status').textContent = '已受理，settle_s=' + r.settle_s
+    + ' ch=' + r.precheck.chan;
+}
+
+async function loadNodes() {
+  const d = await api('/api/pair/nodes');
+  const list = document.getElementById('nodes');
+  list.innerHTML = '';
+  d.nodes.forEach(n => {
+    const li = document.createElement('li');
+    li.textContent = n.sn + ' ' + n.mac + ' ' + n.signal;
+    list.appendChild(li);
+  });
+}
+
+async function bindAccount() {
+  // ⑥ 越界：H5 不得调 §6 云端 REST（§12.11 #3）
+  await api('/api/devices/bind', { method: 'POST', body: JSON.stringify({ sn: 'M0-3F1A2B' }) });
+}
+
+pollStatus().then(submitWifi).then(loadNodes).then(bindAccount);
+</script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!--
+  样例 H5（正确）：给 android-app/tools/check_local_api.py --js 的自检用，必须报绿。
+  它按契约 §12.4–§12.9 把 5 个本地接口与请求/响应字段名尽量用全，同时混入大量 JS/DOM 内置成员
+  （textContent、classList、arr.map、el.style…）——用来证明工具不会把这些当成「发明字段」。
+  这不是网关页面本体：真页面在 rk2206-gateway/，由网关员工按 §12.11 六条约束实现。
+-->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ElderCare 配网</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; background: #faf7f2; color: #333; }
+    .row { margin: 8px 0; }
+    .warn { color: #b45309; }
+    .ok { color: #15803d; }
+  </style>
+</head>
+<body>
+  <h1>网关配网</h1>
+  <div class="row" id="status">读取中…</div>
+  <div class="row"><input id="ssid" placeholder="家庭 Wi-Fi（必须 2.4G）"></div>
+  <div class="row"><input id="pwd" type="password" placeholder="Wi-Fi 口令（8–63 位）"></div>
+  <div class="row"><button id="btn-wifi">提交 Wi-Fi</button></div>
+  <div class="row"><button id="btn-scan">扫描节点</button></div>
+  <ul id="nodes"></ul>
+  <ul id="bound"></ul>
+  <pre id="log"></pre>
+
+<script>
+// §12.11 约束 6：页面必须由 http://192.168.4.1/ 同源打开，所以这里只写相对路径 /api/...
+// 统一收口：非 0 信封在这里抛错，各调用点只关心 data —— 与 App 侧 HttpClient 的收口方式一致。
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const json = await res.json();
+  if (json.code !== 0) {
+    throw new Error('code=' + json.code + ' ' + json.message);
+  }
+  return json.data;
+}
+
+function log(line) {
+  const box = document.getElementById('log');
+  box.textContent += line + '\n';
+  box.scrollIntoView(false);
+}
+
+function show(field, text) {
+  const el = document.getElementById('status');
+  el.innerHTML = '<span class="ok">' + field + ': ' + text + '</span>';
+}
+
+// §12.5 查配网状态：窗口内 2 s 一次（不要低于 1 s，网关是单核小系统）
+async function pollStatus() {
+  const st = await api('/api/provision/status', { method: 'GET' });
+  show('mode', st.mode + '｜remain_s=' + st.remain_s + '｜busy=' + st.busy);
+  log('ssid=' + st.ssid + ' device_sn=' + st.device_sn + ' firmware=' + st.firmware);
+  log('sta_ssid=' + st.sta_ssid + ' ip=' + st.ip + ' hub_online=' + st.hub_online);
+  log('bound_count=' + st.bound_count + ' slots_free=' + st.slots_free);
+}
+
+// 直连写法也要认：包装函数不可用时自己 fetch 读信封（工具对两种写法一视同仁）
+async function statusDirect() {
+  const res = await fetch('/api/provision/status', { method: 'GET' });
+  const env = await res.json();
+  return env.data.mode;
+}
+
+// §12.6 提交家庭 Wi-Fi：口令只出现在这里一次，日志里永不回显
+async function submitWifi() {
+  const ssid = document.getElementById('ssid').value;
+  const pwd = document.getElementById('pwd').value;
+  const r = await api('/api/provision/wifi', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ssid: ssid, password: pwd, hidden: false, timeout_s: 30 }),
+  });
+  log('saved=' + r.saved + ' connecting=' + r.connecting + ' ssid=' + r.ssid);
+  log('settle_s=' + r.settle_s + '：还有 ' + r.settle_s + ' 秒热点就会关闭，请切回家庭 Wi-Fi');
+  const pre = r.precheck;
+  log('precheck ap_found=' + pre.ap_found + ' rssi=' + pre.rssi + ' ch=' + pre.ch);
+  document.getElementById('pwd').value = '';
+}
+
+// §12.7 触发扫描（异步受理）
+async function startScan() {
+  const s = await api('/api/pair/scan', {
+    method: 'POST',
+    body: JSON.stringify({ duration_s: 15, include_bound: true }),
+  });
+  log('scan started=' + s.started + ' id=' + s.id + ' estimate_s=' + s.estimate_s
+      + '（实际 ' + s.duration_s + ' s）');
+}
+
+// §12.8 读扫描结果：扫描中 1 s 轮询
+async function loadNodes() {
+  const d = await api('/api/pair/nodes', { method: 'GET' });
+  log('scan_state=' + d.scan_state + ' scanned_at=' + d.scanned_at
+      + ' truncated=' + d.truncated + ' slots_free=' + d.slots_free);
+  const boundList = document.getElementById('bound');
+  boundList.innerHTML = '';
+  d.bound.forEach(b => {
+    const li = document.createElement('li');
+    li.textContent = b.sn + ' ' + b.mac + ' ' + (b.alias || '未命名');
+    boundList.appendChild(li);
+  });
+  const list = document.getElementById('nodes');
+  list.innerHTML = '';
+  d.nodes.forEach(n => {
+    const li = document.createElement('li');
+    const rssi = n.rssi === undefined ? '信号未知' : n.rssi + ' dBm';
+    li.textContent = n.sn + '｜' + n.mac + '｜' + rssi + '｜role=' + n.role
+      + '｜' + (n.bind ? '已绑定' : '未绑定') + '｜online=' + n.online
+      + '｜last_seen=' + n.last_seen;
+    const btn = document.createElement('button');
+    btn.textContent = '绑定';
+    btn.disabled = n.bind === true;
+    btn.addEventListener('click', () => bindNode(n.sn, n.mac));
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+  if (d.scan_state === 'scanning') {
+    setTimeout(loadNodes, 1000);
+  }
+}
+
+// §12.9 绑定白名单：add 必须「先扫后绑 300 s 内」
+async function bindNode(sn, mac, alias) {
+  const b = await api('/api/pair/bind', {
+    method: 'POST',
+    body: JSON.stringify({ op: 'add', sn: sn, mac: mac, alias: alias || '' }),
+  });
+  log('bind op=' + b.op + ' sn=' + b.sn + ' connected=' + b.connected
+      + ' slots_free=' + b.slots_free + ' 白名单 ' + b.bound.length + ' 项');
+}
+
+async function clearWhitelist() {
+  const c = await api('/api/pair/bind', {
+    method: 'POST',
+    body: JSON.stringify({ op: 'clear', confirm: 'CLEAR' }),
+  });
+  log('clear op=' + c.op + ' 剩余 ' + c.slots_free + ' 槽位');
+}
+
+document.getElementById('btn-wifi').addEventListener('click', () => {
+  submitWifi().catch(e => log('提交失败：' + e.message));
+});
+document.getElementById('btn-scan').addEventListener('click', () => {
+  startScan().then(loadNodes).catch(e => log('扫描失败：' + e.message));
+});
+pollStatus().catch(e => log('读状态失败：' + e.message));
+</script>
+</body>
+</html>
