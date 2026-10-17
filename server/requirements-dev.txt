@@ -1,0 +1,5 @@
+# 开发/验收依赖：pytest 契约测试需要 httpx（starlette TestClient 依赖它）。
+# 镜像同时装这两份，因此 `docker compose run --rm api pytest` 可直接跑。
+-r requirements.txt
+pytest==8.3.4
+httpx==0.28.1

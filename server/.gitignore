@@ -1,0 +1,9 @@
+# Python 产物（容器内跑测试会留下这些；不进仓库）
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# 部署机私密配置：只提交 .env.example
+.env

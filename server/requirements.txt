@@ -1,0 +1,14 @@
+# 运行期依赖（容器内安装，版本固定以便复现；见 server/README.md）
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+SQLAlchemy==2.0.36
+PyMySQL==1.1.1
+PyJWT==2.10.1
+bcrypt==4.2.1
+requests==2.32.3
+python-multipart==0.0.20
+
+# MySQL 8 默认 caching_sha2_password，PyMySQL 走 RSA 密钥交换需要它（不加会报
+# "cryptography package is required for sha256_password or caching_sha2_password auth methods"）
+cryptography==44.0.0

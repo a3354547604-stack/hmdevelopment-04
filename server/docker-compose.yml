@@ -1,0 +1,91 @@
+# 统一约定（AGENTS.md）：项目名 hmprogram、容器/网络/卷前缀 hmprogram-、端口只绑 127.0.0.1、不用 host 网络与 privileged。
+# 默认 profile 只起 db + api，保证 `docker compose up` 零配置成功；nginx 反代在 profile=proxy 里可选。
+name: hmprogram
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: hmprogram-server-db
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00          # 契约 §0.2：时间列一律 UTC，避免服务器本地时区污染
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-hmprogram-dev-root}
+      MYSQL_DATABASE: ${DB_NAME:-eldercare}
+      MYSQL_USER: ${DB_USER:-eldercare}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-hmprogram-dev-pass}
+      TZ: UTC
+    ports:
+      - "127.0.0.1:${DB_PORT_HOST:-3306}:3306"   # 仅本机可连，供宿主机跑 pytest / mysql 客户端
+    volumes:
+      - hmprogram-server-db-data:/var/lib/mysql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro   # 首次初始化即建表（api 启动时也会幂等执行一次）
+      - ./db/init/15-test-db.sh:/docker-entrypoint-initdb.d/15-test-db.sh:ro  # 建 <DB_NAME>_test 并授权（pytest 专用库）
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hmprogram-server-api:latest
+    container_name: hmprogram-server-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SERVER_VERSION: ${SERVER_VERSION:-1.0.0}
+      CLOCK_SOURCE: ${CLOCK_SOURCE:-server}
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:-eldercare}
+      DB_USER: ${DB_USER:-eldercare}
+      DB_PASSWORD: ${DB_PASSWORD:-hmprogram-dev-pass}
+      DB_AUTO_MIGRATE: ${DB_AUTO_MIGRATE:-1}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
+      WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:-dev-webhook-token-change-me}
+      IOTDA_DISPATCH_MODE: ${IOTDA_DISPATCH_MODE:-mock}
+      IOTDA_ENDPOINT: ${IOTDA_ENDPOINT:-}
+      IOTDA_PROJECT_ID: ${IOTDA_PROJECT_ID:-}
+      IOTDA_APP_ID: ${IOTDA_APP_ID:-}
+      IOTDA_APP_SECRET: ${IOTDA_APP_SECRET:-}
+      IOTDA_IAM_USER: ${IOTDA_IAM_USER:-}
+      IOTDA_IAM_PASSWORD: ${IOTDA_IAM_PASSWORD:-}
+      IOTDA_IAM_DOMAIN: ${IOTDA_IAM_DOMAIN:-}
+      PUSH_MODE: ${PUSH_MODE:-mock}
+      PUSH_CLIENT_ID: ${PUSH_CLIENT_ID:-}
+      PUSH_CLIENT_SECRET: ${PUSH_CLIENT_SECRET:-}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-1}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1}
+    ports:
+      - "127.0.0.1:${API_PORT:-3000}:3000"
+    volumes:
+      # 开发期挂载源码：改完无需重建镜像；pytest 也直接跑当前工作区代码
+      - ./:/srv
+    restart: unless-stopped
+
+  # 可选：契约 §0.8 的 Nginx 反代（HTTP 80 → 后端 127.0.0.1:3000）。
+  # 默认 host 端口取 8080，避免与本机其它服务的 80 冲突：docker compose --profile proxy up -d
+  proxy:
+    image: nginx:alpine
+    container_name: hmprogram-server-proxy
+    profiles: ["proxy"]
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+volumes:
+  hmprogram-server-db-data:
