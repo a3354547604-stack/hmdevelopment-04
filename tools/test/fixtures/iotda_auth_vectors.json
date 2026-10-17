@@ -1,0 +1,28 @@
+{
+  "purpose": "IoTDA 一机一密鉴权向量（契约 §4.1）：ClientId={device_id}_0_{S}_{UTC yyyyMMddHH}，Password=HMACSHA256(secret, 同一时间戳字符串) 的小写十六进制",
+  "note": "这些 vector 是测试夹具，secret 是假值，不是任何真实设备的密钥；仓库禁止提交真密钥",
+  "device_id": "6a1b2c3d4e5f",
+  "secret": "demo-secret-only-for-test",
+  "sig_type": 1,
+  "id_type": 0,
+  "vectors": [
+    {
+      "unix_ts": 1760000000,
+      "utc_ymdh": "2025100908",
+      "client_id": "6a1b2c3d4e5f_0_1_2025100908",
+      "password": "d11839835453575248c3daef2ef9a72659d94860538927efae2f9f71f7d4b3b1"
+    },
+    {
+      "unix_ts": 1760003600,
+      "utc_ymdh": "2025100909",
+      "client_id": "6a1b2c3d4e5f_0_1_2025100909",
+      "password": "f5a35b13a5b839d8e21e89e226c476d6b4a192957fef057c873b7e15ec676545"
+    },
+    {
+      "unix_ts": 1700000000,
+      "utc_ymdh": "2023111422",
+      "client_id": "6a1b2c3d4e5f_0_1_2023111422",
+      "password": "c99446ef67bbc3055161bf1623ef0d5fc7c49db4a020048d216bd0ee3d81b741"
+    }
+  ]
+}

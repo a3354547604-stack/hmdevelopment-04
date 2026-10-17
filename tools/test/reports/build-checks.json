@@ -1,0 +1,75 @@
+[
+  {
+    "name": "契约可解析",
+    "status": "passed",
+    "summary": "契约结构解析正常：biz_codes=33, db_tables=11, device_codes=12, endpoints=19, envelope_fields=6, fall=5, gas=8, motion=3",
+    "evidence": [
+      {
+        "cmd": "/usr/bin/python3 /mnt/c/Users/Administrator/Desktop/HMProgram/tools/test/contract/contract_source.py",
+        "rc": 0,
+        "out": "{\n  \"path\": \"docs/技术/接口契约.md\",\n  \"sections\": 116,\n  \"types\": [\n    \"gas\",\n    \"fall\",\n    \"door\",\n    \"presence\",\n    \"status\",\n    \"env\"\n  ],\n  \"envelope_fields\": [\n    \"字段\",\n    \"类型\",\n    \"必填\",\n    \"单位\",\n    \"说明\",\n    \"示例\"\n  ],\n  \"uart_types\": {\n    \"0x01\": \"NODE_DATA\",\n    \"0x02\": \"HUB_STATUS\",\n    \"0x03\": \"HUB_EVENT\",\n    \"0x10\": \"GW_ACK\",\n    \"0x11\": \"GW_CMD\",\n    \"0x12\": \"GW_NACK\",\n    \"0x13\": \"GW_TIME\",\n    \"0x20\": \"SLE_SCAN_REQ\",\n    \"0x21\": \"SLE_SCAN_RSP\",\n    \"0x22\": \"PAIR_BIND\",\n    \"0x23\": \"PAIR_BIND_ACK\",\n    \"0x24\": \"NODE_LIST\"\n  },\n  \"endpoints\": 19,\n  \"biz_codes\": [\n    0,\n    1000,\n    1001,\n    1002,\n    1003,\n    1004,\n    1100,\n    1101,\n    1102,\n    1103,\n    1104,\n    1105,\n    1200,\n    1201,\n    1202,\n    1203,\n    1204,\n    1205,\n    1206,\n    1300,\n    1301,\n    1302,\n    1400,\n    1500,\n    1501,\n    1502,\n    1600,\n    1601,\n    1602,\n    1603,\n    1604,\n    1605,\n    1606\n  ],\n  \"device_codes\": [\n    0,\n    1,\n    2,\n    3,\n    4,\n    5,\n    6,\n    7,\n    8,\n    9,\n    10,\n    11\n  ],\n  \"db_tables\": [\n    \"users\",\n    \"devices\",\n    \"user_devices\",\n    \"nodes\",\n    \"sensor_readings\",\n    \"alerts\",\n    \"alert_dispositions\",\n    \"activity_hourly\",\n    \"activity_daily\",\n    \"device_online\",\n    \"push_tokens\"\n  ],\n  \"settings\": {\n    \"no_motion_min\": 30,\n    \"presence_hold_s\": 60,\n    \"gas_t1_mv\": 1500,\n    \"gas_t2_mv\": 2500,\n    \"gas_l1_hold_s\": 10,\n    \"gas_l2_hold_s\": 6,\n    \"gas_recover_mv\": 200,\n    \"gas_recover_hold_s\": 30,\n    \"away_after_open_s\": 600,\n    \"door_open_alarm_s\": 180,\n    \"report_interval_s\": 60,\n    \"node_offline_timeout_s\": 9,\n    \"gateway_offline_timeout_s\": 180,\n    \"temp_high_c\": 35.0,\n    \"temp_low_c\": 5.0,\n    \"humi_high_pct\": 85.0,\n    \"humi_low_pct\": 20.0,\n    \"env_hold_min\": 30,\n    \"alert_repush_s\": [\n      0,\n      60,\n      300\n    ],\n    \"alert_suppress_s\": 60,\n    \"fall_suppress_s\": 30\n  },\n  \"gas\": {\n    \"采样周期\": 2,\n    \"gas_t1_mv\": 1500,\n    \"gas_t2_mv\": 2500,\n    \"gas_l1_hold_s\": 10,\n    \"gas_l2_hold_s\": 6,\n    \"gas_l1_to_l2_s\": 60,\n    \"gas_recover_mv\": 200,\n    \"gas_recover_hold_s\": 30\n  },\n  \"fall\": {\n    \"enter_delay_s\": 0,\n    \"fall_suppress_s\": 30,\n    \"k_fall_zero\": 3,\n    \"t_hold_s\": 30,\n    \"exit_needs_last_trigger_age\": true\n  },\n  \"motion\": {\n    \"no_motion_min\": 30,\n    \"away_after_open_s\": 600,\n    \"presence_hold_s\": 60\n  },\n  \"offline\": {\n    \"node_offline_s\": 9,\n    \"gateway_offline_s\": 180\n  },\n  \"repush\": {\n    \"alert_repush_s\": [\n      0,\n      60,\n      300\n    ],\n    \"alert_suppress_s\": 60\n  }\n}\n",
+        "err": "",
+        "ms": 144
+      }
+    ],
+    "hint": ""
+  },
+  {
+    "name": "server 构建检查",
+    "status": "passed",
+    "summary": "Python 编译 + schema.sql 结构检查通过",
+    "evidence": [
+      {
+        "cmd": "/usr/bin/python3 -m compileall -q /mnt/c/Users/Administrator/Desktop/HMProgram/server",
+        "rc": 0,
+        "out": "",
+        "err": "",
+        "ms": 557
+      },
+      {
+        "cmd": "grep -c 'create table' server/db/schema.sql",
+        "rc": 0,
+        "out": "11 张表",
+        "err": "",
+        "ms": 0
+      },
+      {
+        "cmd": "docker compose -f /mnt/c/Users/Administrator/Desktop/HMProgram/server/docker-compose.yml config --quiet",
+        "rc": 0,
+        "out": "",
+        "err": "",
+        "ms": 1478
+      }
+    ],
+    "hint": ""
+  },
+  {
+    "name": "网关构建检查",
+    "status": "skipped",
+    "summary": "主机没有 gcc/clang，无法做语法检查",
+    "evidence": [],
+    "hint": ""
+  },
+  {
+    "name": "HAP 构建检查",
+    "status": "skipped",
+    "summary": "主机没有 hvigorw（HarmonyOS SDK 未安装或未进 PATH），无法真编译 HAP",
+    "evidence": [],
+    "hint": "在装了 DevEco/HarmonyOS SDK 的机器上跑 hvigorw assembleHap；本机只做工程结构检查"
+  },
+  {
+    "name": "WS63 固件构建检查",
+    "status": "skipped",
+    "summary": "默认只做静态检查；整包编译需 --full（容器 ws63wsl:latest + SDK）",
+    "evidence": [
+      {
+        "cmd": "find ws63-firmware/src -name '*.c'",
+        "rc": 0,
+        "out": "5 个 .c 文件",
+        "err": "",
+        "ms": 0
+      }
+    ],
+    "hint": "验收构建时用：python3 tools/test/build_checks.py --full"
+  }
+]
