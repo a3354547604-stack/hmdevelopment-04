@@ -303,17 +303,19 @@ def post_config(device_id: int, payload: ConfigIn, user: CurrentUser) -> dict:
         log.warning("设备 %s 有 %d 个键不可下发：%s", device["sn"], len(rejected),
                     {k: v for k, v in sorted(rejected.items())})
     # §6.11：绝不返回「已成功」——accepted 只表示已投递到 IoTDA。
-    # PM 裁定（契约 v1.2）：accepted/rejected 是 data 里的两个**整型**计数，不返回数组明细。
-    return ok(
-        {
-            "command_id": f"cmd-{dispatched_at or now_ms()}-{device_id}",
-            "request_id": request_ids[0] if request_ids else iotda.new_request_id(),
-            "accepted": len(accepted),
-            "rejected": len(rejected),
-            "dispatched_at": dispatched_at or now_ms(),
-            "timeout_s": iotda.COMMAND_TIMEOUT_S,
-        }
-    )
+    # PM 裁定（契约 v1.2 D-05，939/942 行）：accepted/rejected 是 data 里的两个**字符串数组**
+    # （元素=键名）；被拒原因另放可选的 `reasons`（键名 → 原因），没有拒绝项就不带这个键（§0.4）。
+    result: dict[str, Any] = {
+        "command_id": f"cmd-{dispatched_at or now_ms()}-{device_id}",
+        "request_id": request_ids[0] if request_ids else iotda.new_request_id(),
+        "accepted": sorted(accepted),
+        "rejected": sorted(rejected),
+        "dispatched_at": dispatched_at or now_ms(),
+        "timeout_s": iotda.COMMAND_TIMEOUT_S,
+    }
+    if rejected:
+        result["reasons"] = {k: rejected[k] for k in sorted(rejected)}
+    return ok(result)
 
 
 @router.post("/{device_id}/demo")
@@ -350,9 +352,9 @@ def post_demo(device_id: int, payload: DemoIn, user: CurrentUser) -> dict:
         {
             "command_id": dispatched["command_id"],
             "request_id": dispatched["request_id"],
-            # 与 §6.11 同口径（PM 裁定：accepted/rejected 为整型计数）
-            "accepted": 1,
-            "rejected": 0,
+            # 与 §6.11 同口径（PM 裁定 D-05）：accepted/rejected 是字符串数组（元素=键名）
+            "accepted": ["demo_trigger"],
+            "rejected": [],
             "dispatched_at": dispatched["dispatched_at"],
             "timeout_s": dispatched["timeout_s"],
             "event": event,

@@ -162,7 +162,8 @@ def detail(alert_id: int, cfg: dict[str, Any]) -> dict[str, Any]:
                     "username": d["username"],
                     "action": d["action"],
                     "note": d["note"],
-                    "at": dt_to_ms(d["created_at"]),
+                    # 契约 §6.14：处置记录的时间键是 `ts`（不是 `at`），App 详情页按 ts 取处置时间
+                    "ts": dt_to_ms(d["created_at"]),
                 }
             )
             for d in dispositions

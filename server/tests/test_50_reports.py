@@ -263,14 +263,19 @@ def test_recompute_activity_is_idempotent(client, device, seed_readings):
     """§7.9：归并每 5 分钟刷新 —— 重复跑必须收敛到同一结果（用 REPLACE INTO 而非累加）。"""
     from app.services.scheduler import recompute_activity
 
+    # 夹具在「14:00 还没到」时会把读数落回当前小时（避免未来读数被当成未开始的小时），
+    # 所以这里不对具体小时断言：按当天全天求和，凌晨/白天跑都成立，
+    # 断言的是「读数被完整计入 + 重复归并收敛」，与那份「5 条读数」的意图一致。
     seed_readings(count=5, hour=14)
     day = ms_to_cst_date(now_ms())
-    first = db.fetch_scalar("SELECT count FROM activity_hourly WHERE device_id = :d AND hour = 14",
-                            {"d": device["id"]}, 0)
+    first = db.fetch_scalar(
+        "SELECT COALESCE(SUM(`count`), 0) FROM activity_hourly WHERE device_id = :d AND `date` = :day",
+        {"d": device["id"], "day": day}, 0)
     recompute_activity(day)
     recompute_activity(day)
-    second = db.fetch_scalar("SELECT count FROM activity_hourly WHERE device_id = :d AND hour = 14",
-                             {"d": device["id"]}, 0)
+    second = db.fetch_scalar(
+        "SELECT COALESCE(SUM(`count`), 0) FROM activity_hourly WHERE device_id = :d AND `date` = :day",
+        {"d": device["id"], "day": day}, 0)
     assert int(first) == int(second) == 5
     daily = db.fetch_scalar("SELECT count FROM activity_daily WHERE device_id = :d", {"d": device["id"]}, 0)
     assert int(daily) == 5

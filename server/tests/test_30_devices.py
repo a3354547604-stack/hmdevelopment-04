@@ -160,7 +160,9 @@ def test_settings_defaults_match_contract(client, device):
     assert data["items"]["no_motion_min"] == 30
     assert data["items"]["gas_t1_mv"] == 1500
     assert data["items"]["alert_repush_s"] == [0, 60, 300]
-    assert len(data["items"]) == len(DEFAULTS)
+    assert len(data["items"]) == len(DEFAULTS) == 21
+    # 契约 §6.9 注（PM D-01）：gas_l1_to_l2_s 是 §8.2 的算法参数，不进 items
+    assert "gas_l1_to_l2_s" not in data["items"]
 
 
 def test_put_settings_persists(client, device):
@@ -188,6 +190,26 @@ def test_put_settings_unknown_key_1003(client, device):
     assert resp.status_code == 400 and resp.json()["code"] == 1003
 
 
+def test_put_settings_algorithm_param_1003_and_not_persisted(client, device):
+    """§6.9 注（PM D-01）：gas_l1_to_l2_s 只属 §8.2，既不在 items 里，也不接受 PUT 下发。"""
+    before = client.get(f"/api/devices/{device['id']}/settings", headers=_auth(device["token"]))
+    assert before.status_code == 200 and "gas_l1_to_l2_s" not in before.json()["data"]["items"]
+
+    resp = client.put(f"/api/devices/{device['id']}/settings", headers=_auth(device["token"]),
+                      json={"items": {"gas_l1_to_l2_s": 30}})
+    assert resp.status_code == 400 and resp.json()["code"] == 1003, resp.text
+
+    after = client.get(f"/api/devices/{device['id']}/settings", headers=_auth(device["token"]))
+    items = after.json()["data"]["items"]
+    assert "gas_l1_to_l2_s" not in items                    # 没落库
+    assert items["gas_recover_mv"] == 200                   # 相邻键未受影响
+
+    # §6.11 下发面同样不认这个键（与 §6.10 一致）
+    conf = client.post(f"/api/devices/{device['id']}/config", headers=_auth(device["token"]),
+                       json={"keys": ["gas_l1_to_l2_s"]})
+    assert conf.status_code == 400 and conf.json()["code"] == 1003, conf.text
+
+
 def test_put_settings_requires_owner_1104(client, device):
     family = create_user()
     token = login(client, family["username"])
@@ -205,8 +227,11 @@ def test_config_dispatch_shape_and_rejections(client, device):
                        json={"keys": ["report_interval_s", "gateway_offline_timeout_s"]})
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert data["accepted"] == 1          # PM 裁定（契约 v1.2）：accepted/rejected 是整型计数
-    assert data["rejected"] == 1          # gateway_offline_timeout_s 是服务器侧参数，不下发
+    assert data["accepted"] == ["report_interval_s"]
+    assert data["rejected"] == ["gateway_offline_timeout_s"]   # gateway_offline_timeout_s 是服务器侧参数，不下发
+    # 被拒原因放可选的 reasons（键名 → 原因），只覆盖被拒项
+    assert set(data["reasons"]) == {"gateway_offline_timeout_s"}
+    assert all(isinstance(v, str) and v for v in data["reasons"].values())
     assert len(data["request_id"]) <= 64
     assert data["timeout_s"] == 10
     assert isinstance(data["dispatched_at"], int)
@@ -221,12 +246,14 @@ def test_config_dispatch_shape_and_rejections(client, device):
 def test_config_without_keys_dispatches_all_dispatchable(client, device):
     resp = client.post(f"/api/devices/{device['id']}/config", headers=_auth(device["token"]), json={})
     data = resp.json()["data"]
-    assert data["accepted"] >= 1 and data["rejected"] >= 1
     from app.settings_keys import DEFAULTS, dispatch_targets
 
-    # 逐键对账：可下发/不可下发的划分由 settings_keys 单点决定，接口只做汇总计数
-    _, rejected = dispatch_targets(dict(DEFAULTS))
-    assert data["accepted"] == len(DEFAULTS) - len(rejected) and data["rejected"] == len(rejected)
+    # 逐键对账：可下发/不可下发的划分由 settings_keys 单点决定，接口只做汇总（数组元素=键名）
+    accepted, rejected = dispatch_targets(dict(DEFAULTS))
+    assert data["accepted"] == sorted(accepted)
+    assert data["rejected"] == sorted(rejected)
+    assert set(data["reasons"]) == set(rejected)                # 只有被拒项才有原因，且一条不少
+    assert len(data["accepted"]) + len(data["rejected"]) == len(DEFAULTS)
 
 
 # --------------------------------------------------------------------------- §6.12 演示
@@ -236,7 +263,8 @@ def test_demo_fall_creates_alert_and_pushes(client, device):
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert data["event"] == "fall"
-    assert data["accepted"] == 1
+    assert data["accepted"] == ["demo_trigger"]      # §6.12 与 §6.11 同口径：字符串数组
+    assert data["rejected"] == []
     assert data["alert"]["type"] == "fall" and data["alert"]["level"] == 2
     assert data["alert"]["node_sn"] == "M2"
     assert data["alert"]["push_count"] == 1         # 演示要立刻推一次（不等调度器）

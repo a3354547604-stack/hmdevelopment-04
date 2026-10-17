@@ -126,6 +126,11 @@ def test_alert_list_filters_status_and_type(client, device):
     bad = client.get("/api/alerts", headers=_auth(device["token"]),
                      params={"device_id": device["id"], "limit": 500})
     assert bad.status_code == 400 and bad.json()["code"] == 1002
+    # §6.13：status 未知取值契约明文回 1001（枚举非法，不是 1002 的取值越界）
+    bogus = client.get("/api/alerts", headers=_auth(device["token"]),
+                       params={"device_id": device["id"], "status": "bogus"})
+    assert bogus.status_code == 400 and bogus.json()["code"] == 1001, bogus.text
+    assert bogus.json()["data"]["allowed"] == ["pending", "confirmed", "resolved", "all"]
 
 
 def test_alert_list_requires_device_membership(client, device):
@@ -190,6 +195,9 @@ def test_disposition_closes_alert(client, device):
     assert len(detail["dispositions"]) == 1
     assert detail["dispositions"][0]["action"] == "checked"
     assert detail["dispositions"][0]["note"] == "已上门确认，老人安好"
+    # §6.14：处置记录的时间键是 `ts`（不是 `at`），App 详情页按 ts 显示处置时间
+    assert set(detail["dispositions"][0]) == {"id", "user_id", "username", "action", "note", "ts"}
+    assert isinstance(detail["dispositions"][0]["ts"], int) and detail["dispositions"][0]["ts"] > 0
 
 
 def test_disposition_twice_is_1301(client, device):

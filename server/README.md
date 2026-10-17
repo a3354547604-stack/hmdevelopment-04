@@ -27,7 +27,8 @@ server/
 │   ├── payload.py         响应清洗：最外层 None 省略（§0.4）
 │   ├── security.py        bcrypt、JWT、登录限流（§9.1 429）
 │   ├── deps.py            鉴权依赖、设备归属校验（1104/1200）
-│   ├── settings_keys.py   22 个可配置阈值（§6.9/§8）+ 校验与「能否下发」判定
+│   ├── settings_keys.py   21 个可配置阈值（§6.9 字段表）+ 校验与「能否下发」判定
+│   │                      （§8.2 的 gas_l1_to_l2_s 是算法参数，刻意不在 items 里，见 D-01）
 │   ├── summary.py         告警文案（§6.13 逐字表）、趋势/环比文案（§6.17/§6.18）
 │   ├── state.py           进程内运行态（命令流水、webhook 最近时刻、调度计数）
 │   ├── middleware.py      Idempotency-Key 回放（§6.1，5 分钟）
@@ -100,7 +101,7 @@ curl -s http://127.0.0.1:3000/api/health
 | 6 | GET | `/api/devices/{id}/readings` | §6.8 | 按 ts 倒序，limit≤200 |
 | 7 | GET | `/api/devices/{id}/settings` | §6.9 | `{source,updated_at,items}` |
 | 8 | PUT | `/api/devices/{id}/settings` | §6.10 | 局部更新；仅 owner；1002/1003 |
-| 9 | POST | `/api/devices/{id}/config` | §6.11 | 下发命令；`accepted`/`rejected` 为**整型计数**（PM 裁定③） |
+| 9 | POST | `/api/devices/{id}/config` | §6.11 | 下发命令；`accepted`/`rejected` 为**字符串数组**（元素=键名，PM 裁定 D-05），可选 `reasons` 给被拒原因 |
 | 10 | POST | `/api/devices/{id}/demo` | §6.12 | 演示事件，走真实链路（虚拟网关 → webhook） |
 | 11 | GET | `/api/alerts` | §6.13 | `device_id` 必填；`status=pending|confirmed|resolved|all` |
 | 12 | GET | `/api/alerts/{id}` | §6.14 | data **平铺**（PM 裁定①）；打开即 pending→confirmed |
@@ -381,7 +382,6 @@ $ curl -s http://127.0.0.1:3000/api/devices/1/settings -H 'Authorization: Bearer
       "gas_t2_mv": 2500,
       "gas_l1_hold_s": 10,
       "gas_l2_hold_s": 6,
-      "gas_l1_to_l2_s": 60,
       "gas_recover_mv": 200,
       "gas_recover_hold_s": 30,
       "fall_suppress_s": 30,
@@ -419,7 +419,6 @@ $ curl -s -X PUT http://127.0.0.1:3000/api/devices/1/settings -H 'Content-Type: 
       "gas_t2_mv": 2500,
       "gas_l1_hold_s": 10,
       "gas_l2_hold_s": 6,
-      "gas_l1_to_l2_s": 60,
       "gas_recover_mv": 200,
       "gas_recover_hold_s": 30,
       "fall_suppress_s": 30,
@@ -449,8 +448,9 @@ $ curl -s -X POST http://127.0.0.1:3000/api/devices/1/config -H 'Content-Type: a
   "data": {
     "command_id": "cmd-1792246175067-1",
     "request_id": "9435d7",
-    "accepted": 1,
-    "rejected": 1,
+    "accepted": ["report_interval_s"],
+    "rejected": ["temp_high_c"],
+    "reasons": {"temp_high_c": "环境阈值 P1，P0 不远程下发"},
     "dispatched_at": 1792246175067,
     "timeout_s": 10
   },
@@ -473,8 +473,8 @@ $ curl -s -X POST http://127.0.0.1:3000/api/devices/1/demo -H 'Content-Type: app
   "data": {
     "command_id": "cmd-1792246175127-0",
     "request_id": "0ebfd2",
-    "accepted": 1,
-    "rejected": 0,
+    "accepted": ["demo_trigger"],
+    "rejected": [],
     "dispatched_at": 1792246175127,
     "timeout_s": 10,
     "event": "fall",
@@ -876,6 +876,9 @@ cd server && python -m pytest
 | 8 | 错误响应体里的 `data` | 无细节时为 `null`（信封结构稳定，App 一套解析路径）；业务可选字段（如 `recovered_at`）则**省略键**（§0.4） |
 | 9 | `/api/health.db` 取值 | 按 §6.20 字面 `ok`（§9.1 只说不可用时 `down`） |
 | 10 | webhook 收到但匹配不到设备 | 返回 200 + WARN（§5 规定无法识别一律 200），靠 `webhook_last_at` 与日志排查 |
+| 11 | §6.9 `items` 为 **21 项**，`gas_l1_to_l2_s` 不在其中 | PM D-01 裁定：该键是 §8.2 算法参数（P0 固定 60 s），不进 `items`、PUT 即 `1003` 未知键；要开放运行时配置须走契约变更。列为 `settings_keys.ALGORITHM_PARAMS` 备查 |
+| 12 | §6.11 `accepted`/`rejected` 为**字符串数组**（元素=键名） | PM D-05 裁定（契约 939 行示例 + 942 行注）；被拒原因另放可选 `reasons`（键名→原因），无拒绝项则省略该键。App 侧 `Types.ets` 已按 `string[]` 实现，服务器对齐 |
+| 13 | §6.13 `status` 未知取值 → `1001`；§6.14 `dispositions[].ts` | 均按契约字面收紧（原先分别是 1002 与 `at`，见 t18 复核 F-02/F-03）；App 详情页按 `ts` 取处置时间 |
 
 ## 10. 安全与交付要求
 

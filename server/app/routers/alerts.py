@@ -39,7 +39,8 @@ def list_alerts(
 ) -> dict:
     device_context(user, device_id)
     if status not in STATUSES:
-        raise ApiError(1002, field="status", allowed=list(STATUSES))
+        # 契约 §6.13：「未知取值 → 1001」（枚举非法算参数错，不是 1002 的取值越界）
+        raise ApiError(1001, field="status", allowed=list(STATUSES))
     if from_ms is not None and to_ms is not None and from_ms > to_ms:
         raise ApiError(1004, note="from 必须不晚于 to")
     return ok(

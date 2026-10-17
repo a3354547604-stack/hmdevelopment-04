@@ -1,7 +1,8 @@
-"""设置项清单（契约 §6.9 字段表 + §8.2 的 gas_l1_to_l2_s）。
+"""设置项清单（契约 §6.9 字段表，21 项）。
 
-契约 §6.9 的字段表 21 项，加 §8.2 状态机需要的 `gas_l1_to_l2_s`（契约 §6.9 样例里没有，
-但 §8.2 明确要求 L1→L2 有持续时间门槛），共 22 项，由验收核对。
+契约 §6.9 的键集合口径（v1.2 / PM D-01）：**`gas_l1_to_l2_s` 不在 `items` 里**——它是 §8.2 的
+算法参数（一级滞留升二级，P0 固定 60 s），既不进 §6.9 响应，也不接受 §6.10 PUT 下发
+（下发即 `1003` 未知键）；要开放运行时配置必须走契约变更。见下方 `ALGORITHM_PARAMS`。
 
 每项标注：
 - `node`：谁消费（M0 = 汇聚/网关侧，M1/M2/M4 = 节点）；
@@ -28,6 +29,13 @@ class KeySpec:
     reason: str = ""
 
 
+# §8.2 算法参数：**刻意不放进 SETTINGS_SPEC / DEFAULTS**。留在这里是为了给「它不是漏了、
+# 而是被契约明确排除」留个出处——免得后来人看到 §8.2 提到它就顺手加回 items（那正是 D-01 要修的事）。
+ALGORITHM_PARAMS: dict[str, Any] = {
+    "gas_l1_to_l2_s": 60,  # 一级滞留多久升二级；P0 固定，改值走契约变更
+}
+
+
 SETTINGS_SPEC: dict[str, KeySpec] = {
     # ---- 活动/存在（M4 门厅：干簧管 + PIR）----
     "no_motion_min": KeySpec("no_motion_min", "int", 30, 5, 120, "M4"),
@@ -38,7 +46,6 @@ SETTINGS_SPEC: dict[str, KeySpec] = {
     "gas_t2_mv": KeySpec("gas_t2_mv", "int", 2500, 0, 5000, "M1"),
     "gas_l1_hold_s": KeySpec("gas_l1_hold_s", "int", 10, 2, 600, "M1"),
     "gas_l2_hold_s": KeySpec("gas_l2_hold_s", "int", 6, 2, 600, "M1"),
-    "gas_l1_to_l2_s": KeySpec("gas_l1_to_l2_s", "int", 60, 10, 600, "M1"),
     "gas_recover_mv": KeySpec("gas_recover_mv", "int", 200, 0, 1000, "M1"),
     "gas_recover_hold_s": KeySpec("gas_recover_hold_s", "int", 30, 5, 3600, "M1"),
     # ---- 跌倒（M2 卧室：LD6002C，迟滞状态机 §8.4）----

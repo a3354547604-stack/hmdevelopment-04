@@ -244,8 +244,10 @@ def test_mock_seed_user_can_login_and_see_report(client):
     assert devices["total"] == 1
     device_id = devices["items"][0]["id"]
     assert devices["items"][0]["unread_alerts"] >= 1        # 种子里有一条待处置告警
+    # 种子只灌 06:00–22:00 的活动读数（§7.9 活动时段），凌晨跑测试时「今天」合法为空，
+    # 因此用 week 窗口断言「种子账号能看到报表」；day 窗口的形状另由 test_50 覆盖。
     activity = client.get("/api/reports/activity", headers=_auth(token),
-                          params={"device_id": device_id, "period": "day"}).json()["data"]
+                          params={"device_id": device_id, "period": "week"}).json()["data"]
     assert activity["total"] > 0
 
 
