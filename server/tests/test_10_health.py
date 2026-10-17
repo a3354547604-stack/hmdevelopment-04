@@ -20,7 +20,7 @@ def test_health_without_token(client):
 
 
 def test_time_for_gateway_without_token(client):
-    """契约 v1.2 预留：网关联网后先取 UTC 再连 IoTDA，所以这个口必须免鉴权。"""
+    """契约 v1.2 §6.21：网关联网后先取 UTC 再连 IoTDA，所以这个口必须免鉴权。"""
     import re
     import time
 
@@ -37,6 +37,19 @@ def test_time_for_gateway_without_token(client):
     assert before <= data["utc_epoch"] <= before + 5
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", data["iso8601"])
     assert data["iso8601"].endswith("Z")
+
+
+def test_time_is_not_cacheable(client):
+    """§6.21 定稿：响应头必须 `Cache-Control: no-store`。
+
+    缓存这个口 = 网关拿到的是**过期时间**，HMACSHA256 时间戳与 event_time 一起偏；共享缓存对 200 响应
+    默认可做启发式缓存，所以不能用「GET 一般不缓存」当理由，必须显式声明。
+    """
+    resp = client.get("/api/time")
+    assert resp.status_code == 200
+    assert resp.headers.get("cache-control", "").lower() == "no-store"
+    # 头不能代替主体：字段与 §6.21 表一致（避免只加头把 code/data 改坏）
+    assert resp.json()["code"] == 0 and resp.json()["data"]["tz"] == "UTC"
 
 
 def test_root_hint(client):

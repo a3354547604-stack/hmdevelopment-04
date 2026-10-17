@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from .. import db
-from ..summary import prev_compare_text, trend_compare
+from ..summary import TREND_TITLE, prev_compare_text, trend_compare
 from ..timeutil import cst_day_bounds_ms, iso, ms_to_cst_date, now_ms
 
 PERIOD_DAYS = {"day": 1, "week": 7, "month": 30}
@@ -90,16 +90,18 @@ def trend(device_id: int, days: int = 7) -> dict[str, Any]:
     today_count = rows[-1][1] if rows else 0
     yesterday_count = rows[-2][1] if len(rows) > 1 else 0
     delta_pct, text = trend_compare(today_count, yesterday_count)
+    # 契约 v1.2 §6.17：title 必现；无昨日基线时 yesterday/delta_pct/text 三键**省略**（§0.4 不写 null）
+    compare: dict[str, Any] = {"title": TREND_TITLE, "today": today_count}
+    if delta_pct is not None:
+        compare["yesterday"] = yesterday_count
+        compare["delta_pct"] = delta_pct
+    if text is not None:
+        compare["text"] = text
     return {
         "device_id": device_id,
         "days": days,
         "series": [{"date": iso(day), "count": count} for day, count in rows],
-        "compare": {
-            "today": today_count,
-            "yesterday": yesterday_count,
-            "delta_pct": delta_pct,
-            "text": text,
-        },
+        "compare": compare,
     }
 
 

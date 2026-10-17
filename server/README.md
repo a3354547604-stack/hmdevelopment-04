@@ -141,10 +141,16 @@ $ curl -s http://127.0.0.1:3000/api/health
 
 `HTTP 200`
 
-#### 2 网关校时（免鉴权，契约 v1.2）
+#### 2 网关校时（免鉴权，契约 §6.21）
 
 ```bash
-$ curl -s http://127.0.0.1:3000/api/time
+$ curl -s -i http://127.0.0.1:3000/api/time
+```
+
+```
+HTTP/1.1 200 OK
+cache-control: no-store            # §6.21 定稿：网关每次上线都重新取时，中间不许有缓存
+content-type: application/json
 ```
 
 ```json
@@ -862,8 +868,8 @@ cd server && python -m pytest
 |---|---|---|
 | 1 | 技术栈 FastAPI ≠ 契约 §1 示意图的 Node.js | 任务卡 t5 指定 FastAPI；实施计划 §「后端」写「Node.js 或 Python（FastAPI）」，取 FastAPI |
 | 2 | `devices.settings_json` 是**增补列** | §7 未列该列；阈值（§6.9）需要持久化，用 JSON 列最贴合「键值可扩展」的需求 |
-| 3 | `/api/time` 字段名未定稿 | 契约 v1.2 将新增；当前返回 `utc_epoch/utc_epoch_ms/iso8601/tz/server_ts` |
-| 4 | `/api/reports/trend` 文案 | §6.17 规则行写「较昨日下降 N%」，同节 JSON 样例却带「今日活动频次」前缀；以**规则行**为准（与 §6.18「较上周下降 5%」一致） |
+| 3 | `/api/time` 带**附加**字段 | 契约 §6.21 只声明必现两键（`utc_epoch`/`iso8601`）；实现另返回 `utc_epoch_ms`/`tz`/`server_ts`（同一时刻的毫秒、时区提示、响应时刻），不改必现键的语义。`Cache-Control: no-store` 按 §6.21 定稿写死 |
+| 4 | `/api/reports/trend` 文案（v1.2 已定稿，**不再是差异**） | §6.17 v1.2 拆成 `compare.title`（固定「今日活动频次」）+ `compare.text`（规则行「较昨日下降/上升 N%」「与昨日基本持平」）；无昨日基线时省略 `yesterday`/`delta_pct`/`text`，只留 `title`+`today`。边界值算升降（恰好 ±10% 说升降），`delta_pct` 为**整数**（四舍五入，非银行家舍入） |
 | 5 | `/api/reports/summary` 无数据时 `compare_prev` | 契约只给示例「较上周下降 5%」；无上期数据时返回「上周无活动记录」 |
 | 6 | PUT settings 用 `{items:Ellipsis}` 包裹 | §6.10 请求体示例为 `{"items":{...}}`；也兼容裸 dict 与 `{settings:{...}}` |
 | 7 | 下发阈值的命令名 | §4.5 只有 `set_report_interval`，没有「下发阈值」命令；现用 `set_threshold{cmd,key,value}`（对应 §3.4 `0x11` set 帧）逐键下发 |

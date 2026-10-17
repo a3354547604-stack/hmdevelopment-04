@@ -114,25 +114,42 @@ def test_trend_series_length_and_today(client, device, seed_readings):
     assert [s["date"] for s in data["series"]] == sorted(s["date"] for s in data["series"])
     assert data["series"][-1]["date"] == ms_to_cst_date(now_ms()).isoformat()
     compare = data["compare"]
-    assert set(compare) == {"today", "yesterday", "delta_pct", "text"}
-    assert compare["today"] == 2 and compare["yesterday"] == 0
-    assert compare["text"] == "昨日无活动记录"
+    # 契约 v1.2 §6.17：无昨日基线（昨日计数 0）→ 省略 yesterday/delta_pct/text 三键，只留 title+today
+    assert set(compare) == {"title", "today"}
+    assert compare["title"] == "今日活动频次"
+    assert compare["today"] == 2
+    assert "text" not in compare and "delta_pct" not in compare and "yesterday" not in compare
 
 
 def test_trend_compare_text_is_integer_percent(client, device):
-    """§6.17 文案：delta_pct 取整，>+10 / <-10 才说升降，其余「基本持平」。"""
+    """§6.17 文案：delta_pct 取整，≤−10 下降 / ≥+10 上升（**边界值算升降**），其余「基本持平」。"""
     today = ms_to_cst_date(now_ms())
     yesterday = today.fromordinal(today.toordinal() - 1)
     _seed_presence(device["id"], today, 10, 11)          # 今天 11
-    _seed_presence(device["id"], yesterday, 9, 10)       # 昨天 10 → +10% → 持平
+    _seed_presence(device["id"], yesterday, 9, 10)       # 昨天 10 → +10% → 契约 v1.2 算「上升」
     from app.services.scheduler import recompute_activity
 
     recompute_activity(today)
     recompute_activity(yesterday)
     compare = client.get("/api/reports/trend", headers=_auth(device["token"]),
                          params={"device_id": device["id"], "days": 2}).json()["data"]["compare"]
+    assert set(compare) == {"title", "today", "yesterday", "delta_pct", "text"}
     assert (compare["today"], compare["yesterday"]) == (11, 10)
-    assert compare["delta_pct"] == 10
+    assert compare["delta_pct"] == 10            # 整数百分比，不是 10.0
+    assert isinstance(compare["delta_pct"], int)
+    assert compare["text"] == "较昨日上升 10%"    # §6.17：delta_pct ≥ +10 → 上升
+
+    # 持平带 text：今天 = 昨天 → delta_pct 0 →「与昨日基本持平」（仍保留 text 键）
+    db.execute("TRUNCATE TABLE sensor_readings")
+    db.execute("TRUNCATE TABLE activity_hourly")
+    db.execute("TRUNCATE TABLE activity_daily")
+    _seed_presence(device["id"], today, 5, 6)            # 今天 10
+    _seed_presence(device["id"], yesterday, 5, 6)        # 昨天 10 → 0%
+    recompute_activity(today)
+    recompute_activity(yesterday)
+    compare = client.get("/api/reports/trend", headers=_auth(device["token"]),
+                         params={"device_id": device["id"], "days": 2}).json()["data"]["compare"]
+    assert compare["delta_pct"] == 0
     assert compare["text"] == "与昨日基本持平"
 
     db.execute("TRUNCATE TABLE sensor_readings")
@@ -145,7 +162,23 @@ def test_trend_compare_text_is_integer_percent(client, device):
     compare = client.get("/api/reports/trend", headers=_auth(device["token"]),
                          params={"device_id": device["id"], "days": 2}).json()["data"]["compare"]
     assert compare["delta_pct"] == -90
-    assert compare["text"] == "较昨日下降 90%"      # §6.17 规则行原文（见 README「契约口径」）
+    assert compare["text"] == "较昨日下降 90%"      # §6.17 规则行原文
+
+
+def test_trend_compare_rounds_half_up_and_omits_without_baseline():
+    """纯函数边界（不碰库）：四舍五入不是银行家舍入；无基线一律返回 (None, None)。"""
+    from app.summary import trend_compare
+
+    # 11 → 10 是 +10%（整数）；21 → 20 是 +5%；
+    # 100 → 8.7 这种才是小数：8/87*100 = 9.195… → 9（持平）；见下条验证 .5 向上取整
+    assert trend_compare(11, 10) == (10, "较昨日上升 10%")
+    assert trend_compare(9, 10) == (-10, "较昨日下降 10%")
+    assert trend_compare(10, 10) == (0, "与昨日基本持平")
+    # 10.5% 必须进位成 11（内建 round(10.5) 会给 10，那是银行家舍入）
+    assert trend_compare(221, 200) == (11, "较昨日上升 11%")
+    # 无昨日基线：yesterday 为 0 或两边都为 0 时，text/delta_pct 都要省略
+    assert trend_compare(0, 0) == (None, None)
+    assert trend_compare(7, 0) == (None, None)
 
 
 def test_trend_days_bounds(client, device):

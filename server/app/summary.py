@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .settings_keys import DEFAULTS
@@ -77,25 +78,33 @@ def alert_summary(
     return f"{alert_type} 告警（等级 {level}）"
 
 
-def trend_compare(today: int, yesterday: int) -> tuple[float | None, str]:
-    """契约 §6.17 `compare`：返回 (delta_pct, text)。
+# 契约 v1.2 §6.17：`compare.title` 是**固定文案**，不参与趋势判断。原先「今日活动频次」是拼在
+# text 里的前缀，被 PM（m00683）拆成独立键，因此 title 必现——包括没有昨日基线的情形。
+TREND_TITLE = "今日活动频次"
 
-    规则（契约原文）：`< −10` 下降、`> +10` 上升、否则持平；`yesterday=0` →「昨日无活动记录」；
-    `today+yesterday=0` →「暂无活动数据」。
+
+def _round_half_up(value: float) -> int:
+    """四舍五入成整数百分比（契约 §6.17 要求整数）：内建 `round()` 是银行家舍入，10.5 得 10，不合契约。"""
+    if value >= 0:
+        return int(math.floor(value + 0.5))
+    return -int(math.floor(-value + 0.5))
+
+
+def trend_compare(today: int, yesterday: int) -> tuple[int | None, str | None]:
+    """契约 v1.2 §6.17 `compare`：返回 (delta_pct, text)；两者都为 None ⇒ **无昨日基线**。
+
+    规则（契约原文，v1.2 定稿）：`delta_pct ≤ −10` →「较昨日下降 N%」；`≥ +10` →「较昨日上升 N%」；
+    `−10 < delta_pct < +10` →「与昨日基本持平」。**边界值算升降**（恰好 +10% 是「上升 10%」）。
+    无昨日基线（`yesterday` 为 0，或 `today = yesterday = 0`）→ 调用方省略 `yesterday`/`delta_pct`/`text`
+    三个键，只留 `title` 与 `today`（§0.4：无值即省略键，不写 null 占位）。
     """
-    if today + yesterday == 0:
-        return None, "暂无活动数据"
-    if yesterday == 0:
-        return None, "昨日无活动记录"
-    delta = (today - yesterday) / yesterday * 100
-    delta_pct = round(delta, 1)
-    n = abs(int(round(delta)))
-    # 文案取 §6.17 规则行原文（「较昨日下降 N%」）。契约同节的 JSON 样例里带
-    # 「今日活动频次」前缀，与规则行/§6.18 的「较上周下降 5%」不一致，此处以规则行为准，
-    # 已登记待 PM 在契约 v1.2 定稿（server/README.md「契约口径」）。
-    if delta < -10:
+    if yesterday <= 0:
+        return None, None
+    delta_pct = _round_half_up((today - yesterday) / yesterday * 100)
+    n = abs(delta_pct)
+    if delta_pct <= -10:
         return delta_pct, f"较昨日下降 {n}%"
-    if delta > 10:
+    if delta_pct >= 10:
         return delta_pct, f"较昨日上升 {n}%"
     return delta_pct, "与昨日基本持平"
 

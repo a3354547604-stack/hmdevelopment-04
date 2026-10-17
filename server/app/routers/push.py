@@ -93,17 +93,22 @@ def health():
 
 @router.get("/time")
 def server_time():
-    """契约 v1.2 预留：网关取 UTC（无 JWT，先取时后握手）。
+    """契约 v1.2 §6.21：网关取 UTC（免鉴权，先取时后握手，超时 ≤3 s）。
 
-    字段口径（待契约 v1.2 定稿后对齐，未定稿前按此实现并登记 §12 变更）：
+    字段口径（§6.21 定稿）：
     - `utc_epoch`/`utc_epoch_ms`：同一时刻的秒/毫秒表示，避免调用方猜单位（§0.3 时间统一 ms，秒值兼容 RTC/SNTP 用法）；
     - `iso8601`：秒级精度的 `YYYY-MM-DDTHH:MM:SSZ`，直接可用于 MQTT 鉴权时间戳与日志；
     - `tz`：固定 `UTC`，提醒网关写入时**不要**本地闰 8 小时（IoTDA event_time 才是 UTC 无时区标记格式）；
     - 不返回设备侧可信度：本接口只声明服务器自己现在几点，网关校准后必须走 /api/health 的 clock_source。
+
+    响应头 `Cache-Control: no-store`（§6.21 定稿要求）：网关每次上线都按 §4.1.1 降级链重新取时，
+    中间若挂一层缓存就会把**过期时间**当现在发给网关，鉴权时间戳与 event_time 会一起偏移。
+    缓存语义必须显式声明（否则共享缓存默认可按启发式缓存 200 响应），所以这里写死在响应头上而不是靠
+    「GET 一般不会被缓存」的默认行为。
     """
     now = now_ms()
     moment = datetime.fromtimestamp(now / 1000, tz=timezone.utc)
-    return ok(
+    body = ok(
         {
             "utc_epoch": int(now // 1000),
             "utc_epoch_ms": now,
@@ -112,3 +117,4 @@ def server_time():
             "server_ts": now,
         }
     )
+    return JSONResponse(content=body, headers={"Cache-Control": "no-store"})
