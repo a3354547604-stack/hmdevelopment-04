@@ -17,6 +17,16 @@
 import { SettingsItems, parseSettingsItems } from '../model/Types';
 import { JsonObject, asObject, optNum } from './JsonUtil';
 
+/**
+ * 演示事件可选项（契约 §6.12 允许的 event 取值）。
+ *
+ * 放在本文件（纯数据模块）而不是设置页里，是为了让无设备自检也能直接读它：
+ * 自检 #27 用**同一份清单**驱动 `POST /devices/{id}/demo`，一旦有人往界面里
+ * 加回契约外的事件（早期版本列过 `door`/`presence`），自检立刻变红。
+ * PM 裁定 D8：以契约为准，App 不得自创枚举。
+ */
+export const DEMO_EVENTS: string[] = ['gas', 'fall', 'sos'];
+
 /** 一个可编辑设置项的元数据。 */
 export class SettingSpec {
   /** 契约 §6.9 的键名（必须逐字一致）。 */

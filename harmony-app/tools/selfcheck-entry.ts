@@ -17,11 +17,12 @@ import { MockTransport } from '../ets/service/MockTransport';
 import { SessionStore } from '../ets/service/SessionStore';
 import { ApiResult, NETWORK_ERROR_CODE } from '../ets/model/Result';
 import {
-  ActivityReport, AlertDetail, AlertListResult, BindResult, CommandResult, DemoResult,
+  ActivityReport, AlertDetail, AlertItem, AlertListResult, BindResult, CommandResult, DemoResult,
   DeviceListResult, DeviceSettings, DeviceStatus, GatewayProperties, HealthResult, LoginResult,
   NodeItem, PushRegisterResult, ReadingListResult, RegisterResult, SummaryReport, TrendReport
 } from '../ets/model/Types';
 import { SettingsItems } from '../ets/model/Types';
+import { DEMO_EVENTS } from '../ets/common/SettingsSchema';
 import { Formatter } from '../ets/common/Formatter';
 
 /**
@@ -240,6 +241,63 @@ class Runner {
     // 注：§6.10 的 1003「未知键」无法从 App 侧触发 —— HttpApiService.settingsBody()
     // 只序列化契约 §6.9 的 22 个键名，压根构造不出未知键的请求体（这是好事）。
     // mock 仍保留该校验，用于将来手工构造请求体时的自证。
+
+    // D8（t42）：演示事件必须**按类型渲染** —— 选 fall 就是跌倒、gas 就是燃气、
+    // sos 就是紧急求助；任何类型都不得渲染成另一种（旧实现把未知事件默认当跌倒）。
+    // 断言对象是「触发后告警列表的最新一条」，summary 用契约 §6.13 文案表原文。
+    const wantSummary: Map<string, string> = new Map<string, string>();
+    wantSummary.set('fall', '卧室检测到跌倒');
+    wantSummary.set('gas', '厨房燃气泄漏报警');
+    wantSummary.set('sos', '收到紧急求助');
+    // 选项清单直接用**设置页同一份数据**（common/SettingsSchema.ets 的 DEMO_EVENTS）：
+    // 有人往界面加回契约外事件（早期版本列过 door/presence），本项立刻变红。
+    const contractEvents: string[] = ['fall', 'gas', 'sos'];
+    const demoEvents: string[] = DEMO_EVENTS;
+    const optionsOk: boolean = demoEvents.length === contractEvents.length
+      && contractEvents.every((e: string) => demoEvents.includes(e));
+    let renderOk: boolean = optionsOk;
+    let renderDetail: string = `界面选项=[${demoEvents.join(',')}]  `;
+    for (const ev of demoEvents) {
+      const dr: ApiResult<DemoResult> = await this.api.demo(1, ev);
+      const lr: ApiResult<AlertListResult> = await this.api.listAlerts(1, 'all', 50);
+      const top: AlertItem | undefined = lr.ok && lr.data !== undefined && lr.data.items.length > 0
+        ? lr.data.items[0] : undefined;
+      const want: string | undefined = wantSummary.get(ev);
+      if (!dr.ok || top === undefined || top.type !== ev || top.summary !== want) {
+        renderOk = false;
+      }
+      renderDetail = renderDetail + `${ev}→`
+        + (top === undefined ? '-' : `${top.node_sn}/${top.type}/${top.summary}`) + '  ';
+    }
+    this.cases.push({
+      seq: 27, name: '§6.12 演示事件按类型渲染（D8）', contract: '§6.12',
+      ok: renderOk, code: 0, httpStatus: 200, detail: renderDetail
+    });
+
+    // D8（t42）：契约外事件（旧选项里的 door/presence）必须被拒（1206），
+    // 且**不得留下任何告警** —— 否则就是"点错了却看到假报警"。
+    const beforeAlerts: ApiResult<AlertListResult> = await this.api.listAlerts(1, 'all', 50);
+    const beforeTotal: number = beforeAlerts.ok && beforeAlerts.data !== undefined
+      ? beforeAlerts.data.total : -1;
+    const badEvents: string[] = ['door', 'presence'];
+    let illegalCodes: string = '';
+    let illegalOk: boolean = true;
+    for (const bad of badEvents) {
+      const br: ApiResult<DemoResult> = await this.api.demo(1, bad);
+      illegalCodes = illegalCodes + `${bad}:code=${br.code} `;
+      if (br.ok || br.code !== 1206) {
+        illegalOk = false;
+      }
+    }
+    const afterAlerts: ApiResult<AlertListResult> = await this.api.listAlerts(1, 'all', 50);
+    const afterTotal: number = afterAlerts.ok && afterAlerts.data !== undefined
+      ? afterAlerts.data.total : -2;
+    this.cases.push({
+      seq: 28, name: '§6.12 契约外事件被拒且不冒充（D8）', contract: '§6.12',
+      ok: illegalOk && beforeTotal === afterTotal && beforeTotal > 0,
+      code: 1206, httpStatus: 400,
+      detail: `${illegalCodes}告警条数 ${beforeTotal}→${afterTotal}`
+    });
   }
 
   report(): void {

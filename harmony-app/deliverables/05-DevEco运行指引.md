@@ -14,7 +14,7 @@
 | 路线 | 怎么做 | 能得到什么 | 本机验证状态 |
 |---|---|---|---|
 | **A. DevEco 模拟器（推荐）** | 本文 §1–§4 | 能点、能滑、能录屏的真界面 | **待用户实测**（本机无 IDE、无模拟器） |
-| B. 命令行构建 | 本文 §6 | `BUILD SUCCESSFUL` + 未签名 HAP + 接口自检 26/26 | **已实测**（WSL 工具链） |
+| B. 命令行构建 | 本文 §6 | `BUILD SUCCESSFUL` + 未签名 HAP + 接口自检 28/28 | **已实测**（WSL 工具链） |
 | C. 真机 | 需要 `hdc` 认到设备 | 真机安装与运行 | **待用户实测**（本机 `hdc list targets` 为空） |
 
 > P0 演示建议：**A 路线**（模拟器）+ App 默认的 mock 数据源。原因见 §5：mock 模式**不发任何网络请求**，现场断网也能演完五个页面。
@@ -178,7 +178,7 @@ export OHOS_BASE_SDK_HOME="$DEVECO_SDK_HOME"   # 工具链 SDK 是分层软链�
 cd harmony-app
 
 bash tools/build-hap.sh      # ① 先"门禁自证"（必须 BUILD FAILED）再正式构建 → BUILD SUCCESSFUL
-bash tools/run-selfcheck.sh  # ② 无设备自检：真实 HttpApiService + Mock 传输层 → 26/26 PASS
+bash tools/run-selfcheck.sh  # ② 无设备自检：真实 HttpApiService + Mock 传输层 → 28/28 PASS
 ```
 
 - 产物：`entry/build/default/outputs/default/entry-default-unsigned.hap`（**未签名**）
@@ -202,9 +202,9 @@ bash tools/run-selfcheck.sh  # ② 无设备自检：真实 HttpApiService + Moc
 
 **已知问题（不影响本指引，但演示时别踩）**：
 
-1. 设置页「演示事件」的选项是「燃气/跌倒/门磁/人体活动」，而契约 §6.12 只接受 `fall`/`gas`/`sos`；**连真实服务器时只选「燃气」「跌倒」**，选另外两个会被拒（1206）。mock 模式下「门磁/人体活动」会被渲染成「跌倒」——演示别选。
-2. App 与真实服务器组合下，阈值下发（§6.11）响应里的 `accepted/rejected` 字段类型仍在收口（t18 复核报出，t30 承接）——真实服务器演示阈值下发前先确认 t30 已合入。
-3. `harmony-app/README.md` §1 里的自检数字写的是 23/23，当前实际是 **26/26**（t22 新增了 3 项）——文档待同步，不影响运行。
+1. ~~设置页「演示事件」选项比契约多两个~~ **已收口（t42）**：选项现为 **燃气 / 跌倒 / 紧急求助** 三项，与契约 §6.12 的 `fall`/`gas`/`sos` 逐字一致；契约外事件被 mock 按 **1206** 拒绝，不再冒充「跌倒」（自检 #27/#28 覆盖）。**门磁没有演示事件**（PM 裁定 D8 不放宽契约），现场门磁走真实干簧管。
+2. ~~阈值下发响应字段类型仍在收口~~ **已收口（t30）**：服务器已按 PM 裁定 D-05 返回 `data` 内两个字符串数组 `accepted`/`rejected`，与 App 解析一致。
+3. ~~`harmony-app/README.md` §1 的自检数字写的是 23/23~~ **已同步（t42）**：README 与本文档均已改为 **28/28**（t22 加 3 项、t42 加 2 项）。
 
 ---
 

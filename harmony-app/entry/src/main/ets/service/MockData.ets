@@ -654,15 +654,32 @@ export class MockStore {
     return MockStore.dispositionSeq;
   }
 
-  /** 演示注入（§6.12）：真的往列表里加一条未处置告警，让首页/告警页看到变化。 */
+  /**
+   * 演示注入（§6.12）：真的往列表里加一条未处置告警，让首页/告警页看到变化。
+   *
+   * 三种事件各自**按自己的类型**渲染，取值与服务器虚拟网关 `DEMO_EVENTS`
+   * （server/app/mocks/virtual.py:28-50）逐项对齐：`fall`→M2/level 2、
+   * `gas`→M1/level 2、`sos`→H1/level 2；`summary` 用契约 §6.13 文案表原文。
+   *
+   * 契约外事件**什么都不做**：早期实现把未知事件默认渲染成「跌倒」，
+   * 那等于让 mock 冒充另一种类型（PM 裁定 D8 明令禁止），现场选错还会看到假象。
+   * 传输层已先按 §6.12 回 1206（见 MockTransport），这里的兜底是保证
+   * 「绕过传输层直接调用本方法」的路径也不冒充。
+   */
   static injectDemo(event: string): void {
     MockStore.ensure();
-    let id: number = 100;
-    let type: string = 'fall';
+    let id: number = 0;
+    let type: string = '';
     let level: number = 2;
-    let node: string = 'M2';
-    let summary: string = '卧室检测到跌倒';
-    if (event === 'gas') {
+    let node: string = '';
+    let summary: string = '';
+    if (event === 'fall') {
+      id = 100;
+      type = 'fall';
+      level = 2;
+      node = 'M2';
+      summary = '卧室检测到跌倒';
+    } else if (event === 'gas') {
       id = 101;
       type = 'gas';
       level = 2;
@@ -672,8 +689,10 @@ export class MockStore {
       id = 102;
       type = 'sos';
       level = 2;
-      node = 'M0';
+      node = 'H1';
       summary = '收到紧急求助';
+    } else {
+      return;
     }
     MockStore.alertsData.unshift({
       'id': id, 'device_id': 1, 'node_sn': node, 'type': type, 'level': level,

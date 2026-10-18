@@ -1,5 +1,5 @@
 HMProgram 应用端（harmony-app）无设备自检日志
-生成时间（UTC+8）：2026-10-18 00:56:23
+生成时间（UTC+8）：2026-10-18 08:29:53
 Node：v22.22.1　esbuild：0.28.2
 被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,MockTransport,SessionStore}.ets
 ----------------------------------------------------------------------
@@ -10,8 +10,8 @@ PASS  #04  POST /devices/bind                     §6.6    code=   0 http=201  d
 PASS  #05  GET /devices/{id}/status               §6.7    code=   0 http=200  online=true alarm_state=2 nodes=3 pending=3 props=[presence,last_motion_ts,door,window,temp,humi,smoke,lpg,co,nodes_online,battery,alarm_state,bound_nodes,pair_state]
 PASS  #06  GET /devices/{id}/readings             §6.8    code=   0 http=200  total=12 first_payload_keys=smoke+temp+humi+adc_mv+warmup
 PASS  #07  GET /devices/{id}/settings             §6.9    code=   0 http=200  source=local keys=22
-PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792256184292
-PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792256184413-7 accepted=no_motion_min timeout_s=10
+PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792283394792
+PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792283394914-7 accepted=no_motion_min timeout_s=10
 PASS  #10  POST /devices/{id}/demo                §6.12   code=   0 http=200  event=gas accepted=demo_trigger
 PASS  #11  GET /alerts                            §6.13   code=   0 http=200  total=4 first=#101/gas/lv2
 PASS  #12  GET /alerts/{id}                       §6.14   code=   0 http=200  alert=#101/confirmed dispositions=0 before=5 after=5
@@ -29,8 +29,10 @@ PASS  #23  恢复正常后再次成功                              §6.7    cod
 PASS  #24  §4.3 十四属性含 bound_nodes/pair_state      §4.3    code=   0 http=200  bound_nodes=["M1","M2","M4"] pair_state=sta 文案=M1、M2、M4/已连家庭 Wi-Fi
 PASS  #25  §4.3.1 mac 解析（缺省不报错）                   §4.3.1  code=   0 http=200  M1:11:22:33:44:55:01 M2:11:22:33:44:55:02 M4:缺省
 PASS  #26  §6.10 越界 message 透传（F-03）              §9.2    code=1002 http=400  参数超出允许范围（服务器：field=no_motion_min allowed=5..120）
+PASS  #27  §6.12 演示事件按类型渲染（D8）                    §6.12   code=   0 http=200  界面选项=[gas,fall,sos]  gas→M1/gas/厨房燃气泄漏报警  fall→M2/fall/卧室检测到跌倒  sos→H1/sos/收到紧急求助  
+PASS  #28  §6.12 契约外事件被拒且不冒充（D8）                  §6.12   code=1206 http=400  door:code=1206 presence:code=1206 告警条数 8→8
 
-合计 26 项，通过 26 项，失败 0 项
+合计 28 项，通过 28 项，失败 0 项
 说明：本自检跑的是「真实 HttpApiService + Mock 传输层」，证明 URL 拼接/鉴权头/错误码翻译/契约字段解析可跑通；不代表真实服务器可用。
 ----------------------------------------------------------------------
 结论：以上为「真实 HttpApiService + Mock 传输层」的运行结果。

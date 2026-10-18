@@ -20,11 +20,14 @@ import { StepperRow, SwitchRow } from '../components/SettingRows';
 import { LoadingView, ErrorView } from '../components/StateViews';
 import { SessionStore } from '../service/SessionStore';
 import { ServiceHub } from '../service/ServiceHub';
-import { SettingSpec, SETTING_SPECS, settingValueOr } from '../common/SettingsSchema';
+import { SettingSpec, SETTING_SPECS, settingValueOr, DEMO_EVENTS } from '../common/SettingsSchema';
 import { DeviceSettings } from '../model/Types';
 
-/** 演示事件可选项（契约 §6.12 允许的 event 取值）。 */
-const DEMO_EVENTS: string[] = ['gas', 'fall', 'door', 'presence'];
+/**
+ * 演示事件可选项从 `common/SettingsSchema.ets` 引入（契约 §6.12 的三个取值）。
+ * 为什么放在共用模块：无设备自检 #27 用同一份清单驱动 demo 接口，
+ * 有人往界面加回契约外事件（早期版本列过 `door`/`presence`）时自检会变红。
+ */
 
 @Component
 export struct SettingsPage {
@@ -192,6 +195,10 @@ export struct SettingsPage {
             SectionTitle({ text: '演示与调试', note: '答辩现场用' })
             Column({ space: 8 }) {
               Text('演示事件：走真实链路（设备→汇聚→网关→IoTDA→服务器→App 告警）')
+                .fontSize(AppTheme.FONT_CAPTION)
+                .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+                .width('100%')
+              Text('门磁走真实干簧管（缺硬件时用「紧急求助」注入 + 口头说明）；SOS 也可由 433 按钮触发')
                 .fontSize(AppTheme.FONT_CAPTION)
                 .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
                 .width('100%')
