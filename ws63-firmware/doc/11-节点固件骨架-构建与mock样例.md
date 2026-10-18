@@ -663,3 +663,46 @@ git diff -U0 -- ws63-firmware/out/node-uplink-sample.txt | grep -E "^[-+]" | gre
 **环境记录**：本次开工时 Docker 引擎已掉线（`Cannot connect to the docker daemon`，
 AGENTS.md 记过这个「WSL 睡眠后 Docker Desktop 引擎掉线」的坑）——启动 Docker Desktop 后 6 s 内恢复；
 两条 verify 命令都跑在 `tools/build-lock.sh` 槽 1 里，不占串口、不与 t59 抢板。
+
+## 12. t57 记录：M2 雷达统计窗口改为真实耗时（radar_hub.c）
+
+改的是**判读口径**，不是帧率本身：统计窗口原先靠 `tick % 200` 计数当 10 s，而每轮 `osal_msleep(50)`
+实测 ~60.1 ms ⇒ 真实窗口 12.0 s。现在窗口用 `uapi_tcxo_get_ms()` 量真实耗时，并把毫秒打进日志
+（`types(win=%ums)` / `alive(win=%ums)`）；同时把单位写进字段名：`rx_bytes`（字节）/ `rx_frames`（帧）
+/ `drop_bytes`（丢掉的字节），旧名 `rx_total` / `drop` 不再出现。判据按 D13 裁定用**与历史同口径**的
+`nominal`（`--basis nominal`，默认），另两个口径（`wall` 主机时间戳、`fw` 固件 `win=`）一并打印。
+
+细节（改动清单、日志前后对照、同源但未改的两处）在 `docs/技术笔记/雷达LD6002C-接线与实测.md` §5.10/§5.11。
+
+### 12.1 只重编 M2：其它节点包的字节不受影响
+
+`radar_hub.c` 只在 m2 的源文件清单里（见 `scripts/node-targets.txt`），所以本卡只重编 m2。
+`ws63-firmware/out/m1.info.txt` / `m4.info.txt` 在这一时段出现 `built_at` 变化而 `bytes`/`sha256` 一字不变 ——
+那是**并发重编**留下的时间戳，正好又是一条「`.fwpkg` 对同一份源码可复现」的现场证据。
+
+| 目标 | t55 后 | t57 后 | sha256（当次记录） |
+|---|---|---|---|
+| `NODE_M2.fwpkg` | 1468008 | **1468072（+64）** | `f49549ea558e77ae9a0434922f1459edd8d52143d00c24c0d33701a72462be4e` |
+
+`+64 B` 的来源：`alive(win=`/`types(win=` 两个格式串变长、`rx_bytes`/`rx_frames`/`drop_bytes` 替换旧名、
+以及多出 `uapi_tcxo_get_ms()` 的一次调用与窗口差值的算数。两次重编（`node-build.sh m2`）产物字节数与
+sha256 **完全一致**，指纹可复现。
+
+### 12.2 无板验证（证据可复现，命令与产物路径）
+
+| 命令 | 结果 |
+|---|---|
+| `bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh m2` | 退出码 0；`m2 角色断言通过：'EC-NODE-ROLE=M2 type=fall'×1，其它角色标记 0，[MOCK]×0`；`custom/` 残留 0 |
+| `python3 tools/radar-check.py --image ws63-firmware/out/NODE_M2.fwpkg` | PASS（5 必现 + 3 必无），退出码 0 |
+| 同上跑 t55 的旧包（`git show HEAD:ws63-firmware/out/NODE_M2.fwpkg`） | **FAIL 8/8、退出码 1** —— 反例对照，证明这 8 条断言有判别力（否则它只是「新包必过」的同义反复） |
+| `python3 tools/radar-check.py ws63-firmware/out/radar-check-boot.txt ws63-firmware/out/radar-check-steady.txt` | 两条留档各自跟回原始日志重判：PASS 3/3、PASS 3/3，退出码 0（t29 的存量日志仍可判读） |
+
+第二条是卡面 verify 的原样写法：输入是 `radar-check.py` **自己写出的留档**。脚本因此支持把留档当**索引**
+（读头部 `日志：<path>` 跟回原始日志重判，再原地重写留档）——验收要的是「留档随时可复算」，而不是
+一次性的旧输出；`--basis` 三口径与「跌倒触发未验证」的如实标注都在留档里。
+
+### 12.3 未做（按卡面要求标注，不得写成已验证）
+
+- **0x0E02 帧率的上板复测**：板权归 t70（`fw-ws63-op`），本卡不做；上板后的期望日志形状见 §5.10 的「新」示例。
+- **跌倒触发 / TX2(IO06) 硬件通道**：仍属 `待用户实测`（需真人躺 15–20 s）。两条留档里的 `[INFO] 跌倒触发`
+  写的是「未观测到」，这是事实而不是失败。

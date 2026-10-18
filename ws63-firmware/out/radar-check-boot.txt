@@ -1,9 +1,9 @@
 日志：ws63-firmware/spike/logs/radar-m2-COM15.log
 行数=133 带时间戳=132 窗口=71.7 s
 ------------------------------------------------------------------------
-[PASS] rx_total 单调递增 且 bad=0/drop=0（连续 ≥60s）：心跳 5 条、rx_total 3337→14457 严格递增=True、drop=[0]、bad=[0]、抓包窗口 71.7 s
-       rx_total 采样：3337 6107 8877 11677 14457
-[FAIL] 0x0E02 帧率 ≥20 fps：Δ0E02=953 / 48.0 s = 19.86 fps（墙钟口径）；同一批数据按固件标称 10 s 窗口 = 23.82 fps（历史 24 fps 用的是这个口径）；0x0E02 累计 1236
+[PASS] 字节流（rx_bytes）单调递增 且 bad=0/drop_bytes=0（连续 ≥60s）：心跳 5 条、rx_bytes 3337→14457 严格递增=True、drop=[0]、bad=[0]、抓包窗口 71.7 s
+       rx_bytes 采样（单位：字节（旧日志字段名 rx_total））：3337 6107 8877 11677 14457
+[PASS] 0x0E02 帧率 ≥20 fps（nominal 口径）：Δ0E02=953 / 48.0 s；nominal=23.82（历史 ~24 fps 同口径）、wall=19.86、fw=无（旧日志没打 win=）；判定用 nominal=23.82
 [PASS] 无 TinyFrame 解析错误 / 无重启 / 无死循环：BAD CKSUM=0、boot 横幅=1、末次心跳距日志末尾=6.2 s
 [INFO] 固件角色：EC-NODE-ROLE=M2 type=fall fw=0.1.0
 [INFO] SLE 身份：own_addr=11:22:33:44:55:02 name=EC-M2；node up: fw=0.1.0 type=fall mac=11:22:33:44:55:02 adv=EC-M2 proto=0x01
@@ -11,7 +11,7 @@
 [INFO] 有人（user log 关键字）：0 条 —— 本窗口内**未验证**；协议本身没有二进制的「有人」上报帧（见 radar_hub.c 文件头说明）
 [INFO] 节点侧心跳（[M2] alive）：2 条，末条：alive up=60s conn=0x0000 tx=0 fail=0 err=0 rssi=0 seq=0
 [INFO] 解析帧总数（ok）速率：Δok=1112 / 48.0 s = 23.16 帧/s（含 0x0E02 之外的 0x0F09 等）
-[INFO] 字节流（rx_total）：rx_total 计的是**字节**不是帧（radar_rx_callback 每字节 +1），帧数看 ok=：331→1443
+[INFO] 字节流 vs 帧数：rx_bytes 计的是**字节**（ISR 每字节 +1），帧数看 ok/bad：ok 331→1443、bad 0→0
 ------------------------------------------------------------------------
-判据：3 条，PASS 2，FAIL 1
-总判定：FAIL
+判据：3 条，PASS 3，FAIL 0
+总判定：PASS

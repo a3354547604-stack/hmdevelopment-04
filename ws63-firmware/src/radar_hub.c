@@ -77,8 +77,11 @@ static uart_buffer_config_t g_radar_buf_cfg = {
 static volatile uint8_t  g_ring[RING_SZ];
 static volatile uint32_t g_ring_w;
 static volatile uint32_t g_ring_r;
-static volatile uint32_t g_rx_total;
-static volatile uint32_t g_rx_drop;
+static volatile uint32_t g_rx_bytes;       /* 收到的**字节**数（ISR 每字节 +1，不是帧数）
+                                            * t57 前这个变量叫 g_rx_total，日志字段也叫 rx_total，
+                                            * 结果被历史文档当成帧数（README 的「113,927 帧」实为字节）。
+                                            * 名字与日志字段一起改对，避免第三个人再误读。 */
+static volatile uint32_t g_rx_drop_bytes;  /* 环形缓冲满时丢掉的字节数 */
 static volatile uint32_t g_tx_frames;
 
 /* ---------------- 统计 ---------------- */
@@ -113,6 +116,11 @@ static volatile uint8_t  g_userlog_on;
 #define RADAR_LOG_LINE_MAX      96
 #define RADAR_LOG_PER_SEC_MAX   4u          /* 打印速率上限，防日志刷屏淹没采样帧 */
 #define RADAR_PRESENCE_HOLD_MS  60000u      /* 最后一次「有人」关键字之后保持多久 */
+/* 心跳/统计窗口 = 10 000 ms，**按真实耗时判定**（t57/D13）。
+ * 为什么不能用「tick 计数」：节拍是 osal_msleep(50)，但每轮实际 ~60 ms（实测 200 拍要 12.0 s），
+ * 于是标称 10 s 的窗口被当成真实 10 s，0x0E02 帧率被算高约 20%（19.85 → 23.8）。
+ * 现在窗口时长直接打进日志（win=%ums），判读脚本与文档都拿它当分母。 */
+#define RADAR_HB_PERIOD_MS      10000u
 
 static volatile uint8_t  g_log_line[RADAR_LOG_LINE_MAX];
 static volatile uint16_t g_log_len;
@@ -178,9 +186,9 @@ static void radar_rx_callback(const void *buffer, uint16_t length, bool error)
             g_ring[g_ring_w] = p[i];
             g_ring_w = n;
         } else {
-            g_rx_drop++;
+            g_rx_drop_bytes++;
         }
-        g_rx_total++;
+        g_rx_bytes++;
     }
 }
 
@@ -632,26 +640,44 @@ static void *radar_task(const char *arg)
 
 #if RADAR_THR_TEST_ENABLE
         /* 4.5) 到点把跌倒阈值写回默认 0.6 m */
-        if (!g_thr_restored && tick >= (RADAR_THR_TEST_SEC * 20u)) {   /* tick 每 50ms +1 */
+        if (!g_thr_restored && tick >= (RADAR_THR_TEST_SEC * 20u)) {   /* tick 标称 50ms/拍，实测 ~60ms/拍
+                                                                        * ⇒ 本试验窗口实际比 RADAR_THR_TEST_SEC 长约 20%；
+                                                                        * 这是只读回默认值的试验钩子（默认 0=关闭），未随 t57 改成计时器，
+                                                                        * 已记在 t57 报告里与心跳窗口同源。 */
             g_thr_restored = true;
             osal_printk("[RADAR] TEST: restore fall threshold -> 0.600 m\r\n");
             radar_set_threshold(0.600f);
         }
 #endif
 
-        /* 5) 每 10 秒打一次心跳 */
+        /* 5) 统计心跳：窗口按 uapi_tcxo_get_ms() 的**真实耗时**判定（t57/D13，见 RADAR_HB_PERIOD_MS）
+         *    并把窗口时长打进日志，任何人拿日志都能复算速率，不再依赖「标称 10 s」的假设。
+         *    单位口径也一并改对：rx_bytes = 字节（流健康度），rx_frames = 帧（解析量）。 */
         tick++;
-        if (tick % 200u == 0u) {
-            osal_printk("[RADAR] types 0E02=%u 0E01=%u 0E04=%u 0E06=%u 0E08=%u 0E0A=%u 0E0C=%u 0E0E=%u other=%u\r\n",
-                        (unsigned)g_type_cnt[0], (unsigned)g_type_cnt[1], (unsigned)g_type_cnt[2],
-                        (unsigned)g_type_cnt[3], (unsigned)g_type_cnt[4], (unsigned)g_type_cnt[5],
-                        (unsigned)g_type_cnt[6], (unsigned)g_type_cnt[7], (unsigned)g_type_other_cnt);
-            osal_printk("[RADAR] alive rx_total=%u drop=%u ok=%u bad=%u tx=%u fall_evt=%u state=%u tx2=%u tx2_edges=%u\r\n",
-                        (unsigned)g_rx_total, (unsigned)g_rx_drop,
-                        (unsigned)g_frames_ok, (unsigned)g_frames_bad,
-                        (unsigned)g_tx_frames, (unsigned)g_fall_events,
-                        (unsigned)g_fall_state, (unsigned)g_tx2_hw_fall,
-                        (unsigned)g_tx2_edges);
+        {
+            static uint32_t hb_last_ms;
+            static uint8_t  hb_primed;
+            uint32_t now_ms = uapi_tcxo_get_ms();
+            if (hb_primed == 0u) {
+                hb_last_ms = now_ms;                /* 首个窗口从进入主循环算起，避免开机耗时被算进去 */
+                hb_primed = 1u;
+            } else if ((uint32_t)(now_ms - hb_last_ms) >= RADAR_HB_PERIOD_MS) {
+                uint32_t win_ms = (uint32_t)(now_ms - hb_last_ms);
+                uint32_t rx_frames = g_frames_ok + g_frames_bad;
+                hb_last_ms = now_ms;
+                osal_printk("[RADAR] types(win=%ums) 0E02=%u 0E01=%u 0E04=%u 0E06=%u 0E08=%u 0E0A=%u 0E0C=%u 0E0E=%u other=%u\r\n",
+                            (unsigned)win_ms,
+                            (unsigned)g_type_cnt[0], (unsigned)g_type_cnt[1], (unsigned)g_type_cnt[2],
+                            (unsigned)g_type_cnt[3], (unsigned)g_type_cnt[4], (unsigned)g_type_cnt[5],
+                            (unsigned)g_type_cnt[6], (unsigned)g_type_cnt[7], (unsigned)g_type_other_cnt);
+                osal_printk("[RADAR] alive(win=%ums) rx_bytes=%u rx_frames=%u drop_bytes=%u ok=%u bad=%u tx=%u fall_evt=%u state=%u tx2=%u tx2_edges=%u\r\n",
+                            (unsigned)win_ms,
+                            (unsigned)g_rx_bytes, (unsigned)rx_frames, (unsigned)g_rx_drop_bytes,
+                            (unsigned)g_frames_ok, (unsigned)g_frames_bad,
+                            (unsigned)g_tx_frames, (unsigned)g_fall_events,
+                            (unsigned)g_fall_state, (unsigned)g_tx2_hw_fall,
+                            (unsigned)g_tx2_edges);
+            }
         }
         osal_msleep(50);
     }
@@ -700,9 +726,12 @@ uint32_t radar_hub_get_fall_events(void)
     return g_fall_events;
 }
 
+/* 累计**字节**数（不是帧数）：流健康度指标，配 bad/drop 一起看。
+ * 函数名保留（radar_hub.h 与 tools/node-radar-cache-selftest.c 的桩都用它），
+ * 但单位在 t57 明确为字节 —— 要帧数用 radar_hub_get_frames_ok()/bad()。 */
 uint32_t radar_hub_get_rx_total(void)
 {
-    return g_rx_total;
+    return g_rx_bytes;
 }
 
 int radar_hub_get_presence(uint32_t now_ms)
