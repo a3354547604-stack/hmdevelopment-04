@@ -424,6 +424,262 @@ def check_sub_decide(cc):
     return 1 if rp.returncode != 0 else 0
 
 
+
+POLL_ACCT_SRC = r"""
+/* t70 断言用台架：直接编真实 hub_agg.c，模拟「节点应答复到得比 200 ms 晚」这条路径。
+ * 不复制被测逻辑，只喂时间线与上行帧。 */
+#include <stdio.h>
+#include <string.h>
+#include "hub_agg.h"
+
+static int fails;
+static const uint8_t MAC1[6] = {0x11u,0x22u,0x33u,0x44u,0x55u,0x01u};
+
+#define CK(cond, msg) do { if (!(cond)) { fails++; printf("  FAIL %s\n", (msg)); } } while (0)
+
+/* 跑到状态机推出一条 POLL 动作为止；返回 poll id（没有则 -1），并记录是否见过离线事件 */
+static int run_to_poll(hub_agg_t *a, hub_act_t *act, int64_t *now, int64_t limit_ms, int *saw_off)
+{
+    int64_t end = *now + limit_ms;
+    while (*now < end) {
+        uint8_t i;
+        *now += 50;
+        hub_act_clear(act);
+        hub_agg_tick(a, *now, act);
+        for (i = 0; i < act->n; i++) {
+            if (act->q[i].kind == HUB_AK_EVENT_OFF) { *saw_off = 1; }
+        }
+        for (i = 0; i < act->n; i++) {
+            if (act->q[i].kind == HUB_AK_POLL) { return (int)act->q[i].aux; }
+        }
+    }
+    return -1;
+}
+
+int main(void)
+{
+    hub_agg_t a;
+    hub_act_t act;
+    hub_uplink_t u;
+    int64_t now = 100000;
+    int poll_id, saw_off = 0;
+
+    hub_agg_init(&a, "H1", now);
+    CK(hub_wl_add(&a, "M1", MAC1, now) == 0, "白名单加入 M1");
+    CK(hub_agg_on_connected(&a, 0x1000u, MAC1, now) == 0, "连接 M1");
+    hub_agg_set_proc(&a, 0x1000u, HUB_PROC_DONE, 0x1122u);
+    CK(a.node[0].state == HUB_SLOT_READY, "节点进 READY");
+
+    poll_id = run_to_poll(&a, &act, &now, 6000, &saw_off);
+    CK(poll_id > 0, "状态机应发出 poll");
+    CK(a.node[0].poll_pending == 1u, "poll 在途");
+    {
+        int64_t poll_at = now;
+        memset(&u, 0, sizeof(u));
+        strcpy(u.sn, "M1");
+        strcpy(u.type, "status");
+        u.req_id = poll_id;
+        /* 关键：中间要真的跑节拍 —— 上板是 50 ms 一拍，超时判定发生在 tick 里。
+         * 直接调 on_uplink 会绕过判定，那是自欺欺人的测法。 */
+        {
+            int64_t rt = poll_at;
+            while (rt < poll_at + 250) {
+                rt += 50;
+                hub_act_clear(&act);
+                hub_agg_tick(&a, rt, &act);
+            }
+            (void)hub_agg_on_uplink(&a, &u, rt, &act);
+        }
+        CK(a.poll_ok == 1u, "250ms 到应答必须结算 poll_ok（旧 200ms 上界下恒 0）");
+        CK(a.poll_miss == 0u, "250ms 到应答不得记 poll_miss");
+        CK(a.node[0].misses == 0u, "有应答则连续 miss 清零");
+        CK(a.node[0].poll_missed_id == 0u, "有应答则清掉已判死的 poll id");
+        CK(a.node[0].rtt_ms == 250u, "rtt 应为实测 250ms");
+        CK(a.last_rtt_ms == 250u, "STAT 用的 last_rtt 应同步");
+        CK(a.node[0].online == 1u, "有应答即在线");
+    }
+    now += 3000;
+    (void)run_to_poll(&a, &act, &now, 6000, &saw_off);
+    (void)run_to_poll(&a, &act, &now, 6000, &saw_off);
+    (void)run_to_poll(&a, &act, &now, 6000, &saw_off);
+    {
+        int missed_id = (int)a.node[0].poll_id;
+        (void)run_to_poll(&a, &act, &now, 6000, &saw_off);
+        CK(a.poll_miss >= 3u, "静默至少记 3 次 miss");
+        CK(a.node[0].online == 0u, "3 次 miss 判离线");
+        CK(saw_off == 1, "离线须推 0x03 事件（EVENT_OFF）");
+        {
+            uint32_t ok_before = a.poll_ok;
+            memset(&u, 0, sizeof(u));
+            strcpy(u.sn, "M1");
+            strcpy(u.type, "status");
+            u.req_id = missed_id;
+            hub_act_clear(&act);
+            (void)hub_agg_on_uplink(&a, &u, now, &act);
+            CK(a.poll_late == 1u, "迟到应答应计入 poll_late");
+            CK(a.poll_ok == ok_before, "迟到应答不得补记 poll_ok");
+        }
+    }
+    if (fails == 0) { printf("  poll 结算用例表：OK\n"); }
+    return fails == 0 ? 0 : 1;
+}
+"""
+
+UPLINK_FWD_SRC = r"""
+/* t70 断言用台架：直接编真实 hub_glink.c + hub_frame.c，证明「取出上行的人真的把它发到
+ * uart_write」且正文逐字节等于节点原 JSON（t59 上板 [GLINK] -> 0x01 为 0 条的那条链）。 */
+#include <stdio.h>
+#include <string.h>
+#include "hub_glink.h"
+#include "hub_frame.h"
+
+static int fails;
+static uint8_t tx[4096];
+static uint32_t tx_len;
+static int64_t g_now = 5000;
+
+#define CK(cond, msg) do { if (!(cond)) { fails++; printf("  FAIL %s\n", (msg)); } } while (0)
+
+static int32_t fake_write(void *ctx, const uint8_t *buf, uint32_t len)
+{
+    (void)ctx;
+    if (tx_len + len > sizeof(tx)) { return -1; }
+    memcpy(tx + tx_len, buf, len);
+    tx_len += len;
+    return (int32_t)len;
+}
+static int32_t fake_read(void *ctx, uint8_t *buf, uint32_t cap) { (void)ctx; (void)buf; (void)cap; return 0; }
+static int64_t fake_now(void *ctx) { (void)ctx; return g_now; }
+static void fake_log(void *ctx, const char *fmt, ...) { (void)ctx; (void)fmt; }
+
+int main(void)
+{
+    static hub_glink_t g;
+    hub_glink_port_t port;
+    hub_glink_up_t up;
+    const char *json = "{\"sn\":\"M1\",\"ts\":1760000000000,\"type\":\"gas\",\"payload\":{\"smoke_mv\":123}}";
+    uint8_t expect[HUB_FRAME_MAX];
+    int n, m;
+
+    memset(&port, 0, sizeof(port));
+    port.uart_write = fake_write;
+    port.uart_read = fake_read;
+    port.now_ms = fake_now;
+    port.log = fake_log;
+    port.ctx = NULL;
+    hub_glink_init(&g, &port);
+
+    memset(&up, 0, sizeof(up));
+    strcpy(up.sn, "M1");
+    up.rx_ms = g_now;
+    up.len = (uint16_t)strlen(json);
+    memcpy(up.json, json, up.len + 1u);
+
+    tx_len = 0;
+    n = hub_glink_send_uplink(&g, &up);
+    CK(n > 0, "send_uplink 应写出帧");
+    CK(tx_len == (uint32_t)n, "写出的字节数应等于返回的帧长");
+    CK(g.up_sent == 1u, "up_sent 应 +1");
+
+    m = hub_frame_build_node(1u, json, (uint16_t)strlen(json), expect, sizeof(expect));
+    CK(m == n, "帧长应与 hub_frame_build_node 一致");
+    CK(m > 0 && memcmp(tx, expect, (size_t)m) == 0, "帧应与 hub_frame_build_node 逐字节一致");
+    {
+        hub_parser_t pp;
+        hub_frame_t fr;
+        uint8_t scratch[HUB_PAYLOAD_MAX + 4u];
+        hub_parser_init(&pp);
+        CK(hub_parser_push(&pp, tx, tx_len) == 0u, "分帧器应吃下整帧（返回值是丢弃字节数）");
+        CK(hub_parser_next(&pp, &fr, scratch, sizeof(scratch)) == 1, "应解出一帧");
+        CK(fr.type == HUB_T_NODE_DATA, "TYPE 必须是 0x01");
+        CK(fr.payload_len == (uint16_t)strlen(json), "正文长度不变");
+        CK(memcmp(fr.payload, json, fr.payload_len) == 0, "正文必须逐字节等于节点原 JSON");
+    }
+    tx_len = 0;
+    (void)hub_glink_send_uplink(&g, &up);
+    CK(tx[4] == 2u && tx[5] == 0u, "第二帧 SEQ 应为 2（LE）");
+    tx_len = 0;
+    strcpy(up.json, "not-json");
+    up.len = 8u;
+    CK(hub_glink_send_uplink(&g, &up) < 0, "非 JSON 正文应被拒");
+    CK(tx_len == 0u, "被拒时不得写出任何字节");
+    if (fails == 0) { printf("  上行转发用例表：OK\n"); }
+    return fails == 0 ? 0 : 1;
+}
+"""
+
+
+def _compile_one(cc, name, src, extra_sources, td):
+    """把一段内嵌 C 源码 + 若干真实源文件编成可执行文件，返回 (exe, err)。"""
+    csrc = os.path.join(td, name + ".c")
+    exe = os.path.join(td, name)
+    with open(csrc, "w", encoding="utf-8") as f:
+        f.write(src)
+    cmd = [cc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-O1", "-I", SRC,
+           "-o", exe, csrc] + [os.path.join(SRC, s) for s in extra_sources]
+    cp = subprocess.run(cmd, capture_output=True, text=True)
+    if cp.returncode != 0:
+        print(cp.stdout)
+        print(cp.stderr, file=sys.stderr)
+        return None, "编译失败：" + " ".join(extra_sources)
+    return exe, None
+
+
+def check_poll_accounting(cc):
+    """t70：poll 结算必须与到达时延无关（旧代码用固定 200 ms 判死 -> poll_ok 恒 0）。"""
+    with tempfile.TemporaryDirectory() as td:
+        exe, err = _compile_one(cc, "pollacct", POLL_ACCT_SRC, ["hub_agg.c", "hub_json.c"], td)
+        if exe is None:
+            print("  FAIL  poll 结算用例表：" + err)
+            return 1
+        rp = subprocess.run([exe], capture_output=True, text=True)
+    print(rp.stdout, end="")
+    if rp.stderr.strip():
+        print(rp.stderr, file=sys.stderr)
+    return 0 if rp.returncode == 0 else 1
+
+
+def check_pump_forwards():
+    """t70：**取出上行的人**必须负责把它转发出去。
+
+    只测 hub_glink_send_uplink() 本身不够 —— t59 的缺陷正是「有人把队列取空却没人发」。
+    所以这里做源码级断言：hub_pump_uplinks() 的函数体里必须有转发调用。
+    （断言跑在去注释后的文本上：注释里要能出现反面写法来说明问题。）
+    """
+    src = os.path.join(SRC, "hub_client.c")
+    with open(src, encoding="utf-8") as f:
+        text = _strip_comments(f.read())
+    body = _func_body(text, "hub_pump_uplinks")
+    if body is None:
+        print("  FAIL  找不到 hub_pump_uplinks()")
+        return 1
+    bad = 0
+    if "hub_glink_send_uplink(" not in body:
+        print("  FAIL  队列取出方（hub_pump_uplinks）没有转发调用 —— 帧会被取走即丢")
+        bad += 1
+    if "hub_glink_pop_uplink(" not in body:
+        print("  FAIL  hub_pump_uplinks 没在出队？语义已变，请同步本断言")
+        bad += 1
+    if bad == 0:
+        print("  PASS  hub_pump_uplinks 取出后调用 hub_glink_send_uplink 转发（t70 P0 修复点）")
+    return bad
+
+
+def check_uplink_forward(cc):
+    """t70：取出上行的人必须真的把 0x01 发到 uart_write，正文逐字节等于节点原 JSON。"""
+    with tempfile.TemporaryDirectory() as td:
+        exe, err = _compile_one(cc, "uplinkfwd", UPLINK_FWD_SRC,
+                                 ["hub_glink.c", "hub_frame.c", "hub_json.c"], td)
+        if exe is None:
+            print("  FAIL  上行转发用例表：" + err)
+            return 1
+        rp = subprocess.run([exe], capture_output=True, text=True)
+    print(rp.stdout, end="")
+    if rp.stderr.strip():
+        print(rp.stderr, file=sys.stderr)
+    return 0 if rp.returncode == 0 else 1
+
+
 def main():
     in_docker = "--inside-docker" in sys.argv
     cc = find_cc()
@@ -443,7 +699,11 @@ def main():
     fwfail = check_fw_version_consistency()
     hfail = check_cccd_handle()
     sfail = check_sub_decide(cc)
-    total_bad = (1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail
+    pafail = check_poll_accounting(cc)
+    upfail = check_uplink_forward(cc)
+    pffail = check_pump_forwards()
+    total_bad = ((1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail
+                 + pafail + upfail + pffail)
     print("\n==== hub-selftest 总判定：%s ====" % ("PASS" if total_bad == 0 else "FAIL"))
     print("日志：ws63-firmware/out/hub-selftest.log；mock 聚合证据：ws63-firmware/out/hub-mock-agg.log")
     return 0 if total_bad == 0 else 1

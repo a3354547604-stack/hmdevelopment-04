@@ -30,6 +30,7 @@
  * 一切状态推进都在主循环里做 —— 这与 node_link.c「下行只入队」是同一条纪律。
  * 例外只有一处：`sle_enable_cbk` 里设置本机地址，那是协议栈自己的初始化回调，必须当场做。
  */
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -1321,7 +1322,9 @@ static void hub_pump_events(int64_t now)
 
 static void hub_pump_uplinks(int64_t now)
 {
-    while (hub_glink_pop_uplink(&g_glink, &g_up) != 0) {
+    int budget = (int)HUB_UPLINK_BUDGET;
+
+    while (budget-- > 0 && hub_glink_pop_uplink(&g_glink, &g_up) != 0) {
         hub_uplink_t u;
         char body[HUB_GLINK_UP_ENTRY];
 
@@ -1335,6 +1338,11 @@ static void hub_pump_uplinks(int64_t now)
         /* t59：这一帧同时是"订阅真的生效了"的证据（见 hub_sub_confirm_on_frame）。
          * 放在 on_uplink 之后：状态机先记账，再让订阅状态机跟着跳 READY。 */
         hub_sub_confirm_on_frame(u.sn);
+        /* t70：这一条就是「汇聚 → 网关」的透传。取出队列的人负责发出去 ——
+         * 队列只是协议栈回调到主循环的单向交接，不再是待发送缓冲。
+         * 限流：单拍最多 HUB_UPLINK_BUDGET 条，剩下的留在环里下一拍继续
+         * （环满时 push 侧丢最新并计入 up_drop，语义见 hub_glink.h）。 */
+        (void)hub_glink_send_uplink(&g_glink, &g_up);
         if (strcmp(u.type, "fall") == 0 && u.fall == 1) {
             (void)memcpy_s(body, sizeof(body), g_up.json, sizeof(body));
             g_fall_body[sizeof(g_fall_body) - 1u] = '\0';
@@ -1352,11 +1360,16 @@ static void hub_stat(void)
         return;
     }
     g_last_stat_ms = now;
-    HUB_LOG("STAT up=%us rx=%u poll_ok=%u poll_miss=%u ev_on=%u ev_off=%u ev_fall=%u "
-            "disc=%u unknown=%u retrans=%u gw_miss=%u drop(ev=%u up=%u uart=%u) conns=%d wl=%d",
+    /* t70：把 last_late 与最近一次结算的 rtt 打进 STAT —— poll_ok 恒 0 那次就是靠
+     * 「rx 在涨而 poll_ok 不动」看出来的，rtt 则是量真实应答时延的唯一现场数字。 */
+    HUB_LOG("STAT up=%us rx=%u poll_ok=%u poll_miss=%u late=%u rtt=%u@%u ev_on=%u ev_off=%u ev_fall=%u "
+            "disc=%u unknown=%u up_sent=%u retrans=%u gw_miss=%u drop(ev=%u up=%u uart=%u) conns=%d wl=%d",
             (unsigned)g_agg.uptime_s, (unsigned)g_agg.rx_frames, (unsigned)g_agg.poll_ok,
             (unsigned)g_agg.poll_miss, (unsigned)g_agg.ev_online, (unsigned)g_agg.ev_offline,
+            (unsigned)g_agg.poll_late, (unsigned)g_agg.last_rtt_ms,
+            (unsigned)g_agg.last_rtt_slot,
             (unsigned)g_agg.ev_fall, (unsigned)g_agg.disc_total, (unsigned)g_agg.uplink_unknown,
+            (unsigned)g_glink.up_sent,
             (unsigned)g_glink.retrans, (unsigned)g_glink.gw_rx_miss, (unsigned)g_ev_drop,
             (unsigned)g_glink.up_drop, (unsigned)g_uart_err, cli_conn_count(),
             (int)g_agg.wl_count);
@@ -1511,6 +1524,18 @@ static void hub_uart_loopback_check(void)
     HUB_LOG("uart1 loopback no echo (pin 23/24 not shorted; normal when a gateway is attached)");
 }
 
+static void hub_glink_log_forward(void *ctx, const char *fmt, ...)
+{
+    char line[192];
+    va_list ap;
+
+    (void)ctx;
+    va_start(ap, fmt);
+    (void)vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    HUB_LOG("%s", line);
+}
+
 static void hub_port_init(void)
 {
     hub_glink_port_t port = {0};
@@ -1519,7 +1544,10 @@ static void hub_port_init(void)
     port.uart_read = hub_port_read;
     port.now_ms = hub_port_now;
     port.on_gw_cmd = hub_on_gw_cmd;
-    port.log = NULL;
+    /* t70：以前这里是 NULL —— glog() 见 log 为空就直接返回，于是 [GLINK] 那几行
+     * （含「-> 0x01 已发出」）在串口上一条都不打。上板排查时看不到「帧到底发没发」，
+     * 正是 t59 那个 P0 藏了一整轮的原因。现在原样转给 HUB_LOG。 */
+    port.log = hub_glink_log_forward;
     port.ctx = NULL;
     hub_glink_init(&g_glink, &port);
 }

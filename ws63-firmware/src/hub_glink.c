@@ -339,6 +339,30 @@ int hub_glink_feed(hub_glink_t *g, void *cb_ctx, const uint8_t *buf, uint32_t le
     return frames;
 }
 
+int hub_glink_send_uplink(hub_glink_t *g, const hub_glink_up_t *up)
+{
+    uint8_t  frame[HUB_FRAME_MAX];
+    uint16_t seq;
+    int      n;
+
+    if (g == NULL || up == NULL) {
+        return -1;
+    }
+    seq = hub_glink_next_seq(g);
+    n = hub_frame_build_node(seq, up->json, up->len, frame, (uint32_t)sizeof(frame));
+    if (n < 0) {
+        glog(g, "[GLINK] node frame build failed sn=%s len=%u\r\n", up->sn, (unsigned)up->len);
+        return -1;
+    }
+    if (glink_write(g, frame, (uint32_t)n) != n) {
+        glog(g, "[GLINK] uart write failed (0x01 sn=%s)\r\n", up->sn);
+        return -1;
+    }
+    g->up_sent++;
+    glog(g, "[GLINK] -> 0x01 sn=%s seq=%u len=%d body=%s\r\n", up->sn, (unsigned)seq, n, up->json);
+    return n;
+}
+
 int hub_glink_tick(hub_glink_t *g)
 {
     int     progress = 0;
@@ -352,22 +376,12 @@ int hub_glink_tick(hub_glink_t *g)
         hub_glink_up_t up;
         int budget = 6;                 /* 单 tick 限流：串口 115200，别把主循环堵死 */
 
+        /* 环形队列现在由 hub_pump_uplinks() 取出并调用 hub_glink_send_uplink() 转发，
+         * 所以这里通常已经空了。保留这段是为了兜住「有人直接往队列里塞」的老用法，
+         * 限流语义（6 帧/tick）与之前完全一致。 */
         while (budget-- > 0 && hub_glink_pop_uplink(g, &up) == 1) {
-            uint8_t  frame[HUB_FRAME_MAX];
-            uint16_t seq = hub_glink_next_seq(g);
-            int      n = hub_frame_build_node(seq, up.json, up.len,
-                                             frame, (uint32_t)sizeof(frame));
-            if (n < 0) {
-                glog(g, "[GLINK] node frame build failed sn=%s len=%u\r\n", up.sn, (unsigned)up.len);
-                continue;
-            }
-            if (glink_write(g, frame, (uint32_t)n) == n) {
-                g->up_sent++;
+            if (hub_glink_send_uplink(g, &up) > 0) {
                 progress++;
-                glog(g, "[GLINK] -> 0x01 sn=%s seq=%u len=%d body=%s\r\n",
-                     up.sn, (unsigned)seq, n, up.json);
-            } else {
-                glog(g, "[GLINK] uart write failed (0x01 sn=%s)\r\n", up.sn);
             }
         }
     }

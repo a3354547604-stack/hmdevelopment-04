@@ -131,6 +131,15 @@ void hub_glink_on_time(hub_glink_t *g, int64_t gw_ts_ms);
  * @brief 周期任务：排在队里的上行帧发出去、在途下行超时则重传。
  * @return 本次推进的"进展条数"（0 = 什么都没做，调用方可据此少打日志）
  */
+/* 把一条已经出队的上行（节点 JSON）打成 0x01 帧发出去。
+ *
+ * 为什么需要它：上行环形队列的语义是「协议栈回调 → 主循环」的**单向交接**。
+ * t70 之前 hub_pump_uplinks() 用 hub_glink_pop_uplink() 把条目取走喂聚合状态机，
+ * 而同一个队列又是 hub_glink_tick() 的发送源 —— 于是帧被取走就再也没人发，
+ * 上板 100 s 里 `[GLINK] -> 0x01` 一条都没有（P0）。现在由取出方负责转发，
+ * 队列不再承担「待发送缓冲」的角色。 */
+int hub_glink_send_uplink(hub_glink_t *g, const hub_glink_up_t *up);
+
 int hub_glink_tick(hub_glink_t *g);
 
 /**

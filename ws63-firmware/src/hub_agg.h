@@ -30,7 +30,21 @@ extern "C" {
  *      因为那个头引用了 SDK 的 UART_BUS_1 枚举）。每一项都能在契约里找到出处。
  *      hub_client.c 里不再重复定义，硬件/身份相关的宏才放 hub_cfg.h。 ---- */
 #define HUB_POLL_PERIOD_MS      3000u    /* §2.1/§2.6：每 3 s 一轮轮询 */
-#define HUB_POLL_DEADLINE_MS    200u     /* §2.1：节点须在 200 ms 内应答 */
+/* t70 删掉了原来的 HUB_POLL_DEADLINE_MS(200 ms)。它按 §2.1「节点须在 200 ms 内应答」
+ * 设的，但那个 200 ms 是**节点收到 poll 到它把应答写进协议栈**的时间；从协议栈通知
+ * 到汇聚 notification_cb 还要再走一段（上板实测 ~270 ms），于是每条应答到达时
+ * poll_pending 都已被清掉 -> poll_ok 恒 0、misses 每轮 +1 -> 3 次就误判离线
+ * （t59 上板 rx=53 / poll_ok=0 / poll_miss=27 / ev_on=9 ev_off=8）。
+ * 现在改成语义上不依赖时延的规则：**上一次 poll 还没答上就要发下一次时，才算一次 miss**，
+ * 即「一个轮询周期内没等到应答」。这与 §8.7「连续 3 次无应答判离线」一致，
+ * 而 3 x HUB_POLL_PERIOD_MS = 9 s 正好就是 §8.7 的节点离线门限。 */
+/* 单次 poll 的应答时延上界。**必须显著大于真实的通知送达时延**：
+ *   节点收到 poll 后 30 ms 就把应答写进协议栈，但从协议栈通知到汇聚 notification_cb
+ *   还要走一段（t59 上板实测 ~270 ms）。旧值 200 ms 因此把每条正常应答都判成 miss。
+ *   1000 ms 仍远小于 HUB_POLL_PERIOD_MS(3000)，所以 §8.7「连续 3 次无应答判离线」的
+ *   时间尺度（约 9~10 s）不变；它只是「多久算这次没答上」的上界，另有
+ *   hub_poll_schedule() 里「下一拍都发了还没答」的兜底，两处都先判 poll_pending。 */
+#define HUB_POLL_ANSWER_TIMEOUT_MS 1000u
 #define HUB_POLL_MISS_LIMIT     3u       /* §8.7：连续 3 次无应答判离线 */
 #define HUB_POLL_GAP_MS         200u     /* 同一轮里三个节点依次发，隔开 200 ms（§2.6「依次」） */
 #define HUB_STATUS_PERIOD_MS    30000u   /* §3.4：0x02 心跳 30 s */
@@ -84,6 +98,7 @@ typedef struct {
 
     uint8_t  misses;
     uint16_t poll_id;          /* 最近一次发出去的 poll 的 id */
+    uint16_t poll_missed_id;   /* t70：已被判 miss 的那次 poll id（迟到应答据此计数，不重复结算） */
     int64_t  poll_sent_ms;
     uint8_t  poll_pending;
 
@@ -177,6 +192,9 @@ typedef struct {
     uint32_t   ev_fall;
     uint32_t   poll_ok;
     uint32_t   poll_miss;
+    uint32_t   poll_late;       /* t70：下一拍都发了才到的匹配应答，只计数留证 */
+    uint8_t    last_rtt_slot;   /* t70：最近一次结算 rtt 的槽位（量真实应答时延用） */
+    uint16_t   last_rtt_ms;
     uint32_t   uplink_unknown;
     uint32_t   disc_total;
 } hub_agg_t;

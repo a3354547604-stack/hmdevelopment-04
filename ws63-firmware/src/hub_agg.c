@@ -460,14 +460,26 @@ int hub_agg_on_uplink(hub_agg_t *a, const hub_uplink_t *u, int64_t now_ms, hub_a
         }
     }
     /* 轮询应答：节点回两条（status + 主类型）都带同一个 req_id，只有第一条结算 rtt */
-    if (u->req_id >= 0 && (uint16_t)u->req_id == n->poll_id) {
+    if (u->req_id >= 0 && n->poll_id != 0u && (uint16_t)u->req_id == n->poll_id) {
+        /* t70：结算只看 req_id 是否匹配**当前在途的那次 poll**，不再看「是否在 200 ms 内到达」。
+         * 空口上行本来就是几十到几百毫秒，用固定时延判定只会把正常应答判成 miss。 */
         if (n->poll_pending) {
             int64_t dt = now_ms - n->poll_sent_ms;
             n->poll_pending = 0u;
+            n->poll_missed_id = 0u;
+            n->misses = 0u;         /* 有应答就清零：§8.7 的「连续 3 次」是连续 */
             n->rtt_ms = (uint16_t)((dt < 0) ? 0 : ((dt > 65535) ? 65535 : dt));
             n->have_rtt = 1u;
             a->poll_ok++;
+            a->last_rtt_slot = idx;
+            a->last_rtt_ms = n->rtt_ms;
         }
+        /* 同一拍的第二条（status + 主类型）也带同一个 req_id：什么都不做，别重复结算 */
+    } else if (u->req_id >= 0 && n->poll_missed_id != 0u && (uint16_t)u->req_id == n->poll_missed_id) {
+        /* 已经被判过 miss 的那次 poll 的应答姗姗来迟：只计数留证，**不**补记 poll_ok/rtt
+         * （否则一次应答会被算两次：先记 miss 再记 ok） */
+        n->poll_missed_id = 0u;
+        a->poll_late++;
     } else if (u->req_id >= 0) {
         n->req_mismatch++;          /* 对不上号的 req_id：只记统计，不当成应答 */
     }
@@ -490,7 +502,6 @@ int hub_agg_on_uplink(hub_agg_t *a, const hub_uplink_t *u, int64_t now_ms, hub_a
 
 /* ================================================================== */
 /* 周期                                                                */
-/* ================================================================== */
 
 static void hub_poll_account(hub_agg_t *a, hub_act_t *act, int64_t now_ms)
 {
@@ -498,20 +509,25 @@ static void hub_poll_account(hub_agg_t *a, hub_act_t *act, int64_t now_ms)
 
     for (i = 0; i < a->wl_count; i++) {
         hub_node_t *n = &a->node[i];
-        if (!n->poll_pending) {
+
+        if (n->poll_pending == 0u) {
             continue;
         }
-        if (now_ms - n->poll_sent_ms <= (int64_t)HUB_POLL_DEADLINE_MS) {
-            continue;               /* 还在 200 ms 窗口里 */
+        if (now_ms - n->poll_sent_ms < (int64_t)HUB_POLL_ANSWER_TIMEOUT_MS) {
+            continue;               /* 还在上界内，继续等（正常应答 ~270 ms 就到了） */
         }
+        /* 这一拍算没答上 */
         n->poll_pending = 0u;
+        n->poll_missed_id = n->poll_id;
         n->misses++;
         a->poll_miss++;
         if (n->online && n->misses >= (uint8_t)HUB_POLL_MISS_LIMIT) {
             n->online = 0u;
             a->ev_offline++;
             a->list_dirty = 1u;
-            (void)hub_act_push(act, HUB_AK_EVENT_OFF, i, 0u);
+            if (act != NULL) {
+                (void)hub_act_push(act, HUB_AK_EVENT_OFF, i, 0u);
+            }
         }
     }
 }
@@ -531,7 +547,24 @@ static void hub_poll_schedule(hub_agg_t *a, hub_act_t *act, int64_t now_ms)
         }
         n = &a->node[a->poll_rr];
         a->poll_rr++;
-        if (n->state == HUB_SLOT_READY && n->have_conn && !n->poll_pending) {
+        if (n->state == HUB_SLOT_READY && n->have_conn) {
+            if (n->poll_pending) {
+                /* t70：上一拍还没答上，这一拍又要发了 —— 这才是一次 miss。
+                 * 不再用「200 ms 内必须到」判死：那 200 ms 是节点侧的应答预算，
+                 * 而从协议栈通知到汇聚 notification_cb 还有一段时延（实测 ~270 ms）。 */
+                n->poll_pending = 0u;
+                n->poll_missed_id = n->poll_id;
+                n->misses++;
+                a->poll_miss++;
+                if (n->online && n->misses >= (uint8_t)HUB_POLL_MISS_LIMIT) {
+                    n->online = 0u;
+                    a->ev_offline++;
+                    a->list_dirty = 1u;
+                    if (act != NULL) {
+                        (void)hub_act_push(act, HUB_AK_EVENT_OFF, (uint8_t)(a->poll_rr - 1u), 0u);
+                    }
+                }
+            }
             a->poll_id_seq++;
             if (a->poll_id_seq == 0u) {
                 a->poll_id_seq = 1u;      /* 0 留给「未提供」（§2.5 id 可选） */

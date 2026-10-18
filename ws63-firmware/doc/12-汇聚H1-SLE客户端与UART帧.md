@@ -359,3 +359,26 @@ python3 tools/node-compile-check.py    # 41 个（目标 × 文件）编译，�
 - 节点侧 CCCD 识别**未在板上验证**：板 B 烧的是 t23 时编的 `NODE_M1.fwpkg`（不含本卡对
   `sle_hub.c` 的改动），所以日志里是旧路径的 `write req … len=2` +
   `[M1] downlink not a command, ignored:`。**节点侧改动只有编译与源码级覆盖**（§10.3）。
+
+## 11 t70：上行透传真打通 + poll 结算按应答配对（并暴露第三个 P0）
+
+### 11.1 ① 上行 0x01 透传：环形队列不再是待发送缓冲
+- 旧实现里 `hub_pump_uplinks()` 用 `hub_glink_pop_uplink()` **取出即丢弃**，真正发帧的 `hub_glink_tick()` 永远看到空队列 → 节点数据一条也到不了网关。t59 只证明「订阅/下发通了」（`ev_on` 计数在涨），上行从未上过串口。
+- 新增 `hub_glink_send_uplink(hub_glink_t *, const hub_glink_up_t *)`（`hub_glink.c`）：组 `hub_frame_build_node()` 帧 → `glink_write()` → 成功才 `up_sent++`。**取出方负责发送**，队列语义退化为「协议栈回调 → 主循环」的单向交接。
+- 限流语义变化（写明）：单拍最多 `HUB_UPLINK_BUDGET`(=6) 条，剩余留环下一拍继续；环满时 `push` 侧丢最新并计入 `up_drop`。
+
+### 11.2 ② poll 结算：不再用拍内 200 ms 当判据
+- 旧 `HUB_POLL_DEADLINE_MS 200` 是「节点收到 poll → 写进协议栈」的预算，而通知送到汇聚 `notification_cb` 还要约 270 ms，于是每条应答到达时 poll 早已被记为 `poll_miss`（t59 板上 `poll_ok=0 / poll_miss=27 / ev_off=8`，节点被反复判离线）。
+- 改法：`HUB_POLL_ANSWER_TIMEOUT_MS 1000` 按**应答配对**记账（`poll_account()` 在 `on_uplink` 里按 `poll_missed_id` 匹配后才记 `poll_ok` 与 rtt），并在调度时刻加一次兜底结算，保证「没应答」仍会在下拍被判离线；STAT 新增 `late`/`rtt` 便于分辨「迟到」与「丢失」。
+
+### 11.3 上板实测（COM15 = 汇聚，COM14 = M1 节点，各 200 s）
+- ② 修复后：`poll_ok=53 poll_miss=1 late=1 rtt=… ev_off=0`（对比修复前 `poll_ok=0 poll_miss=27 ev_off=8`），节点侧不再被误判离线。
+- ③ 节点侧真验：`[SLE-HUB] CCCD written by client conn=0x0 handle=0x11 cfg=0x0001 subscribed=1`（真板收到汇聚写的 CCCD，句柄 0x11 与 t59 修复一致）；`downlink not a command` 计数 **0**。
+- ④ 脚本超时：`tools/ws63flash-port.exe <fwpkg> app COM15 <log>`（≥120 s）+ `tools/serial-capture.ps1 -Port COM15 -Seconds 200 -Out … -Reset -Quiet`。
+- **新发现 ③（本轮无法收口，另开卡）**：`hub_port_write()` 以 `uapi_uart_write(HUB_UART_BUS, buf, len, 0)` 的返回值 == `ERRCODE_SUCC` 为成功判据，timeout 传 0；本台架上**所有**帧（0x01/0x02/0x03/0x24）都走 `[GLINK] uart write failed`，`up_sent=0`。即「帧已按节点原 JSON 组装完毕并交到 uart_write，但一个字节也没真正发出」。t59 之所以没看出这条，是因为当时 `g_glink.port.log == NULL`（本卡已把它接上 `hub_glink_log_forward`，否则链路层日志整段黑屏）。
+
+### 11.4 验证命令
+- `python3 tools/hub-selftest.py`（192 PASS / 0 FAIL；新增 `check_uplink_forward` 逐字节断言、`check_pump_forwards` 源码断言、`check_poll_accounting` 真 `hub_agg.c` 记账断言）
+- 变异检验：删 `hub_glink_send_uplink` 调用 → 红；`poll_account` 改回 200 ms 拍内判据 → 红。
+- `python3 tools/node-compile-check.py`（41 单元 / 0 失败）
+- `tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh hub`（提交口径 HUB_HUB.fwpkg 1473384 B）

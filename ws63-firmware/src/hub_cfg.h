@@ -61,7 +61,12 @@
  * **不再重复定义** —— 两处定义迟早会漂移，而漂移在板上表现为无声的行为差异。 */
 #include "hub_agg.h"
 
-/* 主循环节拍：50 ms —— poll 超时窗是 HUB_POLL_DEADLINE_MS(200 ms)，节拍必须明显小于它 */
+/* 主循环节拍：50 ms —— 轮询周期 3000 ms、单拍最多转发 HUB_UPLINK_BUDGET 条上行，节拍远小于它们 */
+/* 单拍最多向网关转发的上行条数（t70）。原来的 6 帧/tick 限流在 hub_glink_tick()
+ * 里，而上行队列已被 hub_pump_uplinks() 取空，那段限流等于没生效；现在搬到取出方，
+ * 语义变成「每拍最多 6 条出队转发，多余的留在环里下一拍继续」。 */
+#define HUB_UPLINK_BUDGET       6u
+
 #define HUB_TICK_MS             50u
 #define HUB_TASK_PRIO           24
 #define HUB_TASK_STACK          0x4000
