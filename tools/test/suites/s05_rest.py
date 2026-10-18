@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract")))
 
 import contract_source as cs          # noqa: E402
+import known_issues as ki             # noqa: E402          # noqa: E402
 import mock_server                    # noqa: E402
 from harness import CaseFail, SkipCase, SuiteResult, require, require_eq, require_in, run_cases  # noqa: E402
 
@@ -179,7 +180,13 @@ def case_endpoints_all_reachable():
                    for k in known_paths):
             missing.append((method, path, "验收基线未覆盖该接口"))
     if missing:
-        raise SkipCase("以下接口尚未覆盖（mock 未实现或基线未写）：%r" % missing[:6])
+        # 只有「已登记待收口」的接口才允许 SKIP（带原因 + 负责人卡号），其余一律 FAIL：
+        # 静默 SKIP 会把「mock 少一个路由」长期藏起来。
+        paths = {p for _m, p, _why in missing}
+        if paths <= {"/api/time"}:
+            ki.pending("COV-1", "未覆盖：%r" % sorted(paths))   # 抛 SkipCase，见下
+        else:
+            raise CaseFail("以下接口未覆盖且未登记（mock 未实现或基线未写）：%r" % missing[:6])
 
 
 def case_register_and_login_errors():

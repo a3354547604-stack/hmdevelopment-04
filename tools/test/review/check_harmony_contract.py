@@ -112,11 +112,14 @@ body_keys = set(re.findall(r"items\['([a-z_0-9]+)'\] = patch\.", http))
 print("  §6.9 示例键 %d；SettingsItems %d；settingsBody %d"
       % (len(contract_keys), len(types_keys), len(body_keys)))
 extra = types_keys - contract_keys
-if extra == {"gas_l1_to_l2_s"}:
-    ok("App 仍按可选键带 gas_l1_to_l2_s（v1.2 D-01 已裁：该键属 §8.2 算法参数、**不在 §6.9 items 里**，"
-       "整体提交会被服务器 400/1003 拒）→ App 侧待修 t38/t45，本卡只对齐基线、不改 App")
+# t64 更正：这条期望原先写「App 仍带 gas_l1_to_l2_s → ok」（等 App 修）。
+# App 已在 t62 按 PM D-01 收敛到 §6.9 的 21 键，所以现在的正确期望是**差集为空**；
+# 差集非空才是缺陷（会整体提交 → 服务器 400/1003）。
+if not extra:
+    ok("App 的 SettingsItems 与 §6.9 键集合一致（%d 键，D-01 已收口：gas_l1_to_l2_s 属 §8.2 算法参数、"
+       "不在 items 里）" % len(types_keys))
 else:
-    diff("App 与 §6.9 示例的键差集不是预期的 {gas_l1_to_l2_s}：%s" % sorted(extra))
+    diff("App 多出 §6.9 之外的键（整体提交会被服务器 400/1003 拒）：%s" % sorted(extra))
 if body_keys == types_keys:
     ok("settingsBody 提交清单 == SettingsItems 全部 %d 键（逐键显式判断，未遍历属性）" % len(body_keys))
 else:
@@ -187,7 +190,7 @@ print("F. 核对表 D-01…D-06 现状")
 d_items = [
     ("D-01 gas_l1_to_l2_s 只在 §8.2（v1.2 已裁：不进 §6.9 items）",
      "gas_l1_to_l2_s" in types and "gas_l1_to_l2_s" in http,
-     "契约侧已定稿为 §8.2 算法参数；App 仍带该键 → 提交会被 400/1003 拒，待修 t38/t45"),
+     "契约侧已定稿为 §8.2 算法参数；App 已在 t62 收敛到 §6.9 的 21 键（不解析也不提交）"),
     ("D-02 §6.9 引用错节（写 §8.6 键值）", "§8.6" in C.section_text("6.9"),
      "契约 §6.9 正文仍写 '... §8.6 键值 ...'，阈值实际散在 §8.2/§8.3/§8.5/§8.7/§8.8"),
     ("D-03 §6.13 曾含 recovered_at:null",

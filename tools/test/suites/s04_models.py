@@ -208,11 +208,21 @@ def case_required_error_codes_present():
 
 
 def case_1502_conflict_known():
-    """§3.6 用 result=1502 表示下发失败，与 §9.2（1502=webhook 校验失败）/§9.3（0–7）冲突。"""
+    """§3.6 不得再把 1502 当设备侧 result：1502 只属 §9.2 的 webhook 校验失败。
+
+    B2 已消解（契约 v1.2 ①：§3.6 重发失败改 result=12、§9.3 新增 12）：t64 起是硬断言。
+    允许 §3.6 **提到** 1502，但只能出现在「只用于 webhook / 不允许」这类禁止语境里。
+    """
     framing = C.section_text("3.6")
     device = C.device_errors()
-    if "1502" in framing and 1502 not in device:
-        ki.known("B2", "§3.6 出现 result=1502，§9.3 只有 0–%d" % max(device))
+    require_in(12, device, "§9.3 设备码应有 12（链路超时/无应答）")
+    require(("result=12" in framing) or ("`12`" in framing),
+            "§3.6 重发失败应报 result=12（§9.3），而不是 1502")
+    for m in re.finditer("1502", framing):
+        ctx = framing[max(0, m.start() - 60):m.end() + 60]
+        require(("只用于 webhook" in ctx) or ("不允许" in ctx),
+                "§3.6 提到 1502 但不在禁止语境里（可能又把 1502 当设备侧 result 用了）：…%s…"
+                % ctx.strip())
 
 
 def case_device_error_codes():

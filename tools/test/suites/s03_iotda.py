@@ -174,16 +174,22 @@ def case_properties_cover_core_set():
 
 
 def case_properties_p0_conflict_known():
-    """§4.6 示例含 lpg/co，而 §4.3 标注 P0 未装→缺省：已登记 M6。"""
+    """§4.6 的上报示例不得出现 P0 未装的属性（lpg/co/presence/last_motion_ts）。
+
+    M6 已消解（契约 v1.2 ⑧：§4.6 示例改为 P0 真实上报）：t64 起是硬断言。
+    注意 §4.6 的示例是 node_samples 消息（payload 以转义 JSON 嵌在 content 串里），
+    所以直接扫原文的 `"key":` 形态——早先按 ex["services"] 取属性的写法在这里恒为空，
+    是个假绿。
+    """
+    raw = C.section_text("4.6")
+    require(bool(C.json_blocks("4.6")), "§4.6 应有 JSON 示例（版式变了？）")
     text43 = C.section_text("4.3")
-    props_in_example = set()
-    for ex in C.iotda_examples():
-        if isinstance(ex, dict):
-            for svc in ex.get("services", []):
-                props_in_example |= set((svc.get("properties") or {}).keys())
-    conflicted = {p for p in ("lpg", "co") if p in props_in_example}
-    if conflicted and ("P1" in text43 or "缺省" in text43):
-        ki.known("M6", "示例里出现 %s，§4.3 标 P1/缺省" % sorted(conflicted))
+    p1_props = [p for p in ("lpg", "co", "presence", "last_motion_ts")
+                if re.search(r'\\?"%s\\?"\s*:' % p, raw)]
+    require(not p1_props,
+            "§4.6 上报示例出现 P0 未装属性 %s，与 §4.3「P0 未装→缺省」口径冲突（P0 应直接省略该属性）"
+            % p1_props)
+    require(("P1" in text43) or ("缺省" in text43), "§4.3 应写明 P0 未装属性缺省/P1")
 
 
 CASES = [

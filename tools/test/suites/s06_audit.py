@@ -32,9 +32,9 @@ def _line_of(needle: str) -> int:
 
 
 def case_section_numbers_unique():
+    # V11-2 已消解（§12 编号唯一）：t64 起是硬断言
     dups = C.duplicate_section_numbers()
-    if dups:
-        ki.known("V11-2", "重复编号：%r" % dups)
+    require(not dups, "章节编号重复：%r" % dups)
 
 
 def case_all_section_refs_exist():
@@ -49,53 +49,61 @@ def case_all_section_refs_exist():
 
 
 def case_settings_key_ref():
-    """§2.5 的 key 说明必须指向 §6.9（settings 读取），不是 §6.7（设备状态）。"""
+    """§2.5 的 key 说明必须指向 §6.9（settings 读取），不是 §6.7（设备状态）。
+
+    M3 已消解（契约 v1.2 ⑤ 交叉引用 6 类 7 处）：t64 起是硬断言。
+    """
     text = C.section_text("2.5")
-    m = re.search(r"settings 键名）|settings", text)
-    if "§6.7" in text and "§6.9" not in text:
-        ki.known("M3", "§2.5 引用 §6.7（设备状态），settings 在 §6.9；L%d" % _line_of("settings 键名"))
     require("§6.9" in text or "§6.10" in text, "§2.5 应引用 §6.9/§6.10 的 settings 键名")
+    require(not ("§6.7" in text and "§6.9" not in text),
+            "§2.5 引用了 §6.7（设备状态），settings 键名在 §6.9")
 
 
 def case_gateway_offline_ref():
     """§6.5 的 online 说明应指向 §8.7（离线判定），不是 §8.5（无活动）。"""
     text = C.section_text("6.5")
-    if "§8.5" in text and "§8.7" not in text:
-        ki.known("M3", "§6.5 online 引用 §8.5，离线判定在 §8.7；L%d" % _line_of("180 s 规则"))
     require("§8.7" in text, "§6.5 应引用 §8.7")
+    require(not ("§8.5" in text and "§8.7" not in text), "§6.5 online 不应引用 §8.5")
 
 
 def case_disposition_ref():
     """§8.4 的「闭环由人工处置结束」应指向 §6.15（处置），不是 §6.10。"""
     text = C.section_text("8.4")
-    if "§6.10" in text and "§6.15" not in text:
-        ki.known("M3", "§8.4 处置引用 §6.10（settings 写），实际在 §6.15；L%d" % _line_of("闭环仍由人工处置结束"))
     require("§6.15" in text, "§8.4 应引用 §6.15")
+    require(not ("§6.10" in text and "§6.15" not in text), "§8.4 处置不应引用 §6.10")
 
 
 def case_push_table_ref():
     text = C.section_text("6.19")
-    if "§7.11" in text and "§7.12" not in text:
-        ki.known("M3", "§6.19 push_tokens 引用 §7.11（device_online），实际 §7.12；L%d" % _line_of("§7.11"))
     require("§7.12" in text or "§7.11" not in text, "§6.19 应引用 §7.12")
 
 
 def case_door_dispatch_ref():
     text = C.section_text("3.8")
-    if "§8.4" in text and "§8.5" not in text:
-        ki.known("M3", "§3.8 door 分派引用 §8.4（跌倒），实际 §8.5；L%d" % _line_of("door→门状态"))
     require("§8.5" in text, "§3.8 应引用 §8.5")
+    require(not ("§8.4" in text and "§8.5" not in text), "§3.8 door 分派不应引用 §8.4")
 
 
 def case_activity_merge_ref():
-    """§5.3 / §0.2 的活动归并应指向 §7.9/§7.10，不是 §7.6（原始读数）。"""
-    bad = []
-    for sec in ("5.3", "0.2", "4.1"):
-        text = C.section_text(sec)
-        if "§7.6" in text and "§7.9" not in text:
-            bad.append(sec)
-    if bad:
-        ki.known("M3", "活动归并引用 §7.6（原始读数），实际 §7.9/§7.10：§%s" % ", §".join(bad))
+    """§5.3 的活动归并应指向 §7.9/§7.10（activity_hourly/daily），不是 §7.6（原始读数）。
+
+    M3 已消解；§0.2 的「报表日历切分」是另一处引用，单列 case_report_calendar_ref。
+    """
+    text = C.section_text("5.3")
+    require("§7.9" in text or "§7.10" in text, "§5.3 活动归并应引用 §7.9/§7.10")
+    require(not ("§7.6" in text and "§7.9" not in text),
+            "§5.3 活动归并引用了 §7.6（sensor_readings 原始读数），实际归并在 §7.9/§7.10")
+
+
+def case_report_calendar_ref():
+    """§0.2「报表的日/小时按 UTC+8 日历切分」的落点应是活动归并表 §7.9/§7.10。
+
+    这是 M3 修正后残留的一处引用（§7.6 是 sensor_readings，不是日历切分的定义处），
+    已登记为 PENDING M3-0.2（负责人：PM 契约修订）。契约改好后本用例应转硬断言。
+    """
+    for line in C.section_text("0.2").splitlines():
+        if "日历" in line and "报表" in line and "§7.6" in line and "§7.9" not in line:
+            ki.pending("M3-0.2", "§0.2 报表日历行引用 §7.6：%s" % line.strip()[:70])
 
 
 def case_adc_mv_order_claim():
@@ -105,10 +113,14 @@ def case_adc_mv_order_claim():
     require(row is not None, "§11 找不到 adc_mv 一致性行")
     sec_241 = C.section_text("2.4.1")
     claim = t.cell(row, "契约要求")
-    if "ch4" in claim and ("长度 1" in sec_241 or "[ch2]" in sec_241):
-        ki.known("M5", "§11 #2 声称 %s，而 §2.4.1 P0 只发 [ch2]；L%d"
-                 % (re.search(r"\[ch2[^\]]*\]", claim).group(0) if re.search(r"\[ch2[^\]]*\]", claim) else claim,
-                    _line_of("adc_mv")))
+    # M5 已消解（契约 v1.2 ⑦：§11 #2 改「P0 单路 [ch2]」）：t64 起是硬断言。
+    # 注意：claim 里出现 ch3/ch4 是 P1 扩展说明，允许；不允许的是把 P0 也说成多路。
+    require("[ch2]" in claim, "§11 #2 应写明 P0 = [ch2]（与 §2.4.1 长度 1 一致）")
+    require("长度 1" in sec_241 or "P0 = `[ch2]`" in sec_241,
+            "§2.4.1 应写明 P0 长度 1 = [ch2]")
+    p0_multi = re.search(r"P0[^。\n]{0,20}\[ch2\s*,\s*ch3", claim)
+    require(p0_multi is None,
+            "§11 #2 不得声称 P0 的顺序是多路：…%s…" % (p0_multi.group(0) if p0_multi else ""))
 
 
 def case_alert_types_have_summary():
@@ -151,35 +163,76 @@ def case_timestamp_units():
     require("Unix ms" in text or "毫秒" in text, "§0 应统一时间戳单位（Unix ms）")
 
 
-def case_timestamp_example_known():
-    """§0.2 的时间换算示例 1760000000000 实际是 2025-10-09T08:53:20Z。"""
+def case_timestamp_example():
+    """§0.2 的时间换算示例必须自洽（毫秒值 ↔ 写出来的 UTC 时刻）。
+
+    M7 已消解（契约 v1.2 ⑨：全文毫秒样例统一到 2026-10-17，CRC 锁定帧与鉴权夹具除外）：
+    t64 起是硬断言。
+    """
     text = C.section_text("0")
-    m = re.search(r"1760000000000[^\n]*?(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})", text)
-    if not m:
-        return
-    claimed = m.group(0)
-    real = datetime.fromtimestamp(1760000000000 / 1000, tz=timezone.utc)
-    if "%04d-%02d-%02d" % (real.year, real.month, real.day) != m.group(1):
-        ki.known("M7", "契约写 %r，实际 %s；L%d"
-                 % (claimed[:40], real.strftime("%Y-%m-%dT%H:%M:%SZ"), _line_of("1760000000000")))
+    m = re.search(r"(\d{13})[^\n]*?(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})", text)
+    require(m is not None, "§0.2 应有「毫秒值 ↔ UTC 时刻」的换算示例")
+    real = datetime.fromtimestamp(int(m.group(1)) / 1000, tz=timezone.utc)
+    require("%04d-%02d-%02d" % (real.year, real.month, real.day) == m.group(2),
+            "§0.2 时间换算示例不自洽：写的是 %s，%s 实际是 %s"
+            % (m.group(0)[:44], m.group(1), real.strftime("%Y-%m-%dT%H:%M:%SZ")))
 
 
 def case_version_header():
+    """标题版本必须与「变更记录」最新一行一致，且正文不得出现更高版本。"""
     first = FULL.splitlines()[0]
-    if "v1.1" in FULL and "v1.1" not in first:
-        ki.known("V11-3", "首行标题是 %r，但正文含 v1.1 内容" % first)
+    m = re.match(r"#\s*接口契约\s*(v\d+\.\d+)", first)
+    require(m is not None, "首行应是「# 接口契约 vX.Y（…）」：%r" % first[:60])
+    ver = m.group(1)
+    require(re.search(r"\*\*%s\*\*" % re.escape(ver), FULL) is not None,
+            "「变更记录」里没有 %s 行（标题与变更记录不一致）" % ver)
+    vers = sorted(set(re.findall(r"v(\d+\.\d+)", FULL)),
+                  key=lambda s: [int(x) for x in s.split(".")])
+    require(vers[-1] == ver.lstrip("v"),
+            "正文出现比标题更高的版本：标题 %s，正文最高 v%s" % (ver, vers[-1]))
 
 
 def case_wifi_password_contradiction():
-    """§12.6：password 既写「必填 8–63」又写「开放网络传空串」——P0 只做 WPA2，按 8–63 实现。"""
+    """§12.6 的口令约束必须自洽：8–63 字节，且明文拒绝开放网络（不接空串）。
+
+    M14 已消解（契约 v1.2 ⑫）：t64 起是硬断言。
+    """
     text = C.section_text("12.6")
-    if "开放网络" in text and "8–63" in text:
-        ki.known("M14", "§12.6 两条约束互斥；mock 与 s07 按 WPA2 的 8–63 执行")
     require("8–63" in text, "§12.6 应写明 WPA2 口令长度 8–63")
+    require("不支持开放网络" in text, "§12.6 应明文写「本阶段不支持开放网络」")
+    bad = re.search(r"可传空串|允许空串|接受空口令|空口令可", text)
+    require(bad is None, "§12.6 不得再写「开放网络可传空串」这类与 8–63 互斥的口径：…%s…"
+                         % (bad.group(0) if bad else ""))
+    require("1602" in text and "open_not_supported" in text,
+            "§12.6 应写明开放网络 → 400 code=1602 reason=open_not_supported")
+
+
+def case_no_silent_skip():
+    """不允许静默 SKIP：known() 引用必须在 PENDING 里，PENDING 不许有死条目。
+
+    这条守的是「基线有牙」：已消解的问题若还被 SKIP 引用，等于把回归藏起来；
+    没人引用的 PENDING 条目则是没人收口的空头登记。
+    """
+    suites_dir = os.path.dirname(os.path.abspath(__file__))
+    refs = {}
+    for fn in sorted(os.listdir(suites_dir)):
+        if not fn.endswith(".py"):
+            continue
+        with open(os.path.join(suites_dir, fn), encoding="utf-8") as f:
+            src = f.read()
+        for m in re.finditer(r"\bki\.(?:known|pending)\(\s*\"([A-Za-z0-9._\-]+)\"", src):
+            refs.setdefault(m.group(1), []).append(fn)
+    pending, resolved = set(ki.PENDING), set(ki.RESOLVED)
+    stale = sorted(set(refs) & resolved)
+    unknown = sorted(set(refs) - pending - resolved - set(ki.HISTORICAL))
+    dead = sorted(pending - set(refs))
+    require(not stale, "以下已消解问题仍被 SKIP 引用（必须改成硬断言）：%r" % stale)
+    require(not unknown, "以下 known 编号未登记：%r" % unknown)
+    require(not dead, "PENDING 里以下编号没有任何用例引用（空头登记，需收口或转 HISTORICAL）：%r" % dead)
 
 
 CASES = [
-    ("§12.6 口令约束自洽（已登记 M14）", case_wifi_password_contradiction),
+    ("§12.6 口令约束自洽（8–63 且拒绝开放网络）", case_wifi_password_contradiction),
     ("§ 章节编号唯一", case_section_numbers_unique),
     ("§ 交叉引用都指向存在的章节", case_all_section_refs_exist),
     ("§2.5 settings 键名引用 §6.9", case_settings_key_ref),
@@ -188,14 +241,16 @@ CASES = [
     ("§6.19 push_tokens 引用 §7.12", case_push_table_ref),
     ("§3.8 door 分派引用 §8.5", case_door_dispatch_ref),
     ("§5.3 活动归并引用 §7.9/§7.10", case_activity_merge_ref),
+    ("§0.2 报表日历引用落点（待收口 M3-0.2）", case_report_calendar_ref),
     ("§11 #2 adc_mv 顺序声明", case_adc_mv_order_claim),
     ("§8 告警类型都有 summary 文案", case_alert_types_have_summary),
     ("§6.13 summary 表 9 行且 level 合法", case_summary_table_shape),
     ("§6.2 总表路径都在正文", case_api_table_matches_sections),
     ("§10 CAL 标定表完整", case_cal_table),
     ("§0 时间戳单位统一", case_timestamp_units),
-    ("§0.2 时间换算示例（已登记 M7）", case_timestamp_example_known),
-    ("契约版本标题与内容一致（已登记 V11-3）", case_version_header),
+    ("§0.2 时间换算示例自洽", case_timestamp_example),
+    ("契约版本标题与变更记录一致", case_version_header),
+    ("不允许静默 SKIP（known 引用 ↔ PENDING 清单对账）", case_no_silent_skip),
 ]
 
 

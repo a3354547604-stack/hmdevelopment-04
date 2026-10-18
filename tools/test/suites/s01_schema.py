@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")))
@@ -97,9 +98,9 @@ def case_rest_examples_use_envelope():
                 if isinstance(cand, dict) and "code" in cand:
                     errs = minival.validate(cand, env)
                     if errs and all("缺少必填字段 'ts'" in e for e in errs):
-                        if num == "6.11":
-                            ki.known("V11-1", "§6.11 示例 %s" % json.dumps(cand, ensure_ascii=False)[:60])
-                        continue
+                        # V11-1 已消解（契约 §6 示例均带 ts）：t64 起是硬断言，不再 SKIP
+                        raise CaseFail("§%s 响应示例缺 §6.1 信封必填字段 ts：%s"
+                                       % (num, json.dumps(cand, ensure_ascii=False)[:80]))
                     if errs:
                         raise CaseFail("§%s 响应示例不符合 §6.1 信封：%r" % (num, errs))
                     checked += 1
@@ -115,8 +116,16 @@ def case_settings_keys_and_types():
 
 
 def case_settings_cover_state_machine_params():
-    """§8 里声明「可配=是」的参数必须在 §6.9 items 里能改——否则 App 改不动。"""
+    """§8 里声明「可配=是」的参数必须在 §6.9 items 里能改——除非契约明文把它排除。
+
+    M4 的消解口径（§6.9 注，v1.2 / PM D-01）：`gas_l1_to_l2_s` 是 §8.2 的**算法参数**，
+    不进 §6.9 items；实现按 §8.2 默认值跑，要开放运行时配置必须走契约变更。
+    所以这里放行「§6.9 注明文点名的算法参数」，其余缺失一律 FAIL；同时反向钉死
+    「那句豁免必须真的写在 §6.9 里」，否则等于悄悄放宽了 App 的可下发键集合。
+    """
     items = C.settings_defaults()
+    note = C.section_text("6.9")
+    excused_names = set(re.findall(r"`([a-z][a-z0-9_]{2,})`", note)) if "算法参数" in note else set()
     missing = []
     for num in ("8.2", "8.5"):
         t = C.table(num, must_have=["参数", "默认值"])
@@ -129,11 +138,21 @@ def case_settings_cover_state_machine_params():
                 continue
             if name not in items:
                 missing.append("§%s %s" % (num, name))
+    hard = [m for m in missing if m.split()[-1] not in excused_names]
+    require(not hard, "以下可配参数在 §6.9 items 里缺失且契约未明文排除（App 无法下发）："
+                      + ", ".join(hard))
     if missing:
-        only_m4 = all(m.endswith(" gas_l1_to_l2_s") for m in missing)
-        if only_m4:
-            ki.known("M4")
-        raise CaseFail("以下可配参数在 §6.9 items 里缺失（App 无法下发）：" + ", ".join(missing))
+        # 有豁免就必须有依据：§6.9 注要说明这些键是算法参数、且 §8.2 表里也这么标
+        require("算法参数" in note, "§6.9 注必须写明被豁免的键是「算法参数」")
+        t82 = C.table("8.2", must_have=["参数", "默认值"])
+        for m in missing:
+            key = m.split()[-1]
+            # 存在性按「键名出现在 §8.2 表里」判定：该行「可配」列是自由文本
+            # （「算法参数（不是 §6.9 的 settings 键…）」），不是布尔列
+            row = next((r for r in t82.rows if t82.p(r, "参数").strip("`") == key), None)
+            require(row is not None, "§8.2 表里找不到被豁免的键 %s" % key)
+            require("算法参数" in t82.p(row, "可配"),
+                    "§8.2 的 %s 行「可配」列应标注「算法参数（不是 §6.9 的 settings 键）」" % key)
 
 
 def case_field_names_unique():
@@ -156,11 +175,10 @@ def case_downlink_fields_cover_cmd_enum():
     up = set(C.uart_cmd_enum(0x11))
     require(bool(down) and bool(up), "取不到 §2.5 或 §3.4 的 cmd 枚举（版式变了）")
     diff = down ^ up
-    if diff == {"reboot", "reboot_node", "time_sync"}:
-        ki.known("M13", "§2.5=%s vs §3.4=%s" % (sorted(down), sorted(up)))
-    if diff:
-        raise CaseFail("§2.5 与 §3.4 的 cmd 枚举不一致：仅 §2.5 有 %s；仅 §3.4 有 %s"
-                       % (sorted(down - up), sorted(up - down)))
+    # M13 已消解（契约 v1.2 ⑪：枚举统一为 poll/set_threshold/demo/reboot/time_sync，
+    # `set` 只是节点侧历史别名）：t64 起是硬断言，任何差异都 FAIL
+    require(not diff, "§2.5 与 §3.4 的 cmd 枚举不一致：仅 §2.5 有 %s；仅 §3.4 有 %s"
+                      % (sorted(down - up), sorted(up - down)))
 
 
 CASES = [
