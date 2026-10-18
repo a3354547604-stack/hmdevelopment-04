@@ -1,0 +1,42 @@
+# vibecoding 任务卡
+
+> 从《赛题四-实施计划》拆出：写给"和 AI 结对干活"用的任务清单。
+
+## 13. vibecoding 任务卡
+
+> 用法：每张卡独立交给 AI 生成；卡之间只通过**数据契约**（§10）与**API 契约**（§7.3）耦合。
+
+| # | 卡名 | 目标 | 产出 |
+|---|---|---|---|
+| C1 | RK2206 网关骨架 | 官方样例上做 **433 接收模块 GPIO 中断** + 声光/语音输出 | `input_task` + `alarm_task` + 串口打印 |
+| C2 | 网关任务骨架 | 汇聚串口协议解析 + 阈值算法 + 上报队列 | `algo_task` / `cloud_task` |
+| C3 | 阈值算法引擎 | 输入统一事件流 → 输出 `alarm_state` 与报警类型 | 纯 C 函数 + 用例 |
+| C4 | 声光 + 语音驱动 | 蜂鸣器 PWM / LED GPIO / DFPlayer 串口 AT 选曲 | 驱动 + 曲目映射表 |
+| C5 | SoftAP 配网服务 | 开发板开热点 + HTTP `/config` 收存 SSID/密码/服务器地址 | 配网模块 |
+| C6 | BLE 配网服务 | 同一份 JSON 走 GATT 写入 | BLE 配网模块 |
+| C7 | 断网缓存 | 板载 FLASH 环形缓冲，联网后补传 | `config_task` 子模块 |
+| C8 | IoTDA 接入 | ⚠️ **改**：仓库无 huaweicloud_iotlink → 基于 **`d2_iot_cloud_smart_covers` 的 `oc_mqtt`** 改设备三元组；属性 60 秒上报 + 事件即时上报 + 命令接收（样例为**明文 1883**，要 TLS 需自接 mbedTLS） | `cloud_task` |
+| C9 | WS63 星闪汇聚（✅ **改为自研固件，AT 方案作废**） | WS63 跑自研固件做 SLE Central 轮询节点（**8 路上限**已核实），3 次超时判离线。⚠️ 需**第二块 WS63** 才能端到端验证 | `ws63-firmware/src/`（SLE client 部分待写） |
+| C10 | ~~WS63 气体节点配置~~ 🔴 **原方案不可行**（XF_AT 无 ADC/I2C）→ 改为**在 RK2206 上直接采集**（路线 A） | MQ-2/MQ-5/MQ-7 走 ADC + AHT20 走 I2C，**挂 RK2206**（样例 `b1_adc` / `b11_i2c_scan` / `c7_e53_intelligent_smoke_sensor`） | RK2206 采集模块 |
+| C11 | ~~WS63 雷达/门窗/存在节点配置~~ 🔴 **原方案不可行**（XF_AT 读不了 UART2）→ 改为**直连 RK2206**（路线 A） | LD6002C / LD6002B / 干簧管 / 红外 → 接 RK2206；星闪仅做 2 板加分演示 | RK2206 采集模块 |
+| C12 | 后端 API | §7.3 全部接口 + JWT + MySQL 落库 | 后端工程 |
+| C13 | 转发接收 | AMQP 订阅或 HTTP 回调端点 → 落库 + 触发 Push / 供 App 轮询 | 转发模块 |
+| C14 | 周/月报聚合 | 定时生成物化表 + 同比文案接口 | 报表模块 |
+| C15 | ArkTS App | 登录/绑定/配网向导/首页/报告/预警列表与详情/设置；**前台轮询刷新（首页 10s / 报警页 5s）+ `onForeground` 必拉 `status=pending`** | 完整鸿蒙工程 |
+| C16 | uni-app 安卓版 | 复用同一套 API，出 APK + H5；**前端轮询 + 下拉刷新，不接系统推送** | uni-app 工程 |
+| C17 | **Push Kit 送达（P1）** | 华为推送 token 上报（`POST /api/push/register`）+ 服务端**未确认报警重推调度**（立即→60s→5min→停）；确认即停推 | 推送模块 + 调度任务 |
+
+**通用提示词骨架**（每张卡开头都带）：
+
+```
+【项目背景】OpenHarmony 独居老人居家安全监测系统。
+南向主控 = 小凌派 RK2206（OpenHarmony 3.0 LTS + LiteOS-M，C 语言，非 Linux）。
+星闪 = 如般微 E528H-WS63，**烧官方 XF_AT 固件、不写 C 固件**（⚠️ 但 XF_AT 无 ADC/I2C/UART2 指令、透传期间暂停 AT 解析 → 节点侧传感器方案不成立，见 §9.2；**生成节点代码前先确认走路线 A 还是 C**）。北向 = 原生 ArkTS/ArkUI，compatibleSdkVersion=12。
+云 = 华为云 IoTDA（MQTT+JSON）+ 自建服务器（MySQL + REST）。
+【本卡目标】<从卡片清单取>
+【输入契约】<贴 §10 数据契约 / §7.3 API>
+【约束】不引入新依赖；错误处理显式；给出可直接编译的最小完整文件
+【验收】<该卡验收>
+```
+
+---

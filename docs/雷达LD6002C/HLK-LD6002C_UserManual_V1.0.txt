@@ -1,0 +1,230 @@
+
+===== page 1 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 1
+Fall Detection Module HLK-LD6002C
+User Manual
+2023.9
+Shenzhen Hi-Link Electronic Co., Ltd
+
+===== page 2 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 2
+CONTENTS
+1.Productprofile............................................................................................3
+2.Productcharacteristics...............................................................................3
+3.Applicationscenarios.................................................................................3
+4.Electricalcharacteristicsandparameters...................................................3
+4.1Functionalparameters...........................................................................3
+4.2Electricalcharacteristics.......................................................................3
+4.3RF Characteristics..................................................................................3
+5.Hardwaredescription.................................................................................4
+5.1Overalldimensions................................................................................4
+5.2Pindefinition.........................................................................................4
+5.3 Moduleperipheralreferencedesign......................................................5
+5.4Bootconfiguration................................................................................5
+6.UsageandConfiguration............................................................................5
+6.1Typicalapplicationcircuit....................................................................5
+6.2GUIvisualizationtoolapplication........................................................5
+6.3OTAupgrade.........................................................................................8
+6.4Installationmodeandinductionrange..................................................8
+7.Precautions.................................................................................................9
+8.Radomedesign...........................................................................................9
+
+===== page 3 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 3
+1. Product profile
+HLK-LD6002CisaradarinductionmoduledevelopedbasedonADT6101Pchip,withasingle-
+chipintegrated57-64GHzRFtransceiversystem,2T2RPCBmicrostripantenna,1MBflash,radar
+signalprocessingunit,ARM® Cortex®-M3kernel.ThismoduleisbasedontheFMCWsignal
+processingmechanism,combinedwithradarsignalprocessingalgorithms,toachievetheperception
+ofpersonnelstatusinspecificplacesandtimelyreportthefallstatus.Suitableforceilinginstallation,
+singlepersonscenariosinsmallareasofbathroomsandbathrooms.
+2. Product characteristics
+ RadardetectionbasedonFMCWfrequencymodulatedcontinuouswavesignal
+ Largedetectionangle,supportinghorizontal±60°andelevation±60°detection
+ Implementpersonnelfalldetectionfunction
+ UniversalUARTinterface,providingcommunicationprotocol
+ SupportUARTparameteradjustmenttomeetdifferentscenariorequirements
+ Compactinsize,only25*23mm,supportspininsertion
+ Notaffectedbytemperature,humidity,noise,airflow,dust,lightandotherenvironmental
+factors
+3. Application scenarios
+ Healthcareandcare(bathroom,bathroom)
+ Homesecurity
+ Smarthomescenarioapplication
+4. Electrical characteristics and parameters
+4.1 Functional parameters
+4.2
+Electrical characteristics
+4.3 RF characteristics
+Parametercontent Min Typical Max unit
+Fallmonitoringdetectionradius 2 m
+Fallrecognitionaccuracy 90 %
+Operationalparameter Min Typical Max unit
+Operatingvoltage(VCC) 3.1 3.3 3.5 V
+Operatingcurrent(ICC) 600 mA
+Operatingtemperature(TOP) -20 85 ℃
+Storagetemperature(TST) -40 85 ℃
+Operationalparameter Min Typical Max unit
+OperatingFrequency 58 62 GHz
+EmissionPower(Pout) 12 dBm
+Antennagain 4 dBi
+Horizontalbeam(-3dB) -60 60 °
+Verticalbeam(-3dB) -60 60 °
+
+===== page 4 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 4
+5.Hardware description
+5.1 Overall dimensions
+TOP View BottomView
+5.2 Pin definition
+Pin order
+number Pin name Description Remarks
+1 3V3 POWER INPUT3.3V
+2 GND GND
+3 P19 GPIO19 Boot1
+4 TX2 GPIO20
+5 AIO1 AnalogIO
+6 SCL0 GPIO07
+7 TX0 ConnectedtoexternalserialportTX
+8 RX0 ConnectedtoexternalserialportRX
+
+
+===== page 5 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 5
+5.3 module peripheral reference design
+5.4 Boot configuration
+BOOT1 BOOT0 remarks
+Configurationlevel 0 1 Flashstartswithinthemodule
+Pipfootpositionnumber Pin8 Pin12
+*BOOT1,BOOT0moduleinternalarepulledup.TheBOOT1mustbeconnectedtoalowlevelbeforethe
+modulestarts
+6. Usage and Configuration
+6.1 Typical application circuit
+TheLD6002CmodulecandirectlyusetheTX2pintooutputdetectedtargetinformation(high
+levelforfallingoutput,lowlevelforunmannedfalling),whileUART0outputsdetectionresults
+accordingtothespecifiedprotocol.Theserialportdatacontainstargetfallinginformation,andusers
+canflexiblyuseitaccordingtospecificapplicationscenarios.
+Themodulepowersupplyis3.3V,andtheinputpowersupplycapacityisgreaterthan1A.
+TheoutputvoltageofthemoduleIOportis3.3V.Thedefaultportrateoftheserialportis
+115200withnoparity.
+6.2 GUI visualization tool application
+1.deviceconnection
+1)Selecttheconnectedserialport
+2)SettheBaudrateto115200
+3)Clickthe[Connect]button,andthemodulewillstarttodetect
+
+===== page 6 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 6
+2. Dateexamining
+1)Selectthe3Dviewwindow
+2)Dragandzoomtheviewintheimagetotheappropriatesizewiththemouse
+3)ViewtheSystemLogwindowbelow
+4)Checkthemessageinformation,nofallsdetected,noabnormalitiesdetected
+4)Whensomeonefalls,the3Dviewdisplaystheword"Someonefell"andtheSystemLog
+windowmessagedisplays"Someonefell!"
+
+===== page 7 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 7
+3.Parameterconfiguration
+1)Selectthe[Fall]buttonintheOptionwindowtoentertheparameterconfigurationinterface
+asshowninthefollowingfigure
+2)MountingHeight:Setaccordingtotheactualinstallationheight
+3)[FallThreshold]:Thethresholdsettingforfallingheightiscurrentlybasedonthedistance
+fromthepointcloudtothegroundforfallingdetection.Canbemodifiedanddebugged
+accordingtousagescenarios
+4)[FallSensitivity]:Sensitivitysetting,currentlynotrecommendedformodification
+5)DetectRectXL:Leftboundaryofdetectionarea
+6)DetectRectXR:Detecttherightboundaryofthedetectionarea
+7)DetectRectZF:Detectthefrontboundaryofthedetectionarea
+8)DetectRectZB:Detectthebackboundaryofthedetectionarea
+9)Afterfillingintherequiredparametersforeachconfigurationitem,youneedtoclickthe
+corresponding 【Apply 】buttontocompletetheconfiguration.Confirmwhetherthe
+correspondingparametersinthe[Fall]windowinthebottomleftcornerarethesetparameters.
+10)[GetAllFallParas]Readtheparameterssetwithinthemodule
+11)Clickthe[Get]buttonintheVersionwindowtoobtainthecurrentsoftwareversion
+number
+
+===== page 8 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 8
+6.3 OTA Upgrade
+Pleaserefertothedocument"OTAUpgradeToolUserManualV1.0"
+6.4 Installation method and sensing range
+Topmountedhangingheight2.2-3.0m,maximuminductionradius2m
+Installationdirectionannotation
+Schematic diagram of top installation
+H=2.2-3m
+radar
+
+===== page 9 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 9
+7. Precautions
+1. ThedetectiondistanceoftheradarmoduleiscloselyrelatedtothetargetRCSand
+environmentalfactors,andtheeffectivedetectiondistancemayvarywithchangesinthe
+environmentandtarget.Therefore,itisnormalfortheeffectivedetectiondistancetofluctuatewithin
+acertainrange.
+2.Theradarmodulehasextremelyhighpowerrequirements,requiringaninputvoltageof3.1-
+3.5V,powerripple≤50mV,andcurrent≥1A.IfusingaDCDCpowersupply,theswitching
+frequencyisrequiredtobenolessthan2MHz.
+3. Thisproductisonlysuitableforsmallareascenariosinbathroomsandbathrooms,and
+singlepersonsituations.
+4. Theproductneedstobecombinedwithapplicationscenariostoeliminateinterference
+actions.
+8. Radome design
+Theradomeisusedtoprotecttheradarantennafromrain,externalenvironment,andwind.
+However,ithasthefollowingeffectsontheradarantenna:thedielectriclossandreflectionloss
+causedbytheantennacoverwillreducetheeffectivepoweroftheantenna;causethedistortionof
+theantennabeam,whichaffectsthemeasurementoftheAngle.Therefore,itisverynecessaryto
+designtheradometoreducetheimpactoftheshellandimprovetheradarperformance.
+design requirement:
+1.Whenselectingthematerialofradome,underthepremiseofensuringfirmnessandlowcost,
+thematerialwithsmallerdielectricconstantandlossangleshouldbeselectedtoreducetheinfluence
+ofradomeonradarperformance.
+Dielectricconstantanddissipationfactorofcommonmaterialsareshownbelow:
+material dielectric constant () r Disguetion factor (tan δ)
+Merlon 2.9 0.012
+ABS 2.0-3.5 0.0050-0.019
+PEEK 3.2 0.0048
+PTFE（Teflon®） 2 <0.0002
+Plexiglass® 2.6 0.009
+glass 5.75 0.003
+potteryandporcelain 9.8 0.0005
+PE 2.3 0.0003
+PBT 2.9-4.0 0.002
+2.Theradomeisrequiredtohaveasmoothsurfaceandauniformthickness
+3.Radomeantennathicknessdesignrequirements
+rf2
+cNT  ，N=1，2，3…
+T:Radomethickness
+c:lightspeed, 8103 m/s;
+f:Centerfrequency
+r :Materialpermittivity,DK
+4.Designrequirementsofradarantennafromtheinnersurfaceoftheenclosure
+
+===== page 10 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 10
+f
+c
+2Nd  N=1，2，3…
+c:lightspeed, 8103 m/s;
+f:centerfrequency
+f=60GHz
+c/2f=2.5mm
+
+===== page 11 =====
+
+©Shenzhen Hi-Link Electronic Co.,Ltd ，All rights reserved 11
+Shenzhen Hi-Link Electronic Co., Ltd
+Address：17F,BuildingE,XingheWORLD,MinzhiStreet,LongHuadistrict,
+Shenzhen51813
+Email：sales@hlktech.com
+Website：www.hlktech.net
