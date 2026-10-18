@@ -57,8 +57,23 @@ curl -s http://127.0.0.1:3000/api/health
 
 - 后端监听 `127.0.0.1:${API_PORT:-3000}`（契约 §0.8：Nginx/App 走 80 → 127.0.0.1:3000）
 - MySQL 监听 `127.0.0.1:${DB_PORT_HOST:-3306}`
-- 可选反代：`docker compose --profile proxy up -d`（`127.0.0.1:${HTTP_PORT:-8080}` → api）
+- 可选反代：`docker compose --profile proxy up -d`（`127.0.0.1:${HTTP_PORT:-8080}` → api；8080 被别的服务占用时
+  用 `HTTP_PORT=18080 docker compose --profile proxy up -d` 换端口，本机 8080 现被另一个项目的 nginx 占着）
 - 停止/清理：`docker compose down`（保留数据卷 `hmprogram-server-db-data`）；`docker compose down -v` 连数据一起删
+
+> **并发复核/演示请换项目名（O-01，t88 复核提出）**：`docker-compose.yml` 顶层写了 `name: hmprogram`，
+> 同一台机器上所有 worktree / 员工默认共用**同一组容器与数据卷**（`hmprogram-server-api` / `hmprogram-server-db`）——
+> 别人一条 `docker compose down`/`stop` 就会把你在跑的复核或演示打断（t88 之夜实际发生过两次）。
+> 并行时换项目名即可隔离（实测优先级：`-p` > `COMPOSE_PROJECT_NAME` > 文件里的 `name:`）：
+>
+> ```bash
+> COMPOSE_PROJECT_NAME=hmprogram-review docker compose up -d --build   # 等价：docker compose -p hmprogram-review up -d --build
+> docker compose -p hmprogram-review ps                                # 容器名变成 hmprogram-review-server-api/-db
+> docker compose -p hmprogram-review down -v                           # 换名 = 换数据卷，验证完记得清掉
+> ```
+>
+> 另：`db/init/15-test-db.sh` 被官方 entrypoint `source`，里面的 `set -eu` 必须留在子 shell 内——
+> 顶层 `set -u` 会让 entrypoint 在 `MYSQL_ONETIME_PASSWORD` 未定义处崩掉、db 容器 Exit 1（t93 修复）。
 
 > **演示提示**：种子只写入一次心跳，之后没有真实上报时，服务器会在 180 s（`gateway_offline_timeout_s`，§8.7）
 > 后按契约把网关判为离线并生成 `device_offline` 告警——这是**预期行为**，不是故障。演示前重跑一次 `app.seed`，
