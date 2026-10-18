@@ -149,46 +149,50 @@ grep -c "packet success" build-*.log
   照常走 SLE 上行。串口会多打一行 `*** MOCK 模式：数据为伪造，只验证链路与格式，不代表真实环境 ***`。
 - **本节样例（不开板就能看）**：把固件里**同一份**序列化代码（`node_json.c`）编到开发机上跑
   30 个采样周期打印。字段名/单位/精度/键序与真机逐字节一致，**不是**真机串口原文（真机原文要上板抓）。
-  完整 119 行见 `ws63-firmware/out/node-uplink-sample.txt`；生成命令见 §2 ③。
+  完整 88 行见 `ws63-firmware/out/node-uplink-sample.txt`；生成命令见 §2 ③。
 
 节选（每行 = 一帧，`[SN] tx <长> bytes: <JSON>`；以下逐字取自样例文件，行号为该文件行号）：
 
 ```
-   5  --- M1 厨房节点（gas + 每 5 帧一次 poll 应答）---
-   6  [M1] tx 142 bytes: {"sn":"M1","ts":1760000000000,"type":"gas","payload":{"smoke":300,"temp":25.0,"humi":45.0,"adc_mv":[150],"warmup":true},"seq":10,"fw":"0.1.0"}
-   9  [M1] tx 143 bytes: {"sn":"M1","ts":1760000006000,"type":"gas","payload":{"smoke":420,"temp":25.3,"humi":48.0,"adc_mv":[210],"warmup":false},"seq":13,"fw":"0.1.0"}
-  11  [M1] tx 166 bytes: {"sn":"M1","ts":1760000008000,"type":"status","payload":{"uptime_s":20,"rssi":-58,"power_src":"usb","battery":255,"warmup":false},"seq":204,"req_id":204,"fw":"0.1.0"}
-  12  [M1] tx 158 bytes: {"sn":"M1","ts":1760000008000,"type":"gas","payload":{"smoke":1180,"temp":26.8,"humi":52.1,"adc_mv":[590],"warmup":false},"seq":205,"req_id":204,"fw":"0.1.0"}
+   4  --- M1 厨房节点（gas + 每 5 帧一次 poll 应答）---
+   5  [M1] tx 142 bytes: {"sn":"M1","ts":1760000000000,"type":"gas","payload":{"smoke":300,"temp":25.0,"humi":45.0,"adc_mv":[150],"warmup":true},"seq":10,"fw":"0.1.0"}
+   8  [M1] tx 143 bytes: {"sn":"M1","ts":1760000006000,"type":"gas","payload":{"smoke":420,"temp":25.3,"humi":48.0,"adc_mv":[210],"warmup":false},"seq":13,"fw":"0.1.0"}
+  10  [M1] tx 166 bytes: {"sn":"M1","ts":1760000008000,"type":"status","payload":{"uptime_s":20,"rssi":-58,"power_src":"usb","battery":255,"warmup":false},"seq":204,"req_id":204,"fw":"0.1.0"}
+  11  [M1] tx 158 bytes: {"sn":"M1","ts":1760000008000,"type":"gas","payload":{"smoke":1180,"temp":26.8,"humi":52.1,"adc_mv":[590],"warmup":false},"seq":205,"req_id":204,"fw":"0.1.0"}
 
-  49  --- M2 卧室节点（fall，events 立即上报）---
-  50  [M2] tx 100 bytes: {"sn":"M2","ts":1760000000000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":20,"fw":"0.1.0"}
-  51  [M2] tx 100 bytes: {"sn":"M2","ts":1760000002000,"type":"fall","payload":{"fall":0,"src":"uart"},"seq":21,"fw":"0.1.0"}
-  60  [M2] tx 100 bytes: {"sn":"M2","ts":1760000020000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":30,"fw":"0.1.0"}
+  48  --- M2 卧室节点（fall，events 立即上报）---
+  49  [M2] tx 100 bytes: {"sn":"M2","ts":1760000000000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":20,"fw":"0.1.0"}
+  50  [M2] tx 100 bytes: {"sn":"M2","ts":1760000002000,"type":"fall","payload":{"fall":0,"src":"uart"},"seq":21,"fw":"0.1.0"}
+  59  [M2] tx 100 bytes: {"sn":"M2","ts":1760000020000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":30,"fw":"0.1.0"}
 
       ↑ M2 的 payload **只有 fall 一个键**（100 字节）。t23 之前是三键
         `{"fall":…,"presence":…,"src":"uart"}`（113 字节）——presence 已按 PM 裁定从 P0 移除，见 §10。
 
-  81  --- M4 门厅节点（door/presence，跳变立即上报）---
-  82  [M4] tx 112 bytes: {"sn":"M4","ts":1760000000000,"type":"door","payload":{"door":true,"window":false,"ch":0},"seq":30,"fw":"0.1.0"}
-  83  [M4] tx 139 bytes: {"sn":"M4","ts":1760000000000,"type":"presence","payload":{"presence":true,"last_motion_ts":1760000000000,"count":1},"seq":40,"fw":"0.1.0"}
-  91  [M4] tx 113 bytes: {"sn":"M4","ts":1760000016000,"type":"door","payload":{"door":false,"window":false,"ch":0},"seq":38,"fw":"0.1.0"}
- 100  [M4] tx 112 bytes: {"sn":"M4","ts":1760000032000,"type":"door","payload":{"door":true,"window":false,"ch":0},"seq":46,"fw":"0.1.0"}
+  80  --- M4 门厅节点（door，跳变立即上报；presence 属 P1，P0 不产出）---
+  81  [M4] tx 112 bytes: {"sn":"M4","ts":1760000000000,"type":"door","payload":{"door":true,"window":false,"ch":0},"seq":30,"fw":"0.1.0"}
+  82  [M4] tx 113 bytes: {"sn":"M4","ts":1760000016000,"type":"door","payload":{"door":false,"window":false,"ch":0},"seq":38,"fw":"0.1.0"}
+  83  [M4] tx 112 bytes: {"sn":"M4","ts":1760000032000,"type":"door","payload":{"door":true,"window":false,"ch":0},"seq":46,"fw":"0.1.0"}
 
- 117  --- 下行回执（§2.5）---
- 118  [M4] tx 52 bytes: {"cmd":"set_ack","key":"presence_hold_s","result":0}
- 119  [M4] tx 25 bytes: {"cmd":"nack","reason":1}
+      ↑ t55 起 M4 段**只剩 door 帧**（这里 3 帧是节选，实际 30 帧里 4 帧 door）：
+        presence 与 PIR 一起降为 P1（§2.3/§2.4.4/§10），固件的产出挂
+        `NODE_PRESENCE_ENABLE`（默认 0），样例同步删掉 30 帧 presence，见 §11。
+
+  86  --- 下行回执（§2.5）---
+  87  [M4] tx 52 bytes: {"cmd":"set_ack","key":"presence_hold_s","result":0}
+  88  [M4] tx 25 bytes: {"cmd":"nack","reason":1}
 ```
 
 可以对着样例逐条核对契约，这几处最容易写错：
 
 | 现象 | 契约依据 |
 |---|---|
-| `req_id` 只出现在应答 poll 的那两帧（第 11/12 行），且与汇聚的 `id` 同值（204） | §2.2「应答 poll 时必填」 |
+| `req_id` 只出现在应答 poll 的那两帧（第 10/11 行），且与汇聚的 `id` 同值（204） | §2.2「应答 poll 时必填」 |
 | 同一时刻先 `status` 再 `gas`，两帧 `req_id` 相同 | §2.5「poll → 立即回 status（+该节点主类型）」；M1 主类型是 gas |
 | `adc_mv` 是分压后读数（150 mV）、`smoke` 已折算回 AO 侧（300 mV） | §2.4.1 单位口径（AO 侧 0–5000） |
-| `warmup` 从第 6 行 true 变第 9 行 false，且**每帧都带**（不是缺省） | §2.4.1 选填；M1 每帧都显式给出预热状态，让云端别按正常阈值告警 |
+| `warmup` 从第 5 行 true 变第 8 行 false，且**每帧都带**（不是缺省） | §2.4.1 选填；M1 每帧都显式给出预热状态，让云端别按正常阈值告警 |
 | 全文 `:null` 出现 0 次（未装 MQ-5/MQ-7 就整键不写 `lpg`/`co`） | §0.4「无值 = 字段缺省，不写 null」 |
 | M4 的 `ch` 只在 `door` 跳变帧里出现 | §2.4.3「ch 仅跳变上报时出现」 |
+| M4 段全文**没有** `"type":"presence"` 帧（只剩 door） | PM 裁定：presence 与 PIR 一起降为 P1，P0 不产出该 type（§2.3/§2.4.4/§10），固件挂 `NODE_PRESENCE_ENABLE`、样例同步删帧（t55，见 §11） |
 | M2 的 `fall` 帧里**没有** `presence` 键（100 字节，比 t23 之前少 13 字节） | PM 2026-10-18 裁定：presence 降为 P1、P0 **整键不出现**（见 §10；不是「选填」，连 `"presence":0` 也不许） |
 
 ---
@@ -208,8 +212,15 @@ grep -c "packet success" build-*.log
    0x0E01 + user log 扫描**整条链路保留**，作为 P1 钩子与现场诊断日志。
 2. **`cmd=reboot` 无实现 —— SDK 没有可用接口。** SDK 公开头文件里搜不到 `uapi_reboot`/`osal_reboot`/
    `uapi_reset` 一类复位 API。当前实现：回一条 `nack`（不改状态），并在串口打印原因。
-3. **`set` 的 `result` 码复用 §6.7 口径**：成功=0、越界=1002、未知键=1003。契约 §2.5 只给了
-   `set_ack` 的形状没给码表，这里按网关侧同一套码，便于云端对齐（若 PM 另有码表，改 `node_cfg.h` 一处即可）。
+   → 回执码用 **`reason=1`（§9.3「不支持的命令/指令」）**，不是 `2`（「参数超出范围」）：
+   调用方没传错参数，是这一版固件没有这个能力。用 `2` 会把网关/云端引向「改参数重试」。
+   （t55 修正，改前是 `2`；见 §11。）
+3. **`set` / `set_threshold` 的 `result` 码与 §2.5 码表一致**（t55 复核）：契约 v1.2 §2.5 已给码表
+   ——成功=0、越界=1002（带 `field`/`allowed`）、未知键=1003、设备内部错误=7。固件实现
+   `0/1002/1003`，**从不回 `7`**：P0 的阈值只写内存、掉电复位（PM 裁定 ①，Flash 持久化是 P1），
+   没有「Flash 写失败」这条路径。⚠️ 契约 §2.5 正文目前仍写「`set_threshold` → 落 Flash」，
+   与 P0 口径不一致，已报 PM（不在本卡范围内，见 §11）。
+   另：两种拼写（`set` / `set_threshold`）都按 §2.5 的别名口径接受，见 §11。
 4. **`sensor_hub.c` / `wifi_hub.c` 暂不进任何节点固件**：两者各自带 `app_run`，编进来会多起两个任务
    刷 ADC/WiFi 日志（SLE 链路的噪声）。文件保留、全局变量保留（`sle_hub.c` 的压测线程用 `extern` 引它们，
    而那段已被 `NODE_LEGACY_SPEED_TEST=0` 关掉），需要诊断时单独加回清单。
@@ -449,7 +460,7 @@ D5 已定 P0 的「无活动」判定 = 门磁跳变 + 心跳，presence 不是 
 ```bash
 tools/build-lock.sh python3 tools/node-json-check.py            # 契约断言：SELFTEST OK，10 帧 / 8 条字段断言
 tools/build-lock.sh python3 tools/node-json-check.py --sample \
-  > ws63-firmware/out/node-uplink-sample.txt                    # 样例重新生成（119 行，与旧版逐行可比）
+  > ws63-firmware/out/node-uplink-sample.txt                    # 样例重新生成（t23 当时 119 行；t55 又删了 M4 的 presence，现 88 行，见 §11）
 HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh python3 tools/node-radar-cache-check.py   # t32 证据不回归
 tools/build-lock.sh python3 tools/node-compile-check.py         # 41 个（目标×文件），失败 0
 ```
@@ -463,7 +474,8 @@ tools/build-lock.sh python3 tools/node-compile-check.py         # 41 个（目�
   （30 删 30 增），且**全部是 M2 的 fall 帧**（`grep -E '^[-+]\[M2\]'` 命中 60 条，
   `grep -E '^[-+]\[' | grep -v '\[M2\]'` 为空）：每帧 `113 B → 100 B`，
   payload 由三键 `{"fall":…,"presence":…,"src":"uart"}` 变两键 `{"fall":…,"src":"uart"}`。
-  M1 的 gas 帧、M4 的 door/presence 帧、下行回执**一个字都没动**。
+  M1 的 gas 帧、M4 的 door/presence 帧、下行回执**一个字都没动**（这句写的是 t23 当次；
+  t55 起 M4 不再有 presence 帧，见 §11）。
 - **t32 的证据不回归**：`tools/node-radar-cache-check.py` rc=0，4 场景 `SELFTEST OK`、
   24 帧 / 24 条字段断言 / 0 失败；持续跌倒窗口仍是
   `poll 12 次，其中落在采样间隙 6 次，错报 fall=0 的 0 次`；
@@ -473,7 +485,7 @@ tools/build-lock.sh python3 tools/node-compile-check.py         # 41 个（目�
   `主机无 C 编译器 → 退回容器 …` 与 `$ docker run …` 两行原本走 **stdout**，
   而 stdout 是块缓冲、容器输出直接写 fd 1，于是这两行会**跑到样例文件末尾**，
   把入库样例弄脏 2 行。已改走 stderr（该脚本其余诊断本就用 stderr），
-  `--sample > 文件` 现在拿到的是纯样例（119 行，与上一次入库版本行数一致）。
+  `--sample > 文件` 现在拿到的是纯样例（t23 当时 119 行、与上一次入库版本行数一致；t55 起 88 行，见 §11）。
 
 ### 10.5 与旧包的差异（六个目标）
 
@@ -501,6 +513,8 @@ HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh bash ws63-firmware/script
    t23 删掉调用 `radar_hub_get_presence()` 与那个 `(fall==1)?1:0` 分支（−64 B），一来一去正好抵消。
    **t32 的行为仍被独立验证**：`tools/node-radar-cache-check.py` 本次 rc=0、
    间隙错报 0 次、变异体必失败（见 §10.4）—— 体积相同 ≠ 行为回退，证据在自测而不在字节数。
+4. **t55 之后这四个节点包的指纹再次变化**（别名 / 不发 presence / reboot 回执码三处都改了源文件），
+   M1/M2/M4/MOCK 四个包全部重编，新指纹见 §11.5；上表是 t23 当次的记录，**不要与新表混用**。
 3. `HUB_HUB.fwpkg` 的 sha256 与 t3 复核、t32 重编**三次逐位相同**（`8ef1978b…`）：
    `.fwpkg` 在本项目是**可复现**的（与 AGENTS.md 里 HAP 的「sha256 跨次不可复现」不同）。
    即便如此，本表仍以「体积 + 提交号」为主口径，sha256 只作当次记录。
@@ -520,3 +534,132 @@ HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh bash ws63-firmware/script
   它的 `presence` 是**真来源**：门磁活动 + `NODE_PRESENCE_HOLD_S`=60 s）；
   未改 `NODE_ROLE_NAME "door+presence"`（`node-build.sh` 的角色断言按这串字面量 grep，
   而它不在本卡 inScope 内）。
+
+---
+
+## 11. t55 修复记录：`set_threshold` 别名 / P0 不发 presence / reboot 回执码
+
+来源：独立复核 t20（`docs/评审与验证/复核-t2-节点固件骨架-2026-10-18.md`）的 F-01/F-02/F-04，
+外加 PM 对三处「二选一」的裁定。**只动节点侧四类文件**，契约与接线表一个字未改。
+
+### 11.1 改了什么
+
+| # | 文件 | 改动 | 为什么必须改 |
+|---|---|---|---|
+| F-01 | `ws63-firmware/src/node_json.c` | `node_json_parse_downlink()` 的 `cmd` 分支接受 `"set"` **与** `"set_threshold"` | 契约 §2.5 的枚举口径写明「`set` 是 `set_threshold` 的历史别名，节点两者都必须接受」；而网关 §3.4 的 `GW_CMD.cmd`、契约示例帧、`rk2206-gateway/test/gw_contract_frames.inc` 用的都是 `set_threshold`，汇聚又按 §2.6 逐字透传 —— 只认 `set` 会把「App → 云 → 网关 → 汇聚 `0x11` → SLE → 节点」这条阈值下发链断在最后一跳，且上层只看到 `nack reason=1` |
+| F-01 | `tools/node-json-check.py` | 新增 `check_downlink_alias()`：运行时生成一个 C 探针（`tempfile`，不往仓库加文件）并**真编译真运行**，断言两种拼写都成 `NODE_CMD_SET`、`key`/`value` 完全一致，外加两条**反例**（`set_thresh`、`setthreshold` 必须仍是 `NODE_CMD_UNKNOWN`） | 契约条款要有正反例才防得住「退化成 `strncmp("set",…,3)` 前缀匹配」；探针跑在既有自测的同一套编译参数下（主机无 gcc 时同样退回 `ws63wsl` 容器） |
+| F-02 | `ws63-firmware/src/node_sensor_door.c` | P0 **不产出 `presence` 帧**：置待发位与建帧两处都挂 `NODE_PRESENCE_ENABLE`（默认 0），`presence -> false` 那行日志也一并挂上 | `presence` 与 PIR 一起被标成 P1（§2.3/§2.4.4/§10），P0 的「有无活动」判定在网关侧只看 `door` 跳变（§3.8）。原来的实现是 D3 之后由门磁活动驱动 presence，但那是「数据源换了」，并不等于「P0 该发这个 type」 |
+| F-02 | `tools/node-json-sample.c` | 样例生成器不再打印 M4 的 presence 帧（M4 段只剩 `door`） | 样例的卖点是「与固件同一份序列化代码、逐字节同形」；固件不发了，样例还发就会让这句话失真，也会让照样例实现汇聚/网关的人以为 P0 会收到该 type |
+| F-04 | `ws63-firmware/src/node_main.c` | `cmd=reboot` 的回执 `reason` 由 `2` 改 `1` | §9.3 里 `1` = 不支持的命令/指令、`2` = 参数超出范围。reboot 是「这一版没这个能力」，不是「调用方传错参数」；回 `2` 会把网关/云端引向「改参数重试」 |
+| F-05 | （无需改动） | 已由 t51 在 `ws63-firmware/scripts/node-build.sh` 落地：mock 目标的 `role_marker` 追加 ` mock=1` | 物证 `ws63-firmware/out/mock.info.txt` 里 `role_marker=EC-NODE-ROLE=M1 type=gas count=1 mock=1` —— 单看 `EC-NODE-ROLE=M1 type=gas` 会把 mock 包当成真 M1 包（mock 与真 M1 的标记串逐字相同） |
+
+**为什么挂同一个开关而不是新加一个**：M2 的 fall payload「整键不出现」与 M4 的「整帧不发」
+是同一件事的两面（契约把 `presence` 整体降为 P1），用同一个 `NODE_PRESENCE_ENABLE`
+就不用维护两张口径；哪天给 M2 补了真实存在传感器，改一处、两个角色一起生效。
+
+### 11.2 无板证据（**实跑结果**，命令可复现）
+
+```bash
+# ① 卡面 verify①：六个目标的真编译（借 SDK 的 compile_commands.json，真出 .o，不是 -fsyntax-only）
+#    主机没有 C 编译器、SDK 的 riscv 工具链在主机上是空的 → 必须在 ws63wsl 镜像里跑
+tools/build-lock.sh docker run --rm --name hmprogram-nodecc-$$ \
+  -v "$PWD":/w -v "$HOME/ws63/fbb_ws63-master":/sdk -w /w -e SDK_DIR=/sdk \
+  ws63wsl:latest python3 tools/node-compile-check.py
+#    实跑：共 41 个（目标 × 文件）编译，失败 0 个；退出码 0
+
+# ② 卡面 verify②：JSON 层自测 + 契约断言 + 新增的下行别名探针（缺 gcc 时脚本自动退回同一镜像）
+tools/build-lock.sh python3 tools/node-json-check.py
+#    实跑：SELFTEST OK（10 帧、字段级断言 8 条）→ ALIAS_OK（9 条断言：7 正 + 2 反例）；退出码 0
+#      ok  set 可解析 / set -> NODE_CMD_SET / set 的 key/value
+#      ok  set_threshold 可解析 / set_threshold -> NODE_CMD_SET（§2.5 历史别名）
+#      ok  两种拼写的 key/value 完全一致 / set_threshold 换一个键走同一分支
+#      ok  set_thresh（少 threshold 后半）不是 SET / setthreshold（少下划线）不是 SET
+
+# ③ 卡面 verify③：mock 目标（并顺带刷新另外三个节点包 —— node_json.c 是四个目标共编，
+#    只重编 mock 会让磁盘上的 M1/M2/M4 包停在修复前的行为）
+tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh m1 m2 m4 mock
+#    实跑：四个目标全过、退出码 0；每个包的角色断言逐条通过（见 §11.5）；
+#    SDK custom/ 收工清空（残留 0 项，清单 out/custom-residue.log）
+
+# ④ 样例重新生成（M4 段只剩 door 帧）
+tools/build-lock.sh python3 tools/node-json-check.py --sample > ws63-firmware/out/node-uplink-sample.txt
+#    实跑：88 行（上一版 119 行）；退出码 0
+
+# ⑤ 变异检验（判据有效性说明，不是本次实跑）：把别名那半边删掉
+#    （`|| strcmp(out->value_s, "set_threshold") == 0`），探针必须变红（ALIAS_FAIL），
+#    证明它真的在测这条契约，而不是一个永远绿的断言。
+```
+
+`-fsyntax-only` 不够用是 t8 踩过的坑（漏 `-Werror=unused-function`：回调定义了却没注册），
+所以 ① 走的是真编译。
+
+### 11.3 两件不在本卡、但必须说清的事
+
+1. **F-03（阈值持久化）走契约侧，且契约正文还没改。** PM 裁定 ①：P0 阈值**内存生效、掉电复位**，
+   Flash 持久化降到 P1（`result=7` 保留码位但在 P0 不可达）。固件本来就是这个行为（`node_sensor_apply_set()`
+   只写内存），所以代码侧无需改动；**但契约 §2.5 正文现在仍写着「`set_threshold` → 落 Flash」**，
+   与裁定不一致 —— 契约不在本卡 inScope（本卡 inScope 只含 `ws63-firmware/` 下四类文件与 doc/11），
+   已按流程报 PM，请由契约侧开卡收口。
+2. **`NODE_ROLE_NAME "door+presence"` 这个角色标签暂不改。** 它是 `node-build.sh` 角色断言的
+   grep 锚点、也已写进 `out/NODE_M4.fwpkg`/`m4.info.txt` 与历次复核报告。改成 `"door"` 会让
+   「同一次构建的产物指纹表」全部对不上，收益只是字面好看；真机报文的 `type` 由
+   `node_json_door()` 决定（本来就是 `"door"`），不受这个标签影响。留作下次和构建脚本一起改。
+
+### 11.4 跨目录改动登记（按 AGENTS.md「跨目录改动先在任务里写明理由」）
+
+| 路径 | 在 t55 卡面 inScope？ | 处置与理由 |
+|---|---|---|
+| `tools/node-json-sample.c` | **否**（卡面只列了 `tools/node-json-check.py`） | **改了**：样例生成器里有 M4 的 presence 帧打印。样例的卖点是「与固件同一份序列化代码、逐字节同形」，固件不发这一帧之后样例还发就失真；且 PM 在 t55 派卡邮件里点名要求「把 presence 帧从 `out/node-uplink-sample.txt` 的 M4 段删掉」。改动只有删除（含 3 个因此不再需要的静态变量）与一句段标题措辞，不引入新行为 |
+| `tools/node-json-selftest.c` | 否 | **未动**：它里面那条 `node_json_presence()` 调用是 P1 payload 的**序列化形状检验**（函数还在、契约 §2.4.4 的字段表也还在，只是 P0 不产出）。删了会丢掉 P1 的覆盖 |
+| `ws63-firmware/src/node_sensor_mock.c` | 是 | **核对后无需改动**：M4 角色的 mock 走 `node_json_by_role()`（role 4 → `node_json_door()`），本来就不会发 presence |
+| `ws63-firmware/scripts/node-build.sh` | 否 | **未动**：F-05（mock 的 `role_marker` 补 `mock=1`）已由 t51 完成 |
+
+### 11.5 本次产物指纹与**二进制级**前后对照
+
+```bash
+tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh m1 m2 m4 mock   # 退出码 0
+```
+
+| 目标 | 本次体积 | 比上一版 | 本次 sha256（当次记录，不是防伪判据） | 角色断言 |
+|---|---|---|---|---|
+| `NODE_M1.fwpkg` | 1468136 | +192 | `941316694f376167e2f2c758d85033253ecc5f26ca17ad664d40e30cd6c38415` | `EC-NODE-ROLE=M1 type=gas`×1、其它角色 0、`[MOCK]`×0 |
+| `NODE_M2.fwpkg` | 1468008 | +192 | `92a9e64aa9cd0a5036879378154969922105f5d294ece08d8ed04e370b25617f` | `EC-NODE-ROLE=M2 type=fall`×1、其它角色 0 |
+| `NODE_M4.fwpkg` | 1463592 | **−64** | `2cdf90e42ce173a28c9a9a1e589166cf182361e74c955bb481e8a460b19c5928` | `EC-NODE-ROLE=M4 type=door+presence`×1、其它角色 0 |
+| `NODE_MOCK.fwpkg` | 1463144 | +192 | `19234c2c5c3cff294a5d61abe8b2c40ad391875b5715aed4cf3da8039b0bdb3f` | `EC-NODE-ROLE=M1 type=gas`×1 + `[MOCK]`×3（t51 起 marker 带 `mock=1`） |
+
+体积净变化的来源：M1/M2/MOCK 多出「一个字符串常量 + 一次 `strcmp` 调用」（别名分支）；
+M4 反而小了 64 B —— door 驱动里 presence 的**置位 / 建帧 / 日志**三处都被 `#if NODE_PRESENCE_ENABLE` 掉，
+省下的比别名加的多。**体积不是行为判据**：下面这两条 grep 才是。
+
+| 在包里 grep 的串 | 旧包 | 新包 | 说明 |
+|---|---|---|---|
+| `presence -> false`（M4） | 1 | **0** | 该日志行在 P0 被 `#if` 掉，字符串根本没进镜像 —— 直接证明 M4 不再走 presence 那条路 |
+| `set_threshold`（M1/M4） | 0 | **1** | 别名分支的字符串常量真的编进了镜像 —— 证明「接受两种拼写」是代码而不是注释 |
+
+```bash
+# 旧包从 git 里取，不依赖磁盘上还有旧文件
+git show HEAD:ws63-firmware/out/NODE_M4.fwpkg > /tmp/M4.old.fwpkg
+git show HEAD:ws63-firmware/out/NODE_M1.fwpkg > /tmp/M1.old.fwpkg
+grep -acF "presence -> false" /tmp/M4.old.fwpkg ws63-firmware/out/NODE_M4.fwpkg   # 1 → 0
+grep -acF "set_threshold"     /tmp/M1.old.fwpkg ws63-firmware/out/NODE_M1.fwpkg   # 0 → 1
+```
+
+**样例文件的 diff 自证**：`git diff --numstat -- ws63-firmware/out/node-uplink-sample.txt` = `1 32`
+（新增 1 行、删除 32 行）。扣掉 30 行 M4 presence 帧与 1 行诊断行（`使用编译器: gcc`）后
+**只剩 M4 段标题那一行的改写** —— 也就是说这次改动**不可能**混进别的角色的帧：
+
+```bash
+git diff -U0 -- ws63-firmware/out/node-uplink-sample.txt | grep -E "^[-+]" | grep -vE "^(\+\+\+|---)" \
+  | grep -vE '^[-+]\[M4\] tx 139 bytes: \{"sn":"M4".*"type":"presence"'
+# 只剩两行：
+#   -使用编译器: gcc
+#   +--- M4 门厅节点（door，跳变立即上报；presence 属 P1，P0 不产出）---
+```
+
+**顺手修掉的一处证据污染**：`--sample` 模式下 `使用编译器: gcc` 原本走 stdout，
+会成为入库样例的第一行（样例文件应当**只有样例本身**）。已改成只在 `--sample` 时走 stderr，
+普通自测模式仍走 stdout（输出形状不变）。
+
+**环境记录**：本次开工时 Docker 引擎已掉线（`Cannot connect to the docker daemon`，
+AGENTS.md 记过这个「WSL 睡眠后 Docker Desktop 引擎掉线」的坑）——启动 Docker Desktop 后 6 s 内恢复；
+两条 verify 命令都跑在 `tools/build-lock.sh` 槽 1 里，不占串口、不与 t59 抢板。

@@ -17,8 +17,8 @@
  *
  * 数据规律与 ws63-firmware/src/node_sensor_mock.c 一致：
  *   M1 烟雾 300→1180 mV 三角波、温度 25.0→30.0、湿度 50.0±5.0；
- *   M2 每 10 个采样周期一次跌倒脉冲（20 s），存在随脉冲翻转；
- *   M4 每 8 个采样周期翻转一次玄关门，presence 由门活动驱动（60 s 无活动转 false）。
+ *   M2 每 10 个采样周期一次跌倒脉冲（20 s）—— fall payload 不含 presence（P0 口径，t23）；
+ *   M4 每 8 个采样周期翻转一次玄关门，只发 door 帧 —— presence 属 P1，P0 不发（t55）。
  */
 #include "node_json.h"
 
@@ -141,23 +141,12 @@ static void sample_m4(int n)
 {
     node_snapshot_t s;
     static int door_open;
-    static uint32_t motion_count;
-    static int64_t last_motion_ms;
-    static int occ;
     int len;
     int64_t now = T0_MS + (int64_t)n * SAMPLE_PERIOD_MS;
 
     if ((n % 8) == 0) {                      /* 每 8 个采样周期（16 s）翻转一次玄关门 */
         door_open = 1 - door_open;
-        motion_count++;
-        last_motion_ms = now;
-        occ = 1;
-    }
-    if (occ != 0 && (now - last_motion_ms) > 60000LL) {
-        occ = 0;                             /* §2.4.4：持续 60 s 无新触发 → presence=false */
-    }
 
-    if ((n % 8) == 0) {                      /* 门磁跳变：立即上报 door，带 ch */
         memset(&s, 0, sizeof(s));
         s.ts_ms      = now;
         s.seq        = (uint32_t)(30 + n);
@@ -170,18 +159,11 @@ static void sample_m4(int n)
         print_frame("M4", "door", len, g_buf);
     }
 
-    if (occ != 0) {                          /* 由静到动：立即上报 presence */
-        memset(&s, 0, sizeof(s));
-        s.ts_ms      = now;
-        s.seq        = (uint32_t)(40 + n);
-        s.req_id     = -1;
-        s.occ        = true;
-        s.last_motion_ms = last_motion_ms;
-        s.motion_count = motion_count;
-        s.has_motion_count = true;
-        len = node_json_presence(g_buf, sizeof(g_buf), "M4", "0.1.0", &s);
-        print_frame("M4", "presence", len, g_buf);
-    }
+    /* 这里**不再**打印 presence 帧（t55）：契约把 presence 与 PIR 一起标成 P1
+     * （§2.3/§2.4.4/§10），P0 的 M4 固件在 node_sensor_door.c 里同样不建这一帧
+     * （`NODE_PRESENCE_ENABLE=0`，待发位都不置）。
+     * 为什么样例必须跟着删：样例的卖点就是「与固件同一份序列化代码、逐字节同形」，
+     * 多留一帧 presence 会让这句话失真，也会让照着样例实现汇聚/网关的人以为 P0 会收到该 type。 */
 }
 
 int main(int argc, char **argv)
@@ -223,7 +205,7 @@ int main(int argc, char **argv)
         printf("\n");
     }
     if (only == 0 || only == 4) {
-        printf("--- M4 门厅节点（door/presence，跳变立即上报）---\n");
+        printf("--- M4 门厅节点（door，跳变立即上报；presence 属 P1，P0 不产出）---\n");
         for (n = 0; n < FRAMES; n++) {
             sample_m4(n);
         }

@@ -115,7 +115,10 @@ static void handle_downlink(const char *js, int len, const node_snapshot_t *s)
              * chip_reboot 均无）。硬要复位只能「打开看门狗再故意卡死」，那会让节点在没有现场
              * 复位条件时变成一块砖，因此明确拒绝并回报；等有可靠复位途径再实现。 */
             osal_printk("[%s] <- reboot 请求被拒绝（SDK 无可用的安全复位接口）\r\n", NODE_SN_STR);
-            n = node_json_nack(g_tx, sizeof(g_tx), 2);
+            /* reason=1（不支持的命令/指令），不是 2（参数超出范围）：调用方没传错参数，
+             * 是这一版固件没有这个能力。用 2 会让网关/云端判成「我发的参数有问题」而
+             * 去改参数重试，方向错了（§9.3 的 1/2 语义分工）。 */
+            n = node_json_nack(g_tx, sizeof(g_tx), 1);
             node_send(g_tx, n);
             break;
         default:

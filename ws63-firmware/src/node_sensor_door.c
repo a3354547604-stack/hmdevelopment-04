@@ -14,6 +14,12 @@
  *   presence = 最近 presence_hold_s 内有过门磁跳变，
  *   count = 累计跳变次数（诊断用，掉电清零）。
  * 字段口径未变，只换来源；M4 上「无人活动」因此等价于「两扇门都没动」。
+ *
+ * **P0 不发 `presence` 帧（t55）**：契约把 `presence` 与 PIR 一起标成 P1（§2.3/§2.4.4/§10），
+ * P0 的「有无活动」判定在网关侧只看 `door` 跳变（§3.8）。所以本文件在 P0 里
+ * **既不置待发位、也不建 presence 帧**，只在内存里维护状态（`s->occ` = 有无活动，
+ * 供 P1 与诊断用），开关仍是 `node_cfg.h` 的 `NODE_PRESENCE_ENABLE`。
+ * 与 M2 的 fall payload 用同一个开关：一处改口径，两处（整键不出现 / 整帧不发）一起生效。
  */
 #include <string.h>
 
@@ -124,9 +130,11 @@ void node_sensor_sample(uint32_t now_ms, node_snapshot_t *s)
             if (g_pending_door < 0) {
                 g_pending_door = (int)g_reed[i].ch;
             }
+#if NODE_PRESENCE_ENABLE
             if (g_occ == 0 && g_pending_presence < 0) {
                 g_pending_presence = (int)g_reed[i].ch;   /* 由静到动：补发一条 presence */
             }
+#endif
             g_motion_count++;
             g_last_motion_ms = now_ms;
             g_occ = 1;
@@ -137,7 +145,11 @@ void node_sensor_sample(uint32_t now_ms, node_snapshot_t *s)
      * 只改状态不产生事件：§2.3 没有要求「由动到静」立即上报，poll 应答会带上 false。 */
     if (g_occ != 0 && (now_ms - g_last_motion_ms) > (g_presence_hold_s * 1000u)) {
         g_occ = 0;
+#if NODE_PRESENCE_ENABLE
+        /* P0 不打这行日志：presence 不产出，日志里出现 "presence -> false" 只会让看日志的人
+         * 以为还有人在消费这个状态（现场排障时「有日志=有功能」是很强的心理暗示）。 */
         osal_printk("[M4] presence -> false (无门磁活动 %us)\r\n", (unsigned)g_presence_hold_s);
+#endif
     }
 
     s->door_open = (g_reed[0].stable != 0);
@@ -192,8 +204,14 @@ const char *node_sensor_main_type(void)
 bool node_sensor_build_event(char *buf, size_t cap, const char *sn, const char *fw,
                              const node_snapshot_t *s, int *out_len)
 {
+#if NODE_PRESENCE_ENABLE
     int n = (g_cur_kind == 2) ? node_json_presence(buf, cap, sn, fw, s)
                               : node_json_door(buf, cap, sn, fw, s);
+#else
+    /* P0：只有 door 一种事件帧。待发位（g_pending_presence）在 sample() 里就不置位，
+     * 这里再收一道 —— 万一以后有人在别处置了它，也不会漏出一帧契约里 P0 不该有的 presence。 */
+    int n = node_json_door(buf, cap, sn, fw, s);
+#endif
 
     if (n < 0) {
         return false;

@@ -254,6 +254,99 @@ def run_sample(cc):
         return rp.returncode
 
 
+def check_downlink_alias(cc):
+    """§2.5 的 `cmd` 别名：`set` 与 `set_threshold` 必须都解析成 NODE_CMD_SET。
+
+    为什么单独写一个探针而不是塞进 node-json-selftest.c：自测是「帧形状」的基线，
+    这里要的是**一条契约条款的正反例**（别名成立 + 拼错不许成立），改名/回退别名必须变红。
+    探针在内存里生成（tempfile），不往仓库里放新文件。
+    """
+    src = r'''
+#include <stdio.h>
+#include <string.h>
+#include "node_json.h"
+
+static int fails;
+
+static void expect(const char *what, int cond)
+{
+    if (cond != 0) {
+        printf("ok   %s\n", what);
+    } else {
+        printf("FAIL %s\n", what);
+        fails++;
+    }
+}
+
+int main(void)
+{
+    node_downlink_t a, b, c;
+    const char *set_s   = "{\"cmd\":\"set\",\"key\":\"no_motion_min\",\"value\":30}";
+    const char *set_th  = "{\"cmd\":\"set_threshold\",\"key\":\"no_motion_min\",\"value\":30}";
+    const char *set_th2 = "{\"cmd\":\"set_threshold\",\"key\":\"presence_hold_s\",\"value\":60}";
+    const char *typo    = "{\"cmd\":\"set_thresh\",\"key\":\"no_motion_min\",\"value\":30}";
+    const char *typo2   = "{\"cmd\":\"setthreshold\",\"key\":\"no_motion_min\",\"value\":30}";
+
+    memset(&a, 0, sizeof(a));
+    memset(&b, 0, sizeof(b));
+    memset(&c, 0, sizeof(c));
+
+    expect("set 可解析", node_json_parse_downlink(set_s, strlen(set_s), &a) == 0);
+    expect("set -> NODE_CMD_SET", a.cmd == NODE_CMD_SET);
+    expect("set 的 key/value", strcmp(a.key, "no_motion_min") == 0 && a.value_i == 30);
+
+    expect("set_threshold 可解析", node_json_parse_downlink(set_th, strlen(set_th), &b) == 0);
+    expect("set_threshold -> NODE_CMD_SET（§2.5 历史别名）", b.cmd == NODE_CMD_SET);
+    expect("两种拼写的 key/value 完全一致",
+           strcmp(b.key, a.key) == 0 && b.value_i == a.value_i);
+
+    expect("set_threshold 换一个键走同一分支",
+           node_json_parse_downlink(set_th2, strlen(set_th2), &c) == 0 &&
+           c.cmd == NODE_CMD_SET && strcmp(c.key, "presence_hold_s") == 0 && c.value_i == 60);
+
+    /* 反例：别名必须是整词匹配。若实现退化成 strncmp("set", ..., 3)，这两条会变红。 */
+    expect("set_thresh（少 threshold 后半）不是 SET",
+           node_json_parse_downlink(typo, strlen(typo), &c) == 0 && c.cmd == NODE_CMD_UNKNOWN);
+    expect("setthreshold（少下划线）不是 SET",
+           node_json_parse_downlink(typo2, strlen(typo2), &c) == 0 && c.cmd == NODE_CMD_UNKNOWN);
+
+    if (fails != 0) {
+        printf("ALIAS_FAIL %d\n", fails);
+        return 1;
+    }
+    printf("ALIAS_OK\n");
+    return 0;
+}
+'''
+    dep = os.path.join(SRC, "node_json.c")
+    if not os.path.isfile(dep):
+        print(f"缺源文件 {dep}", file=sys.stderr)
+        return 2
+    with tempfile.TemporaryDirectory() as td:
+        csrc = os.path.join(td, "downlink-alias-probe.c")
+        exe = os.path.join(td, "downlink-alias-probe")
+        with open(csrc, "w", encoding="utf-8") as f:
+            f.write(src)
+        cmd = [cc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-O1",
+               "-I", SRC, "-o", exe, csrc, dep]
+        print("$ " + " ".join(cmd))
+        cp = subprocess.run(cmd, capture_output=True, text=True)
+        if cp.returncode != 0:
+            print(cp.stdout)
+            print(cp.stderr, file=sys.stderr)
+            print("下行别名探针编译失败", file=sys.stderr)
+            return 1
+        rp = subprocess.run([exe], capture_output=True, text=True)
+        print(rp.stdout, end="")
+        if rp.stderr.strip():
+            print(rp.stderr, file=sys.stderr)
+        if rp.returncode != 0 or "ALIAS_OK" not in rp.stdout:
+            print("§2.5 下行别名检查失败（set / set_threshold 必须都成 NODE_CMD_SET）",
+                  file=sys.stderr)
+            return 1
+    return 0
+
+
 def main():
     in_docker = "--inside-docker" in sys.argv
     sample_mode = "--sample" in sys.argv
@@ -272,7 +365,10 @@ def main():
             return run_inside_docker(extra)
         print("环境缺 gcc 且没有可用的 docker 镜像 %s" % IMAGE, file=sys.stderr)
         return 2
-    print(f"使用编译器: {cc}")
+    # `--sample` 的 stdout 必须是**只有样例本身**（它会被直接重定向进
+    # ws63-firmware/out/node-uplink-sample.txt 入库），所以这一行走 stderr；
+    # 普通自测模式仍走 stdout，保持原有输出形状不变。
+    print(f"使用编译器: {cc}", file=sys.stderr if sample_mode else sys.stdout)
     if sample_mode:
         return run_sample(cc)
 
@@ -303,6 +399,11 @@ def main():
         if rp.returncode != 0 or "SELFTEST OK" not in out:
             print("C 侧自测失败", file=sys.stderr)
             return 1
+
+    # ---- §2.5 下行别名（t55 新增）：set / set_threshold 两种拼写都要工作 ----
+    rc = check_downlink_alias(cc)
+    if rc != 0:
+        return rc
 
     # ---- 逐帧用真 JSON 解析器复检 ----
     frames = []

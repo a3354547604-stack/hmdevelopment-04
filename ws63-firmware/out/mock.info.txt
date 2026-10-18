@@ -1,7 +1,7 @@
 target=mock
 extra_build_args=-def=NODE_ROLE=1,NODE_MOCK=1
 sources= node_main.c node_json.c node_link.c node_sensor_mock.c sle_hub.c sle_hub_adv.c
-bytes=1462952
-sha256=cba8c29be47ba04c3e7afe53e656f133a71ec351249ddbc7a27e2b9f6c1a58d9
-built_at=2026-10-18T09:22:06+08:00
+bytes=1463144
+sha256=19234c2c5c3cff294a5d61abe8b2c40ad391875b5715aed4cf3da8039b0bdb3f
+built_at=2026-10-18T10:18:45+08:00
 role_marker=EC-NODE-ROLE=M1 type=gas count=1 mock=1

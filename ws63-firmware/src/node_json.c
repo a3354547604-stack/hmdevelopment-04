@@ -492,7 +492,12 @@ int node_json_parse_downlink(const char *js, size_t len, node_downlink_t *out)
 
     if (strcmp(out->value_s, "poll") == 0) {
         out->cmd = NODE_CMD_POLL;
-    } else if (strcmp(out->value_s, "set") == 0) {
+    } else if (strcmp(out->value_s, "set") == 0 || strcmp(out->value_s, "set_threshold") == 0) {
+        /* 契约 §2.5 的 `cmd` 枚举口径（v1.2）：「`set` 是 `set_threshold` 的**历史别名**，
+         * 节点两者都必须接受」。少认一个不是少一个开关 —— 网关 §3.4 的 `GW_CMD.cmd` 与示例
+         * 用的都是 `set_threshold`，汇聚按 §2.6 逐字透传，只认 `set` 会把整条阈值下发链
+         * （App → 云 → 网关 → 汇聚 0x11 → SLE → 节点）断在最后一跳，而上层只看到
+         * `nack reason=1`（不支持的命令），排查方向会被带偏。 */
         out->cmd = NODE_CMD_SET;
     } else if (strcmp(out->value_s, "demo") == 0) {
         out->cmd = NODE_CMD_DEMO;
