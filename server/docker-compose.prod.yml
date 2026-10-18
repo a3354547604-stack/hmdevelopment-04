@@ -33,7 +33,13 @@ services:
       - hmprogram-server-db-data:/var/lib/mysql
       - ./db/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      # t67/F-02：`mysqladmin ping` 只要服务端有响应就返回 0（口令错也判 healthy），会把
+      # 「db healthy + api 反复 1045」的排查顺序带偏。这里改成带鉴权的探测，两个账号都要能 SELECT 1：
+      #   - root（$MYSQL_ROOT_PASSWORD）：运维用（ALTER USER / root 路径的 mysqldump）；
+      #   - $MYSQL_USER/$MYSQL_PASSWORD（= .env 的 DB_USER/DB_PASSWORD）：api 实际连库用的账号。
+      #     只探 root 挡不住最常见的那个坑——「数据卷里 eldercare 的口令与 .env 的 DB_PASSWORD 不一致」。
+      # 于是「db healthy」等价于「api 连得上」：口令不对 → db unhealthy → api 不会启动（depends_on）。
+      test: ["CMD-SHELL", "mysql -uroot -p\"$$MYSQL_ROOT_PASSWORD\" -e 'SELECT 1' --silent && mysql -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" -e 'SELECT 1' --silent"]
       interval: 10s
       timeout: 5s
       retries: 12
