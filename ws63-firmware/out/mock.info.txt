@@ -3,5 +3,5 @@ extra_build_args=-def=NODE_ROLE=1,NODE_MOCK=1
 sources= node_main.c node_json.c node_link.c node_sensor_mock.c sle_hub.c sle_hub_adv.c
 bytes=1463016
 sha256=7b7372051c1c7e6ed3f4a67ab8dcf79121514fc44f2a74d4a860bdca5e19a8e8
-built_at=2026-10-17T22:19:50+08:00
+built_at=2026-10-18T08:38:08+08:00
 role_marker=EC-NODE-ROLE=M1 type=gas count=1

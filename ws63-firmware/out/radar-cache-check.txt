@@ -1,0 +1,123 @@
+使用编译器: gcc
+$ gcc -std=c99 -Wall -Wextra -Werror -O1 -I /w/ws63-firmware/src -I /tmp/tmpwnktdt61/stub -DNODE_ROLE=2 -o /tmp/tmpwnktdt61/radar-selftest /w/tools/node-radar-cache-selftest.c /w/ws63-firmware/src/node_sensor_radar.c /w/ws63-firmware/src/node_json.c
+FRAME poll-normal
+{"sn":"M2","ts":1760000003000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":37,"req_id":1,"fw":"0.1.0"}
+FRAME poll-normal
+{"sn":"M2","ts":1760000006000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":97,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000009000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":157,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000012000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":217,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000015000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":277,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000018000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":337,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000021000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":397,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000024000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":457,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000027000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":517,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000030000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":577,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000033000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":637,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000036000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":697,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000039000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":757,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000042000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":817,"req_id":1,"fw":"0.1.0"}
+FRAME poll-lagging
+{"sn":"M2","ts":1760000045000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":877,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000048000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":937,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000051000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":997,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000054000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":1057,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000057000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":1117,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000060000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":1177,"req_id":1,"fw":"0.1.0"}
+# 持续跌倒窗口：poll 12 次，其中落在采样间隙 6 次，错报 fall=0 的 0 次
+# 起床后首个 fall=0 的 poll：t=48000ms（首次采样到起床在 46000ms），其后连续 fall=0 的 poll 5 次
+# osal_printk 共调用 2 次
+SCENARIO sustained
+SELFTEST OK
+FRAME poll-boot
+{"sn":"M2","ts":1760000000500,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":1,"req_id":1,"fw":"0.1.0"}
+SCENARIO boot
+SELFTEST OK
+FRAME poll-unknown
+{"sn":"M2","ts":1760000002500,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":2,"req_id":1,"fw":"0.1.0"}
+SCENARIO silent
+SELFTEST OK
+FRAME poll-demo-gap
+{"sn":"M2","ts":1760000008500,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":5,"req_id":1,"fw":"0.1.0"}
+FRAME poll-demo-expired
+{"sn":"M2","ts":1760000011500,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":7,"req_id":1,"fw":"0.1.0"}
+SCENARIO demo
+SELFTEST OK
+# 帧统计: gap-poll-fall=12, poll-boot=1, poll-demo-expired=1, poll-demo-gap=1, poll-lagging=1, poll-normal=2, poll-recovered=5, poll-unknown=1
+$ gcc -std=c99 -Wall -Wextra -Werror -O1 -I /w/ws63-firmware/src -I /tmp/tmpwnktdt61/stub -DNODE_ROLE=2 -o /tmp/tmpwnktdt61/radar-selftest-mutant /w/tools/node-radar-cache-selftest.c /tmp/tmpwnktdt61/node_sensor_radar_mutant.c /w/ws63-firmware/src/node_json.c
+FRAME poll-normal
+{"sn":"M2","ts":1760000003000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":37,"req_id":1,"fw":"0.1.0"}
+FRAME poll-normal
+{"sn":"M2","ts":1760000006000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":97,"req_id":1,"fw":"0.1.0"}
+FAIL 263: t=9000ms 老人仍在跌倒，poll 应答却报 fall=0（采样间隙）
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000009000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":157,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000012000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":217,"req_id":1,"fw":"0.1.0"}
+FAIL 263: t=15000ms 老人仍在跌倒，poll 应答却报 fall=0（采样间隙）
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000015000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":277,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000018000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":337,"req_id":1,"fw":"0.1.0"}
+FAIL 263: t=21000ms 老人仍在跌倒，poll 应答却报 fall=0（采样间隙）
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000021000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":397,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000024000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":457,"req_id":1,"fw":"0.1.0"}
+FAIL 263: t=27000ms 老人仍在跌倒，poll 应答却报 fall=0（采样间隙）
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000027000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":517,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000030000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":577,"req_id":1,"fw":"0.1.0"}
+FAIL 263: t=33000ms 老人仍在跌倒，poll 应答却报 fall=0（采样间隙）
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000033000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":637,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000036000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":697,"req_id":1,"fw":"0.1.0"}
+FAIL 263: t=39000ms 老人仍在跌倒，poll 应答却报 fall=0（采样间隙）
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000039000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":757,"req_id":1,"fw":"0.1.0"}
+FRAME gap-poll-fall
+{"sn":"M2","ts":1760000042000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":817,"req_id":1,"fw":"0.1.0"}
+FAIL 280: t=45000ms 起床后采样尚未跟上，期望仍报 1，实为 0
+FRAME poll-lagging
+{"sn":"M2","ts":1760000045000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":877,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000048000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":937,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000051000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":997,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000054000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":1057,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000057000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":1117,"req_id":1,"fw":"0.1.0"}
+FRAME poll-recovered
+{"sn":"M2","ts":1760000060000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":1177,"req_id":1,"fw":"0.1.0"}
+# 持续跌倒窗口：poll 12 次，其中落在采样间隙 6 次，错报 fall=0 的 6 次
+FAIL 308: 跌倒窗口内错报 fall=0 的次数 = 6，期望 0
+# 起床后首个 fall=0 的 poll：t=48000ms（首次采样到起床在 46000ms），其后连续 fall=0 的 poll 5 次
+# osal_printk 共调用 2 次
+SCENARIO sustained
+SELFTEST FAILED: 8
+# 变异体（删掉两行回填）sustained: rc=1, 计数行=(12, 6, 6)
+# 反例成立：修复前错报 fall=0 6 次 = 采样间隙 poll 6 次（共 poll 12 次）
+
+场景 4 个，字段级断言 24 条，帧统计 24 帧
+✅ 全部通过：4 场景 SELFTEST OK、fall 帧逐字段合契约 §2.2/§2.4.2、持续跌倒窗口 0 次错报，且变异体（删掉回填两行）必失败
+主机无 C 编译器 → 退回容器 ws63wsl:latest 执行（等价编译参数）
+$ docker run --rm --name hmprogram-radarcache-223340 -v /mnt/c/Users/Administrator/Desktop/HMProgram:/w -w /w ws63wsl:latest python3 tools/node-radar-cache-check.py --inside-docker

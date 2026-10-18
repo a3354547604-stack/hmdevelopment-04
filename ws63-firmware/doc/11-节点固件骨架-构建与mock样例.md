@@ -5,6 +5,9 @@
 > §0/§2/§8，引脚依据：`docs/技术/引脚与接线表.md` §4/§5/§6。
 >
 > **未做**：上板实测。本文里凡涉及真机读数/链路的地方都标注「待用户实测」。
+>
+> **后续任务**：**t32「雷达 fall/presence 采样缓存只读不写」**的修复记录见本文 **§9**
+> （同一份 `src/`、同一块板 M2；t32 只改了 `node_sensor_radar.c` 一个文件）。
 
 ---
 
@@ -31,7 +34,13 @@ python3 tools/node-json-check.py
 # ③ 生成节点上行样例（mock 串口样例的来源，见 §5）
 python3 tools/node-json-check.py --sample
 
-# ④ 出四份固件（顺序执行，约 2 分钟/份；结束自动还原 SDK 的 custom/ 目录）
+# ④ t32：雷达采样缓存回归自测（4 场景 + 变异检验；主机无 gcc 时同样自动退回容器）
+python3 tools/node-radar-cache-check.py
+#    期望结尾：✅ 全部通过：4 场景 SELFTEST OK、fall 帧逐字段合契约 §2.2/§2.4.2、
+#              持续跌倒窗口 0 次错报，且变异体（删掉回填两行）必失败
+#    日志：ws63-firmware/out/radar-cache-check.txt（本次实测 24 帧 / 24 条字段断言 / 0 失败）
+
+# ⑤ 出四份固件（顺序执行，约 2 分钟/份；结束自动还原 SDK 的 custom/ 目录）
 ws63-firmware/scripts/node-build.sh            # 也可只编 m2 mock
 ```
 
@@ -211,7 +220,7 @@ grep -c "packet success" build-*.log
 |---|---|---|---|---|
 | 1 | `NODE_MOCK.fwpkg` | 什么都不接 | 开机行 `EC-NODE-ROLE=M1 type=gas` + `*** MOCK 模式 ***` + 每 2 s 一帧 `{"sn":"M1",...}` | 帧在动、值在变，且**不碰传感器也照常发** |
 | 2 | `NODE_M1.fwpkg` | AHT20（23/24 脚，3.3 V）+ MQ-2（AO→IO09，5 V 供电，1:1 分压） | `i2c scan: found 0x38`；温湿度数值合理（±2 °C 内，引脚表 §8 第 4 步） | 扫描到 0x38 且 `temp/humi` 不是 0 |
-| 3 | `NODE_M2.fwpkg` | LD6002C（7/8 脚→IO07/IO08，4 脚 TX2→IO06，3 脚必须接 GND，独立 3.3 V/1 A） | 帧类型计数增长（`0E02` 为主）；站到雷达下 15–20 s 后出现 `"fall":1` | 出现一次 `fall:1` 事件帧 |
+| 3 | `NODE_M2.fwpkg` | LD6002C（7/8 脚→IO07/IO08，4 脚 TX2→IO06，3 脚必须接 GND，独立 3.3 V/1 A） | 帧类型计数增长（`0E02` 为主）；站到雷达下 15–20 s 后出现 `"fall":1` | 出现一次 `fall:1` 事件帧；**且此后站在雷达下不动时，每一次 poll 应答（包括落在两次 2 s 采样之间的那些）都必须报 `"fall":1`** —— 这是 t32 的上板判据，见 §9 |
 | 4 | `NODE_M4.fwpkg` | 玄关门磁→IO00、阳台门磁→IO02（裸管 + 内部上拉，门开=断开=1） | 开关门时出现 `{"type":"door",...,"ch":0}`；随后 `presence` 由 true 转 false（60 s 无活动） | door 跳变帧成对出现且 `ch` 正确 |
 | 5 | 任一 + t3 汇聚 | 汇聚板做 Central | 汇聚侧轮询就绪后，节点 `poll` 应答带 `req_id` | 端到端联调（属 t3 的验收） |
 
@@ -229,3 +238,156 @@ grep -c "packet success" build-*.log
 - **CAL-03 安装高度**：雷达装高不是 2.4 m 时要下发 `0x0E04`，现有固件只解析回包、**还没有下发代码**
   （本次未做，属雷达参数配置范畴）。
 - **P0 只有 2 块板**（截至 2026-10-17）：M1/M2/M4 三块节点里有一块要等采购，先在板上轮换烧三份固件验证。
+
+---
+
+## 9. t32 修复记录：M2 的 fall/presence 采样缓存「只读不写」
+
+> 任务卡 **t32**。范围：`ws63-firmware/src/`（实际只改了 `node_sensor_radar.c` 一个文件）。
+> 主机侧自测脚本新增 `tools/node-radar-cache-selftest.c` + `tools/node-radar-cache-check.py`。
+
+### 9.1 缺陷
+
+`node_sensor_sample()` 里那三个 `static` 缓存（`last`/`last_fall_c`/`last_pres_c`）**只在「未到采样点」
+的分支里被读**，采样路径从**不**回填。于是「未到采样点」的每一拍都读到初始值 `-1`，
+再被归一化成 `s->fall = 0`。
+
+**为什么这是会上现场翻车的 bug，而不是无害的小瑕疵**：poll 应答读的就是同一次
+`node_sensor_sample()` 填出来的快照，所以间隙拍的 poll 应答是**凭空造出来的 `fall=0`**，
+而契约 §8.4 的跌倒退出判定用的正是这些样本。
+
+### 9.2 节奏算术（为什么大约一半的 poll 会中招）
+
+| 量 | 值 | 依据 |
+|---|---|---|
+| 节点采样周期 | 2000 ms | `NODE_SAMPLE_PERIOD_MS`（§8.2 采样周期 2 s） |
+| 汇聚轮询周期 | 3000 ms | §2.1 |
+| 两者最小公倍数 | **6000 ms** | lcm(2000, 3000) |
+
+一个 6 s 周期里 3 次采样（2000/4000/6000）、2 次 poll（3000/6000）：
+**6000 那一拍正好压在采样点上，3000 那一拍落在两次采样之间**。周期重复下去，
+`3000/9000/15000/…` 永远落在间隙，`6000/12000/…` 永远压在采样点 ——
+也就是**每 2 次 poll 必有 1 次是间隙拍**。
+
+### 9.3 对契约 §8.4 的具体后果
+
+§8.4 的迟滞状态机：**进入即时**；退出须**连续 K=3 次 fall=0 且距最后一次 fall=1 ≥30 s**；
+fall=0 的采样源 = 汇聚 3 s 一次的轮询应答（`docs/技术/接口契约.md` §8.4）。
+
+| | 30 s 内可拿到的「fall=0」样本 | 结果 |
+|---|---|---|
+| 修复前 | 每 2 次 poll（6 s）就有 1 次假 0 → 30 s 里能凑出 ≥5 个假样本 | **K=3 轻易凑满**，仍躺在地上的老人被判「已恢复 → 告警撤销」 |
+| 修复后 | fall=1 的窗口里**一次 0 都没有** | K=3 只能等老人真的起来、且被下一次 2 s 采样读到之后才可能凑满 |
+
+### 9.4 修法（3 处，最小 diff）
+
+1. 三个缓存从**函数内嵌套块**提升到**文件作用域** —— 让「谁写谁读」在评审时一眼可见：
+   `g_last_sample_ms`（最近一次真实采样时刻，0 = 还没采过）、`g_cache_fall`、`g_cache_pres`。
+2. 间隙判据改成 `if ((now_ms - g_last_sample_ms) < NODE_SAMPLE_PERIOD_MS)`，分支体读缓存，
+   `-1`（模块还没给过帧）归一化成 `0`（§2.4.2 只有 0/1）。
+3. 采样路径末尾回填 `g_cache_fall = fall; g_cache_pres = pres;`。
+   存的是**原始** `fall`（可能 `-1`），不是归一化后的 `s->fall` —— 归一化只在读方做一次，
+   语义只留一份；**demo 覆盖后的值也进缓存**（见 §9.7）。
+
+**没动的**：`g_last_fall`/`g_last_report_ms`/`NODE_EVENT_MIN_GAP_MS` 的事件限流逻辑、
+两个边沿仍照旧各报一次（§2.3）、其它传感器驱动、`ws63-firmware/spike/`（t16 在改）。
+
+### 9.5 无板证据（可复现的命令 + 计数）
+
+```bash
+cd /mnt/c/Users/Administrator/Desktop/HMProgram
+HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh python3 tools/node-radar-cache-check.py \
+  | tee ws63-firmware/out/radar-cache-check.txt
+# 本次实测输出已入库：ws63-firmware/out/radar-cache-check.txt（24 帧 / 24 条字段断言 / 0 失败）
+# 同名 .log 内容相同，但被 .gitignore 的 *.log 排除
+```
+
+自测**链接真实的 `node_sensor_radar.c`**（不复制逻辑），只替两类依赖：SDK 的
+`soc_osal.h`/`tcxo.h`（替身头由脚本在临时目录生成）与 `radar_hub.h` 的只读访问器
+（按脚本化时间线给读数，`radar_hub_get_presence()` 恒返回 -1 以走真机的降级路径）。
+时间线按真机节拍搭：50 ms 一拍、2 s 一采样、3 s 一 poll，跑 0–60 s。
+
+**关键设计**：「这一拍到底是不是采样节拍」**不重算周期**（那是把被测逻辑抄一遍再来证明自己
+对），而是看 `radar_hub_get_fall()` 有没有被调用 —— 间隙分支在读缓存之前就 `return`，不碰雷达。
+这是一个与被测代码**不共因**的行为学观测点。每个场景跑在**独立进程**里
+（`node_sensor_radar.c` 的状态是文件作用域静态量，同进程连跑会互相带状态）。
+
+结果（`ws63-firmware/out/radar-cache-check.txt`，24 帧 / 24 条字段级断言 / 0 失败）：
+
+| 场景 | 断言 |
+|---|---|
+| `sustained` 持续跌倒 | 跌倒窗口 poll **12** 次，其中落在采样间隙 **6** 次，**错报 fall=0 的 0 次**；两个边沿都产生事件帧；起床后连续 `fall=0` 的 poll 5 次（≥K=3） |
+| `boot` 开机未采样 | 未采样时 `fall/presence` 报 0/0（不把 `-1` 报上去）、`src=="uart"` |
+| `silent` 模块静默 | 未知读数在采样拍与间隙拍都归一化成 0 |
+| `demo` | demo 期间间隙 poll 报 1/1；到期后回落 0 |
+
+poll 应答帧按 `FRAME <tag>\n<json>` 打印，由 Python 用**真 JSON 解析器**逐字段复检
+（tag 按**脚本模型**分档，不按被测代码报出来的值分档 —— 否则代码错报时 tag 会跟着变，
+断言就成了自我实现）。实测帧统计：
+
+```
+gap-poll-fall=12, poll-normal=2, poll-lagging=1, poll-recovered=5,
+poll-boot=1, poll-unknown=1, poll-demo-gap=1, poll-demo-expired=1
+```
+
+逐字段核对项：§2.2 信封键序（`sn→ts→type→payload→seq→req_id→fw`）与必填、
+`sn=="M2"`（§2.7）、`ts` 13 位毫秒（§0.2）、§2.4.2 `fall`/`presence` 是 **int 0/1**
+（不是 bool）、`src ∈ {uart,tx2}`、§2.1 单条 ≤512 字节。
+
+### 9.6 变异检验：删掉回填那两行，同一套自测**必须失败**
+
+正例全绿只能说明「没报错」；只有反例失败才能说明那几条断言**真的在测这个不变量**。
+`tools/node-radar-cache-check.py` 因此会在临时目录里生成一个变异体
+（把真实源码里的 `g_cache_fall = fall;` 与 `g_cache_pres = pres;` 各删掉一次；
+脚本会先要求这两行在源文件里**各出现恰好一次**，结构变了就报错而不是假装通过），
+用完全相同的编译参数编出来跑同一个 `sustained` 场景：
+
+| | 结果 | 计数行 |
+|---|---|---|
+| 正例（真实源码） | `SELFTEST OK`（rc=0） | poll 12 次，间隙 6 次，**错报 0 次** |
+| 反例（删掉回填两行） | `SELFTEST FAILED: 8`（rc=1） | poll 12 次，间隙 6 次，**错报 6 次** |
+
+反例的错报次数**恰好等于**采样间隙 poll 次数（6 = 6）—— 这正是「修复前间隙回 0 是唯一的
+错报来源」的证明，也说明这条断言不是顺手绿的。反例的 8 条失败里，6 条是逐拍的
+`老人仍在跌倒，poll 应答却报 fall=0（采样间隙）`，1 条是起床滞后拍，1 条是总量断言。
+
+### 9.7 `cmd=demo` 的有界延后（顺带说清，免得被当成新缺陷）
+
+demo 造的 `fall=1` 也会进缓存，所以 demo 到期（`NODE_DEMO_HOLD_MS`=3000 ms）之后，
+间隙拍最多再报一个采样周期（**≤2 s**）的 `fall=1` 才回落。这是**故意**的：
+不这样的话会出现「事件帧说跌倒了、同一时间的 poll 应答说没跌倒」的自相矛盾。
+自测在 demo 场景里断言了到期后确实回落（11000 ms 与 11500 ms 两拍均为 0）。
+
+同理，起床后的**第一个** poll（本次自测里是 t=45000 ms）仍报 `fall=1` 也是正确的：
+节点只保证 2 s 采样分辨率，那一拍的快照来自 2 s 前的真实采样。自测把这一拍单列成
+`poll-lagging` 档并断言它报 1，与 `poll-recovered`（已采到起床，必须报 0）分开，
+免得把「采样分辨率」和「缺陷」混为一谈。
+
+### 9.8 本次未做
+
+- **上板实测**：§7 第 3 步的通过标志已按 §9.3 补上 t32 判据，待用户操作。
+- 事件限流（`NODE_EVENT_MIN_GAP_MS`=5000）与「两个边沿都报」的语义未改动，
+  属 t2 既有设计，不在 t32 范围。
+
+### 9.9 t32 重编后的产物指纹（六个目标全过，**只有 M2 变了**）
+
+```bash
+HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh
+# 退出码 0，六轮全部 "角色断言通过"（日志 /tmp/node-build-t32.log，逐目标指纹见 out/*.info.txt）
+```
+
+| 目标 | t2 时的字节数 | t32 重编后 | 变化 | t32 后的 sha256 |
+|---|---|---|---|---|
+| `NODE_M1.fwpkg` | 1467944 | 1467944 | 不变 | `001c70200d232ded5cc76d5d293f1ddcf2a323380f59e3e2629267d10a45a067` |
+| **`NODE_M2.fwpkg`** | 1467816 | **1467880** | **+64 B（唯一变了的）** | `901649d49a468c176fd432463702dfcdbb03e931ba531e2f3d254486dec5c3b6` |
+| `NODE_M4.fwpkg` | 1463656 | 1463656 | 不变 | `e49e8816e95a23c2883b3974f93c124f9b2b47c38d4b75208495c85a478e1ba6` |
+| `NODE_MOCK.fwpkg` | 1463016 | 1463016 | 不变 | `7b7372051c1c7e6ed3f4a67ab8dcf79121514fc44f2a74d4a860bdca5e19a8e8` |
+| `HUB_HUB.fwpkg` | 1472744 | 1472744 | 不变 | `8ef1978be0b414308691f2ab709fe6c3d3bad326de6e0b3588f4bc568fc1f2f4` |
+| `HUB_HUBMOCK.fwpkg` | 1476200 | 1476200 | 不变 | `28a1f56e5c37668b7fd4ef7d4db8f3d4223c07fec08cd5fe627c937ea0044ca6` |
+
+**「只有 M2 变了」本身就是一条验收证据**：t32 只改了 `ws63-firmware/src/node_sensor_radar.c`
+（`git status` 里 `ws63-firmware/src/` 下唯一的 `M`），三个节点目标里只有 M2 把该文件编进清单；
+两个汇聚目标的 sha256 与 t3 复核时**逐位相同**（`8ef1978b…` / `28a1f56e…`），说明这一棒
+没有蹭到汇聚固件。+64 B 就是两行回填加上注释/符号带来的差异。
+
+`tools/node-compile-check.py m2` 亦复跑通过（7 个「目标×文件」，失败 0）。
