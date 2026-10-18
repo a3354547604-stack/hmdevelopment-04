@@ -680,6 +680,53 @@ def check_uplink_forward(cc):
     return 0 if rp.returncode == 0 else 1
 
 
+def check_uart_tx_path():
+    """t76（F-70-01）：UART 写路径必须按「实际写出的字节数」判成功，且失败要看得见。
+
+    SDK 语义（已取证，见 doc/12 §11）：uapi_uart_write() 返回**实际写出的字节数**
+    （uart.c `return write_count;`），只有 uapi_uart_param_check 失败才返回负 errcode。
+    t59 的代码拿这个返回值跟 ERRCODE_SUCC(0) 比，于是写成功反被判失败、up_sent 恒 0。
+    本断言守三件事（变异检验：把超时改回 0、或把判据改回 ERRCODE_SUCC、或删掉分级计数，
+    这里必须变红）：
+      1) 超时常量存在且非零；
+      2) 成功判据是 n == len，写路径里不再出现 ERRCODE_SUCC；
+      3) 失败分级计数（总数 / 短写 / 参数错）都在写路径里。
+    """
+    cfg = os.path.join(SRC, "hub_cfg.h")
+    with open(cfg, encoding="utf-8") as f:
+        cfg_text = _strip_comments(f.read())
+    m = re.search(r"#define\s+HUB_UART_TX_TIMEOUT_MS\s+(\d+)u?", cfg_text)
+
+    src = os.path.join(SRC, "hub_client.c")
+    with open(src, encoding="utf-8") as f:
+        text = _strip_comments(f.read())
+    body = _func_body(text, "hub_port_write")
+    if body is None:
+        print("  FAIL  找不到 hub_port_write()")
+        return 1
+
+    bad = 0
+    if m is None or int(m.group(1)) == 0:
+        print("  FAIL  HUB_UART_TX_TIMEOUT_MS 缺失或为 0（非零超时是卡面要求）")
+        bad += 1
+    if "HUB_UART_TX_TIMEOUT_MS" not in body:
+        print("  FAIL  写路径没用超时常量（还是硬编码 0？）")
+        bad += 1
+    if "ERRCODE_SUCC" in body:
+        print("  FAIL  写路径又拿返回值跟 ERRCODE_SUCC 比 —— 返回值是字节数，不是 errcode")
+        bad += 1
+    if "(int32_t)len" not in body:
+        print("  FAIL  成功判据不是 n == len（实际写出字节数）")
+        bad += 1
+    for cnt in ("g_uart_tx_err++", "g_uart_tx_short++", "g_uart_tx_param++"):
+        if cnt not in body:
+            print("  FAIL  失败分级计数缺少 %s —— 写失败会被吞掉" % cnt)
+            bad += 1
+    if bad == 0:
+        print("  PASS  UART 写路径：非零超时 + 按实际写出字节数判成功 + 失败分级计数（F-70-01 修复点）")
+    return bad
+
+
 def main():
     in_docker = "--inside-docker" in sys.argv
     cc = find_cc()
@@ -702,8 +749,9 @@ def main():
     pafail = check_poll_accounting(cc)
     upfail = check_uplink_forward(cc)
     pffail = check_pump_forwards()
+    txfail = check_uart_tx_path()
     total_bad = ((1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail
-                 + pafail + upfail + pffail)
+                 + pafail + upfail + pffail + txfail)
     print("\n==== hub-selftest 总判定：%s ====" % ("PASS" if total_bad == 0 else "FAIL"))
     print("日志：ws63-firmware/out/hub-selftest.log；mock 聚合证据：ws63-firmware/out/hub-mock-agg.log")
     return 0 if total_bad == 0 else 1

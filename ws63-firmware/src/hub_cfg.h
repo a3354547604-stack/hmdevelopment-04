@@ -190,6 +190,11 @@ static inline int hub_sub_decide(uint8_t sub_tries, int cfm_status, int got_fram
 #define HUB_RX_BUF_SIZE         512u
 /* 帧最大长度 = 10 + 1024（§3.2） */
 #define HUB_TX_FRAME_MAX        1034u
+/* UART 写超时（ms）。取值依据：115200 8N1 下 1 字节 = 10 bit ≈ 86.8 µs，最长帧
+ * HUB_TX_FRAME_MAX（1034 B）一次发完 ≈ 90 ms；取 200 ms ≈ 2.2× 最长帧传输时间，
+ * 既容得下 TX FIFO 排空，也不会让主循环在异常情况下被拖死。写超时必须非零，
+ * 由 tools/hub-selftest.py 的 check_uart_tx_path() 守着（变异检验会把 0 判红）。 */
+#define HUB_UART_TX_TIMEOUT_MS  200u
 
 /* 引脚（《引脚与接线表》§3.2）：汇聚排针 23=U1TX=GPIO_15、24=U1RX=GPIO_16，
  * 复用关系表里 UART1 是 MODE 1，115200 8N1，3.3 V 直连不分压、必须共地。

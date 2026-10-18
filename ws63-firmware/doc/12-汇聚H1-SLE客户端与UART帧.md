@@ -382,3 +382,119 @@ python3 tools/node-compile-check.py    # 41 个（目标 × 文件）编译，�
 - 变异检验：删 `hub_glink_send_uplink` 调用 → 红；`poll_account` 改回 200 ms 拍内判据 → 红。
 - `python3 tools/node-compile-check.py`（41 单元 / 0 失败）
 - `tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh hub`（提交口径 HUB_HUB.fwpkg 1473384 B）
+
+## 12 t76 / F-70-01：UART 写路径判据写反（并更正 §11.3 的因果结论）
+
+> **一句话**：§11.3 记的「一个字节也没真正发出」**结论是错的**。真因是 `hub_port_write()`
+> 把 `uapi_uart_write()` 的返回值（**实际写出的字节数**）当成 `errcode_t` 去跟
+> `ERRCODE_SUCC`(0) 比：写成功时 n=len>0，反而被判成失败 → 每帧都打
+> `[GLINK] uart write failed`、`up_sent` 恒 0。字节其实一直在发。
+
+### 12.1 SDK 取证（本卡第一件事：先读懂被调用的函数）
+
+`fbb_ws63-master/src/include/driver/uart.h:499` 的声明与文档：
+
+```c
+int32_t uapi_uart_write(uart_bus_t bus, const uint8_t *buffer, uint32_t length, uint32_t timeout);
+/* @return 实际发送的数据长度。 */
+```
+
+`fbb_ws63-master/src/drivers/drivers/driver/uart/uart.c:738-763` 的实现：
+
+```c
+int32_t uapi_uart_write(uart_bus_t bus, const uint8_t *buffer, uint32_t length, uint32_t timeout)
+{
+    unused(timeout);                                  /* ① timeout 参数被丢弃 */
+    ...
+    int32_t ret = uapi_uart_param_check(bus, buffer, length);
+    if (ret != ERRCODE_SUCC) { return ret; }          /* ② 只有参数检查失败才返回负 errcode */
+    ... while (len > 0) { ... hal_uart_write(bus, data_buffer++, 1); write_count++; } ...
+    return write_count;                               /* ③ 成功返回写出的字节数 = length */
+}
+```
+
+三条结论：**① 本 SDK 的 `timeout` 不起作用**（轮询忙等，`unused(timeout)`）；
+**② 返回值是字节数，不是错误码**；**③ 所以 `(ret == ERRCODE_SUCC)` 这个判据把成功判成失败**。
+即 F-70-01 的原描述（「物理层断链」）与 §11.3 的因果解释都需要更正 —— 链路没断，是**判据**断了。
+
+### 12.2 改了什么
+
+- `hub_client.c` 的 `hub_port_write()`：以 `n == (int32_t)len` 判成功（唯一正确判据）；失败**分级计数**
+  `g_uart_tx_err`（总）/`g_uart_tx_short`（0 ≤ n < len，FIFO 满/中途放弃）/`g_uart_tx_param`
+  （n < 0，参数或总线错，打印负 errcode 原值）。分级的理由：短写是**链路侧**问题，参数错是
+  **本端配置**问题，排查方向相反。
+- `hub_cfg.h` 新增 `HUB_UART_TX_TIMEOUT_MS 200u`：115200 8N1 下 1 字节 ≈ 86.8 µs，最长帧
+  1034 B ≈ 90 ms，取 200 ms ≈ 2.2× 最长帧传输时间。**注**：本 SDK 会丢弃该参数，仍传非零值是
+  契约要求，也让换版本后行为不被 0 意外放大。
+- `hub_client.c` STAT 行新增 `tx(ok= err= short= param=)` —— 写失败从此在日志里看得见（t59 之所以
+  漏看，是当时 `g_glink.port.log == NULL`，链路层日志整段黑屏，t70 已接上）。
+- `tools/hub-selftest.py` 新增 `check_uart_tx_path()` 源码级断言（超时常量非零 / 判据是 `n == len`
+  且写路径不出现 `ERRCODE_SUCC` / 三个分级计数都在），并接入总判定。
+
+### 12.3 主机验证（无板可复现）
+
+- `python3 tools/hub-selftest.py`：**PASS**（C 断言 `PASS 192 / FAIL 0`，与 t70 基线同数；Python 级 16 项
+  断言全 PASS，含本次新增 `check_uart_tx_path`；日志 `ws63-firmware/out/hub-selftest.log`）。
+- **变异检验（三个变异全被抓，且还原后逐字节一致）**：
+
+| 变异 | 期望 | 实测 |
+|---|---|---|
+| `HUB_UART_TX_TIMEOUT_MS 200u → 0u` | 红 | `FAIL HUB_UART_TX_TIMEOUT_MS 缺失或为 0`，bad=1 |
+| 判据 `n == (int32_t)len → n == ERRCODE_SUCC` | 红 | `FAIL 又拿返回值跟 ERRCODE_SUCC 比` + `FAIL 判据不是 n == len`，bad=2 |
+| 删掉 `g_uart_tx_short++;` | 红 | `FAIL 失败分级计数缺少 g_uart_tx_short++`，bad=1 |
+
+- `python3 tools/node-compile-check.py hub hubmock`：41 单元 / 0 失败。
+
+### 12.4 上板实测（板 A = COM15 汇聚，板 B = COM14 节点 NODE_M1，`-Reset` 后 150 s）
+
+- 启动自证：`uart1 init ret=0 (IO15=TX/IO16=RX mode=1 115200 8N1)` —— 端口确实 open，
+  所以失败不可能是 param_check（这条排除了「总线没配好」这一支）。
+- `[GLINK] -> 0x01` 计数 = **92**（> 0）；`uart write failed` = **0**。
+- 末条 STAT（uptime 121 s，满足 ≥120 s）：
+
+```
+[HUB] STAT up=121s rx=74 poll_ok=37 poll_miss=0 late=1 rtt=0@0 ev_on=360 ev_off=0 ev_fall=0
+      disc=14 unknown=0 up_sent=74 retrans=0 gw_miss=0 drop(ev=0 up=0 uart=0) conns=1 wl=1
+      tx(ok=90 err=0 short=0 param=0)
+```
+
+即 **`up_sent=74` > 0、`uart_err`（tx err）= 0** —— 卡面验收第 2 条的三项判据全部满足。
+日志：`ws63-firmware/spike/logs/f70-hub-COM15.log`。
+- 台架前提（必须写明）：白名单只由网关的 `0x22 PAIR_BIND` 填充，**没有网关时汇聚不会连任何节点**
+  （本轮首次抓包即 `conns=0 wl=0 disc` 疯涨，但 `seek hit … sn=M1 rssi=-43` 说明节点在广播）。
+  因此本轮用 `hub_cfg.h` 的台架钩子 `HUB_TEST_PREBIND_ON 1 / SN "M1"` 临时预置白名单
+  （见 §10.4；交付镜像仍为 `0`，与不带钩子逐位无关的差异只有这一处宏）。
+  钩子镜像 1473832 B `4a2dc175…5c55`（当次），交付镜像 1473640 B `6dd52721…fd66f`（当次）。
+
+### 12.5 网关侧端到端（真收到并解析出 0x01）—— **未验证**（RK2206 板未被系统识别）
+
+用户本轮插了板，但 Windows 只枚举到两块 WS63 的 CH340（COM14/COM15），RK2206 显示
+`未知 USB 设备(端口重置失败)` → 无法烧网关固件、也无法抓网关日志。**本条如实标「未验证」**，
+补做时按下面 ≤3 步施工单执行（接线依据 `docs/技术/引脚与接线表.md` §2 表，H1↔M0 段）：
+
+1. **接线（3 线，先接后上电）**：M0 `E53_UART0_TX_M0` → H1 排针 **24**（U1RX，黄）；
+   M0 `E53_UART0_RX_M0` → H1 排针 **23**（U1TX，绿）；GND ↔ H1 排针 15/26/29/30（黑，**必接**）。
+   115200 8N1、3.3 V 直连不分压。**禁止**接到底板 CH340E 的 `UART1_RXD_M1/TXD_M1`。
+2. **烧录并起服务**：按 `rk2206-gateway/` 的烧录说明把网关固件烧进 M0 的 OTG 口，起网关进程
+   （串口 `E53_UART0`，115200）。
+3. **判据（必须看到三条）**：① 网关日志出现解析成功的 `0x01`（节点上行透传）且 JSON 可解析；
+   ② 网关回 `0x11`/`0x12` 后，汇聚 STAT 的 `gw_miss` 不再增长；③ 下发阈值命令，节点侧回 ack，
+   汇聚 `[GLINK] -> 0x11` 后 `[GLINK] -> 0x01` 出现同一 `seq` 的 ack（端到端闭环）。
+   可复跑命令：`pwsh -File tools/serial-capture.ps1 -Port <网关串口> -Seconds 120 -Out <log>`
+   （本机无 `pwsh`，用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/serial-capture.ps1 …`）。
+
+### 12.6 验证命令（本卡口径）
+
+- `python3 tools/hub-selftest.py`（PASS；C 断言 192/0，Python 级 16 项含新增 `check_uart_tx_path`）
+- `python3 tools/node-compile-check.py hub hubmock`（16 个目标×文件编译、失败 0）
+- `bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh hub hubmock`
+  （交付口径 `ws63-firmware/out/HUB_HUB.fwpkg` 1473640 B、`HUB_HUBMOCK.fwpkg` 1477160 B）
+- 上板：`tools/ws63flash-port.exe <fwpkg> app COM15 <log>` +
+  `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/serial-capture.ps1 -Port COM15 -Seconds 150 -Out ws63-firmware/spike/logs/f70-hub-COM15.log -Reset -Quiet`
+
+### 12.7 本次未做 / 留给他卡
+
+- 网关侧真收到 0x01 的端到端（**未验证**，等 RK2206 板被系统识别）。
+- 生产镜像与钩子镜像的差异只有 `HUB_TEST_PREBIND_ON/SN` 两个宏；**交付镜像钩子为 OFF**。
+- 收工已恢复：板 A ← `ws63-firmware/output/ws63-liteos-app_all.fwpkg`（生产汇聚）、
+  板 B ← `ws63-firmware/output/WS63-XF_AT-2.0.1-alpha.fwpkg`（厂家 xfat-rescue），释放 COM14/COM15。

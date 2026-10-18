@@ -301,6 +301,13 @@ static volatile uint8_t  g_rx_ring[HUB_RX_RING_SIZE];
 static volatile uint32_t g_rx_w;
 static volatile uint32_t g_rx_r;
 static volatile uint32_t g_uart_err;
+/* UART **发送**侧统计（F-70-01）：tx_err=失败总数、tx_short=没写完、tx_param=参数/总线错。
+ * 必须分开计数：`short` 说明对端没接、FIFO 满或波特率不匹配（链路问题），`param` 说明本端
+ * 根本没配好（uart_init 失败/总线上没有这个口）——两者排查方向完全相反，混成一个数就只能猜。 */
+static volatile uint32_t g_uart_tx_ok;
+static volatile uint32_t g_uart_tx_err;
+static volatile uint32_t g_uart_tx_short;
+static volatile uint32_t g_uart_tx_param;
 
 static void hub_uart_rx_cb(const void *buffer, uint16_t length, bool error)
 {
@@ -328,14 +335,34 @@ static void hub_uart_rx_cb(const void *buffer, uint16_t length, bool error)
 
 static int32_t hub_port_write(void *ctx, const uint8_t *buf, uint32_t len)
 {
-    errcode_t ret;
+    int32_t n;
 
     unused(ctx);
     if (buf == NULL || len == 0u) {
         return 0;
     }
-    ret = uapi_uart_write(HUB_UART_BUS, (const uint8_t *)buf, len, 0);
-    return (ret == ERRCODE_SUCC) ? (int32_t)len : -1;
+    /* F-70-01：uapi_uart_write() 的返回值是**实际写出的字节数**，不是 errcode_t：
+     * 声明见 src/include/driver/uart.h:499（`@return 实际发送的数据长度`），
+     * 实现 uart.c:738-763 结尾 `return write_count;`，只有参数检查失败才返回负的 errcode。
+     * 旧代码 `return (ret == ERRCODE_SUCC) ? len : -1;` 拿它跟 ERRCODE_SUCC(0) 比：
+     * 写成功时 n=len>0，反被判成失败 → 每帧都打 "uart write failed"、up_sent 恒为 0。
+     * 即 t70 看到的"一个字节都没发出去"是**判据写反**，不是物理层断链（本卡取证见 doc/12 §11）。 */
+    n = uapi_uart_write(HUB_UART_BUS, (const uint8_t *)buf, (uint32_t)len, HUB_UART_TX_TIMEOUT_MS);
+    if (n == (int32_t)len) {
+        g_uart_tx_ok++;
+        return n;
+    }
+    g_uart_tx_err++;
+    if (n < 0) {
+        /* n<0：uapi_uart_param_check 失败，返回负的 errcode_t（总线未 open / 参数非法） */
+        g_uart_tx_param++;
+        HUB_LOG("ERROR: uart write param/bus err code=%d len=%u", (int)n, (unsigned)len);
+    } else {
+        /* 0<=n<len：TX FIFO 一直满/中途放弃，只发出去一部分 —— 短写不能当成功 */
+        g_uart_tx_short++;
+        HUB_LOG("WARN: uart write short n=%d/%u (tx fifo full?)", (int)n, (unsigned)len);
+    }
+    return -1;
 }
 
 static int32_t hub_port_read(void *ctx, uint8_t *buf, uint32_t cap)
@@ -1363,7 +1390,8 @@ static void hub_stat(void)
     /* t70：把 last_late 与最近一次结算的 rtt 打进 STAT —— poll_ok 恒 0 那次就是靠
      * 「rx 在涨而 poll_ok 不动」看出来的，rtt 则是量真实应答时延的唯一现场数字。 */
     HUB_LOG("STAT up=%us rx=%u poll_ok=%u poll_miss=%u late=%u rtt=%u@%u ev_on=%u ev_off=%u ev_fall=%u "
-            "disc=%u unknown=%u up_sent=%u retrans=%u gw_miss=%u drop(ev=%u up=%u uart=%u) conns=%d wl=%d",
+            "disc=%u unknown=%u up_sent=%u retrans=%u gw_miss=%u drop(ev=%u up=%u uart=%u) conns=%d wl=%d "
+            "tx(ok=%u err=%u short=%u param=%u)",
             (unsigned)g_agg.uptime_s, (unsigned)g_agg.rx_frames, (unsigned)g_agg.poll_ok,
             (unsigned)g_agg.poll_miss, (unsigned)g_agg.ev_online, (unsigned)g_agg.ev_offline,
             (unsigned)g_agg.poll_late, (unsigned)g_agg.last_rtt_ms,
@@ -1372,7 +1400,9 @@ static void hub_stat(void)
             (unsigned)g_glink.up_sent,
             (unsigned)g_glink.retrans, (unsigned)g_glink.gw_rx_miss, (unsigned)g_ev_drop,
             (unsigned)g_glink.up_drop, (unsigned)g_uart_err, cli_conn_count(),
-            (int)g_agg.wl_count);
+            (int)g_agg.wl_count,
+            (unsigned)g_uart_tx_ok, (unsigned)g_uart_tx_err,
+            (unsigned)g_uart_tx_short, (unsigned)g_uart_tx_param);
 }
 
 #if HUB_MOCK
