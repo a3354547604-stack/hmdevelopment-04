@@ -461,12 +461,18 @@ class Ws63Flash
     // ---------------- main ----------------
     static int Main(string[] args)
     {
-        string pkgPath = args.Length > 0 ? args[0] : @"C:\Users\Administrator\ws63-tools\fw\ws63-liteos-app_all.fwpkg";
+        // [t81] 默认路径不再写死本机账户名：提交包自检会把 `C:\Users\<账户名>\…` 判成身份泄漏。
+        // 默认值改成不含账户名的占位路径；优先级 argv > 环境变量 > 占位默认值（行为不变）。
+        string pkgPath = args.Length > 0 ? args[0]
+            : (Environment.GetEnvironmentVariable("WS63_FWPKG")
+               ?? @"C:\ws63-tools\fw\ws63-liteos-app_all.fwpkg");
         string mode = args.Length > 1 ? args[1] : "app";
         // [tools/ws63flash-port] port + log path are parameters so a board on a
         // non-COM14 port can be flashed without touching ws63-firmware/flasher/.
         string port = args.Length > 2 ? args[2] : "COM14";
-        string logPath = args.Length > 3 ? args[3] : @"C:\Users\Administrator\ws63-tools\flasher-log.txt";
+        string logPath = args.Length > 3 ? args[3]
+            : (Environment.GetEnvironmentVariable("WS63_FLASH_LOG")
+               ?? @"C:\ws63-tools\flasher-log.txt");
         int baud = 115200;
 
         logw = new StreamWriter(logPath, false);

@@ -145,15 +145,25 @@ EXCLUDE_RE = [
     (re.compile(r"^ws63-firmware/doc/[0-9]-"), "E4 上板调试记录（0–9 号）"),
     (re.compile(r"^android-app/docs/evidence/evidence-.*\.md$"), "E11 含身份的证据文档"),
     (re.compile(r"^ws63-firmware/spike/out/build-evidence\.txt$"), "E11 含身份的证据文档"),
-    (re.compile(r"^tools/test/reports/.*\.json$"), "E10 机器日志（可选，人读报告 .md 仍入包）"),
-    (re.compile(r"^tools/test/reports/.*repo-health.*$"),
-     "E11 仓库体检输出（正文逐条列举 PII 命中位置）"),
+    # t81：原来只排 .json、放行 .md，而 .md 里逐条写着 `/mnt/c/Users/<user>/…`（63 处），
+    # 又被「路径含 test/ 就良性」的宽泛规则盖住。现在整目录显式排除并写明理由：
+    # 验收报告是**过程记录**（正文含本机绝对路径与账户名），提交包只放材料与源码。
+    (re.compile(r"^tools/test/reports/"),
+     "E10/E11 机器生成的验收报告与扫描输出（正文逐条含本机绝对路径与账户名；"
+     "属内部 QA 记录，提交包不放验收过程记录）"),
     (re.compile(r"^docs/评审与验证/"),
      "E11 内部复核报告（正文引用本机路径/作者姓名邮箱/主办方 PII；发现问题≠把问题发出去）"),
     (re.compile(r"^赛题四-实施计划\.md$"),
      "E8 内部实施计划（含报名流程与主办方邮箱）"),
     (re.compile(r"^android-app/BUILD-LOG\.md$"),
      "E11 构建日志（含本机绝对路径）"),
+    # t81 实测发现（旧正则漏检、补了反斜杠形态后抓出）：本文件正文引用原厂打包机的
+    # Windows 账户路径 `C:\Users\<厂商账户>\Downloads\u-boot.itb`。该文件是内部上板施工记录，
+    # 不属 t54 §5.1 必含项；**待归属人把该路径换成 `<原厂机器>` 占位符后即可删掉这条排除**。
+    # 这里写明理由而不是用「路径含某关键字就良性」的宽泛规则掩盖。
+    (re.compile(r"^rk2206-gateway/施工单-网关上板与上云验证\.md$"),
+     "E11 内部上板施工记录（正文含原厂打包机的 Windows 账户路径；"
+     "归属人改占位符后可移除本条排除）"),
     (re.compile(r"(^|/)\.env(\.[^/]*)?$"), "E9 环境与密钥"),
 ]
 
@@ -190,7 +200,17 @@ IDENTITY_PATTERNS = [
     ("凭据-URL内嵌", re.compile(r"://[^\s/:'\"]+:[^\s/:'\"@]+@")),
     ("身份-院校/角色", re.compile(r"大学|学院|学校|职业技术学院|指导老师|指导教师|辅导员|学号|团队名|身份证")),
     ("身份-本机用户名", re.compile(r"qinyixiang|QinYixiang|QINYIXIANG")),
-    ("身份-绝对路径本机用户", re.compile(r"/(?:home|Users)/([A-Za-z][A-Za-z0-9_.\-]{2,})")),
+    # t81：原来只认正斜杠（`/(home|Users)/x`），漏掉 Windows 反斜杠形态 `C:\Users\<user>\…`
+    # 与 C# 字面量 `@"C:\Users\…"` —— 这正是 README:130/134/138、ws63-firmware/doc/11:239
+    # 当初没进清单的原因。现在三种形态 + 正反斜杠混用都覆盖：
+    #   /home/<user>/          （Linux/WSL 家目录）
+    #   /mnt/c/Users/<user>/   （WSL 挂载的 Windows 用户目录）
+    #   C:\Users\<user>\  ·  C:/Users/<user>/  ·  @"C:\Users\<user>\…"
+    # `(?:[A-Za-z]:)?` 吃掉盘符，`[\\/]{1,2}` 同时吃 `/`、`\`、`//`、`\\`；捕获组仍是用户名本身，
+    # 下面的 BENIGN_HOME（容器内 /home/openharmony 之类）判定逻辑不受影响。
+    ("身份-绝对路径本机用户", re.compile(
+        r"(?:[A-Za-z]:)?[\\/]{1,2}(?:Users|home)[\\/]([A-Za-z][A-Za-z0-9_.\-]{2,})",
+        re.IGNORECASE)),
     ("联系-邮箱", re.compile(r"[A-Za-z0-9._%+\-]+@(?:qq|163|126|gmail|foxmail|outlook|sina|aliyun|hotmail|htu)\.[A-Za-z.]{2,}")),
     ("联系-手机号", re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")),
 ]
@@ -203,13 +223,29 @@ BENIGN_LINE = re.compile(r"不得出现|不得包含|不得跨校|禁止出现|�
                          r"占位符|规则引用|允许出现|校验|检查项|扫描|grep |"
                          r"XX\s*学校|XX\s*队|XX队|XX学校|"
                          r"信息技术应用创新大赛|开源鸿蒙赛道|河南省高等学校")
-# 测试夹具/样例/mock 文件里的假值不算泄露（t54 §4.1 的良性命中口径）
-BENIGN_PATH = re.compile(r"(^|/)(tests?|test_[^/]*\.py|h5_samples|mocks?|Mock[^/]*)(/|$)|"
+# 测试夹具/样例/mock 文件里的假值不算泄露（t54 §4.1 的良性命中口径）。
+# t81：这里原来是 `(^|/)(tests?)(/|$)`，等于「路径里只要有 test/ 目录就整棵树良性」——
+# `tools/test/reports/*.md` 里 63 处 `/mnt/c/Users/<user>/…` 就是这样被掩盖的。
+# 现在只放行「测试目录下的**源码**」（.py/.kt/.java/.ts/.ets/.js），文档/报告一律照扫。
+BENIGN_PATH = re.compile(r"(^|/)(tests?)/[^/]+\.(py|kt|java|ts|ets|js)$|"
+                         r"(^|/)test_[^/]*\.py$|"
+                         r"(^|/)(h5_samples|mocks?)(/|$)|"
                          r"Test\.kt$|Mock[A-Za-z]*\.(kt|ets)$|selfcheck|mock_server\.py$")
 BENIGN_PHONE = re.compile(r"^1[3-9]8000000\d$|^1380000000\d$")
 # 容器内路径（不是本机用户）：构建脚本里 /home/openharmony、/home/tools 是镜像里的目录
 BENIGN_HOME = {"openharmony", "tools", "root", "user", "ubuntu", "debian", "builder", "node",
                "hpm", "docker", "public", "shared", "app", "workspace", "code", "opt", "tmp"}
+
+# 扫描器自命中（t81）：复核脚本必须把「大学|学院|…」与本机用户名写成正则字面量才能扫别人，
+# 于是必然扫到自己（repo_health.py 的 PAT 行、check_*_contract.py 的 PAT 行与提示语）。
+# 只对 tools/test/review/ 下这两个文件、且只对下面两类放行；同一个文件里的本机路径/口令/
+# 邮箱/手机号照旧判红 —— 这是窄口径，不是「路径含 test/ 就良性」那种宽泛规则。
+SCANNER_SELF_REF = re.compile(r"^tools/test/review/(repo_health|check_[^/]+)\.py$")
+SELF_REF_KINDS = frozenset({"身份-院校/角色", "身份-本机用户名"})
+
+
+def _scanner_self_ref(rel: str, kind: str) -> bool:
+    return kind in SELF_REF_KINDS and bool(SCANNER_SELF_REF.search(rel))
 
 TEXT_EXT = {".md", ".txt", ".py", ".c", ".h", ".cc", ".cpp", ".ets", ".ts", ".kt", ".java", ".js",
             ".gn", ".gni", ".json", ".json5", ".sh", ".bat", ".ps1", ".yml", ".yaml", ".toml",
@@ -454,7 +490,9 @@ def check_identity_text(root: str, rep: Report) -> int:
                 frag = m.group(0)
                 is_benign = bool(BENIGN_VALUE.search(frag) or BENIGN_LINE.search(line)
                                  or BENIGN_PHONE.match(frag) or BENIGN_PATH.search(rel))
-                if not is_benign and kind == "身份-绝对路径本机用户" and m.group(1).lower() in BENIGN_HOME:
+                if not is_benign and (_scanner_self_ref(rel, kind)
+                                      or (kind == "身份-绝对路径本机用户"
+                                          and m.group(1).lower() in BENIGN_HOME)):
                     is_benign = True
                 rec = (rel, lineno, kind, frag, line.strip()[:150])
                 (benign if is_benign else real).append(rec)
@@ -594,7 +632,7 @@ def _redact_line(line: str, rel: str = "") -> tuple[str, list[str]]:
                 break
             frag = m.group(0)
             if (BENIGN_VALUE.search(frag) or BENIGN_LINE.search(line) or BENIGN_PHONE.match(frag)
-                    or BENIGN_PATH.search(rel)
+                    or BENIGN_PATH.search(rel) or _scanner_self_ref(rel, kind)
                     or (kind == "身份-绝对路径本机用户" and m.group(1).lower() in BENIGN_HOME)):
                 break  # 良性：不脱敏（也不继续找，避免死循环）
             repl = REDACT_MAP.get(kind, "<redacted:%s>" % kind)
@@ -736,7 +774,7 @@ def identity_hits_for_files(base: str, files: list[str]) -> list[tuple]:
                     continue
                 frag = m.group(0)
                 if (BENIGN_VALUE.search(frag) or BENIGN_LINE.search(line) or BENIGN_PHONE.match(frag)
-                        or BENIGN_PATH.search(rel)
+                        or BENIGN_PATH.search(rel) or _scanner_self_ref(rel, kind)
                         or (kind == "身份-绝对路径本机用户" and m.group(1).lower() in BENIGN_HOME)):
                     continue
                 hits.append((rel, lineno, kind, frag, line.strip()[:150]))
@@ -799,7 +837,7 @@ def _fake_pptx(path: str, slides: int = 14) -> None:
 
 
 def _build_candidate(root: str, dirty: bool) -> None:
-    """造一个最小提交包候选：材料四件套齐全 + 一段源码；dirty=True 时塞两处脏东西。"""
+    """造一个最小提交包候选：材料四件套齐全 + 一段源码；dirty=True 时塞 .env、正斜杠家目录与 Windows 反斜杠路径。"""
     os.makedirs(os.path.join(root, "docs/参赛材料/dist"), exist_ok=True)
     os.makedirs(os.path.join(root, "docs/技术"), exist_ok=True)
     with open(os.path.join(root, "docs/参赛材料/10-说明文档正文.md"), "w", encoding="utf-8") as fh:
@@ -818,6 +856,12 @@ def _build_candidate(root: str, dirty: bool) -> None:
         with open(os.path.join(root, "docs/技术/证据.md"), "w", encoding="utf-8") as fh:
             fh.write("构建日志：docker run -v /home/qinyixiang/ws63:/w …\n"
                      "联系：a3354547604@163.com 手机 13838156565\n")
+        # t81 注入反例：**只有** Windows 反斜杠/盘符形态（不含任何正斜杠家目录），
+        # 用来证明「身份-绝对路径本机用户」正则对 `C:\Users\<user>\` 与 `@"…"` 字面量真有牙。
+        with open(os.path.join(root, "docs/技术/证据-反斜杠.md"), "w", encoding="utf-8") as fh:
+            fh.write("反斜杠字面量：string pkg = @\"C:\\Users\\Administrator\\ws63-tools\\fw\\app.fwpkg\";\n"
+                     "盘符正斜杠：C:/Users/Administrator/ws63-tools/flasher-log.txt\n"
+                     "混用：C:\\Users\\Administrator/ws63-tools/mixed.log\n")
 
 
 def do_selftest(args) -> int:
@@ -857,13 +901,20 @@ def do_selftest(args) -> int:
     dirty_text = " ".join(a for _l, _i, _e, a in results[1][3].rows if _l == "FAIL")
     hit_env = ".env" in dirty_text
     hit_user = "/home/qinyixiang" in dirty_text or "qinyixiang" in dirty_text
+    # t81 反例：夹具文件 `docs/技术/证据-反斜杠.md` 里**只有** Windows 形态（`@"C:\Users\…"`、
+    # `C:/Users/…`、正反混用），命中它才说明「身份-绝对路径本机用户」正则补上了反斜杠盲点。
+    win_rows = [a for lvl, _i, _e, a in results[1][3].rows
+                if lvl == "FAIL" and "证据-反斜杠" in a]
+    hit_win = any("身份-绝对路径本机用户" in a and "Administrator" in a for a in win_rows)
     print("\n== 自检自证结果 ==")
     print("   干净包必须 rc=0        ：%s" % ("通过" if clean_ok else "失败"))
     print("   脏包必须 rc≠0          ：%s" % ("通过" if dirty_ok else "失败"))
     print("   脏包命中 .env          ：%s" % ("是" if hit_env else "否"))
     print("   脏包命中本机用户名      ：%s" % ("是" if hit_user else "否"))
-    if clean_ok and dirty_ok and hit_env and hit_user:
-        print("   结论：打包器自检有效（既能放行干净包，也能抓住 .env 与本机路径）")
+    print("   脏包命中 Windows 反斜杠路径（t81 注入反例）：%s（%d 行）"
+          % ("是" if hit_win else "否", len(win_rows)))
+    if clean_ok and dirty_ok and hit_env and hit_user and hit_win:
+        print("   结论：打包器自检有效（既能放行干净包，也能抓住 .env、正斜杠家目录与 Windows 反斜杠路径）")
         return 0
     print("   结论：自检本身不可信，先修打包器", file=sys.stderr)
     return 1
