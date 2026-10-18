@@ -596,7 +596,137 @@ sub(conf=12 forced=3 late=2 pend=0 unconf=1)
 （本节由串口复跑结果填写；串口由 architect-op 的 t86 占用中，**释放后补**。
 补齐前的判定：以 §13.4 的无板验证 + §13.1 的一手时间线为准，**上板行标「待复跑」**。）
 
+> 2026-10-19 补记（backend-2，t70 attempt 3）：串口已释放，可用的一份对跑日志见
+> §14.4 的 `ws63-firmware/spike/logs/t70-COM15-hook2.txt`（260 s，COM15 汇聚 + COM14 节点）。
+> 其中与本节相关的两行一手证据：
+> `sub-state sn=M1 = FORCED, start polling (a later first frame can still upgrade to CONFIRMED)` 与
+> `sub-state sn=M1 -> CONFIRMED (first 0x01 uplink; 6452ms after first CCCD, confirmed AFTER force-release (window too tight))`。
+> 本节结论仍由 t85 的负责人在读数后填写，此处只提供日志出处。
+
 ### 13.8 验证命令（本卡口径）
 
 - `python3 tools/hub-selftest.py`
 - `python3 tools/node-compile-check.py hub hubmock`
+
+---
+
+## 14 t70 attempt 3：把「透传」与「poll 结算」两条判据跑在真板上
+
+### 14.1 这次上板要证什么
+
+t70 修的两条 P0 缺陷（§11、§12）在主机侧只能证到「代码是这么写的」：
+
+- ①**消费即丢**：`hub_pump_uplinks()` 从队列取走上行帧后没有转发 → 只有板上能看到 `[GLINK] -> 0x01` 真的出现、且条数与节点实际上行同量级；
+- ②**200 ms 判死**：`poll_ok` 恒 0、`poll_miss` 系统性上涨 → 只有板上能看 ≥180 s 的累计结算值。
+
+本节判据不靠「我看过日志」：日志交给 `tools/hub-selftest.py` 的上板断言（§14.6）复算，`rc=0` 才算过。
+
+### 14.2 台架、镜像来源与「钩子」的边界
+
+- 板 A = **COM15 汇聚**；板 B = **COM14 节点（`out/NODE_M1.fwpkg`，含当前 `sle_hub.c`）**；两块板各跑 260 s（> 卡面要求的 180 s）。
+- 本台架**没有网关**：契约 §3.4 的白名单只由网关 0x22 帧填充，没有网关 ⇒ 汇聚永远连不上节点。因此用 `hub_cfg.h` 的 t59 测试钩子**临时**编一份台架镜像（`HUB_TEST_PREBIND_ON 1` + `HUB_TEST_PREBIND_SN "M1"`）：
+  - 台架镜像（含钩子）= 1474344 B / `sha256 bc370b489b991b85ca3736cf3b16a1835771a61b75ff93058b9a9f60e83441d3`；
+  - 编完立刻 `git checkout -- ws63-firmware/src/hub_cfg.h` 还原（钩子回 `0`/`""`），再**重新构建生产镜像**并烧回 COM15：
+    `out/HUB_HUB.fwpkg` = 1474152 B / `sha256 6abfcbe54f0008d92c8e562c16fb7c67761aa28ae0a3ec740e5084679471c02f`，与 22:0x 那次生产构建**逐位相同**（`REBUILD_RC=0`，`.fwpkg` 可复现的又一例）。
+- 钩子只替换「网关下发配对」这一次交互；上行链路本身（连接 / 交换信息 / 服务发现 / 写 CCCD / 首轮 poll / 0x01 透传）全是真路径。§13.5 的镜像来源口径继续适用：**凡上板行都写明是谁编的、开关什么状态**。
+
+### 14.3 260 s 对跑的一手结果
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| 汇聚板抓包（复位后 260 s） | `powershell -File tools/serial-capture.ps1 -Port COM15 -Seconds 260 -Reset -Out …\t70-COM15-hook2.txt` | 164 条 `-> 0x01`、STAT 8 条 |
+| 节点板被动抓包（260 s） | `powershell -File tools/serial-capture.ps1 -Port COM14 -Seconds 260 -Out …\t70-COM14-node2.txt` | 节点自报 `[M1] tx …` 164 条 |
+| 断言 | `python3 tools/hub-selftest.py --board-log …/t70-COM15-hook2.txt --node-log …/t70-COM14-node2.txt` | **总判定 PASS / rc=0** |
+
+末条 STAT（汇聚板每 30 s 打一条）：
+
+```
+STAT up_sent=154 poll_ok=77 poll_miss=0 late=1 ev_off=0 tx(ok=186 err=0 short=0 param=0)
+```
+
+- **验收①落地**：`[GLINK] -> 0x01` = **164 条**（不是 0）。断言把「条数」钉成可复算的关系：**末条 STAT 之前**出现的 0x01 行数 == `up_sent=154`（STAT 之后的 10 条属快照之后，不参与比对），且 `len == 正文 UTF-8 字节数 + 10`（`hub_frame.h:29`）。
+- **验收②落地**：`poll_ok=77` 随有应答的 poll 递增（t59 的病是恒 0），`poll_miss=0`（旧 200 ms 上界下 3 s 轮询几乎必然超时误判），`ev_off=0`、`late=1` ⇒ ≥180 s 内无节点在线/离线反复。
+
+### 14.4 逐字节对账（汇聚侧正文 == 节点侧原文）
+
+节点板也打印它发出去的每一帧：`[M1] tx 154 bytes: {"sn":"M1","ts":…}`。断言按「同 ts + `N+10 == len`」配对：
+
+| 对账结果 | 条数 |
+|---|---|
+| 完全相等（汇聚侧正文 == 节点侧正文） | 82 |
+| 汇聚侧是节点侧前缀（节点日志行被板端行上限截断，见 §14.5） | 82 |
+| 对不上 | 0 |
+| 找不到 | 0 |
+
+即：**能拿到完整正文的 82 条逐字节相等**；另 82 条受日志行上限影响，只做前缀 + 长度字段一致。
+
+### 14.5 板端日志行上限 198 字符（一个会骗人的东西）
+
+首次跑断言时出现 82 条 `Unterminated string …`，看起来像「帧被改了」。实测判定是**串口日志行被截，不是帧被截**：
+
+- 82 条被截行**都恰好 198 字符**，而真实 JSON 长度在 138–154 之间不等 —— 若帧被截，行长会跟随正文长度变化；
+- 帧头 `len` 与节点板原文一致（`len - 10 == N`）；
+- 节点板自己的 `tx N bytes` 与汇聚侧 `len` 一致。
+
+处理：断言**认得**这种截断（被截行必须恰好顶到本文件里的行上限、且仍以该 sn 的信封头开头）；既解析不了、又没顶到上限的判 FAIL。这样「日志被截」与「帧被改」不再混为一谈。
+
+### 14.6 断言有牙（变异 + 负对照，全部一手）
+
+`tools/hub-selftest.py` 新增 `--board-log/--node-log` 上板断言；**不带参数时打印 `SKIP` 并返回 0**，主机无板也能跑。
+
+变异检验（把修复改回错误写法必须报红）：
+
+| 变异 | 操作 | 结果 |
+|---|---|---|
+| M1 消费即丢 | 删掉 `hub_client.c` 里 `(void)hub_glink_send_uplink(&g_glink, &g_up);` | **rc=1**：`FAIL 队列取出方（hub_pump_uplinks）没有转发调用 —— 帧会被取走即丢` |
+| M2 200 ms 判死 | `hub_agg.h` 的 `HUB_POLL_ANSWER_TIMEOUT_MS` 1000u → 200u | **rc=1**：C 用例表 5 条 FAIL（首条 `250ms 到应答必须结算 poll_ok（旧 200ms 上界下恒 0）`） |
+| 还原 | `git checkout --` 两个源文件后复跑 | **rc=0**，`git status` 干净 |
+
+负对照（对日志本身造假，各写一份临时日志再跑断言）：打坏一条完整行正文 → rc=1；末条 STAT 的 `poll_miss` 改成 27 → rc=1（`FAIL poll_miss=27 > 2 —— 还在按固定时延误判丢应答（t70 的病）`）；从完整行中间挖掉 20 字符 → rc=1。**三个负对照全红**。
+
+### 14.7 验证命令（本卡口径）
+
+```bash
+# 无板：C 用例 + 源码级断言
+tools/build-lock.sh python3 tools/hub-selftest.py
+tools/build-lock.sh python3 tools/node-compile-check.py
+# 有板：上板日志断言（日志由 tools/serial-capture.ps1 抓）
+python3 tools/hub-selftest.py \
+  --board-log ws63-firmware/spike/logs/t70-COM15-hook2.txt \
+  --node-log  ws63-firmware/spike/logs/t70-COM14-node2.txt
+# 六个目标重编（生产镜像口径）
+tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh hub hubmock m1 m2 m4 mock
+```
+
+### 14.8 节点侧 CCCD（验收⑤）
+
+`t70-COM14-node2.txt`（节点板烧 `out/NODE_M1.fwpkg`，含当前 `sle_hub.c`）里的一手行：
+
+```
+[SLE-HUB] CCCD written by client conn=0x0 handle=0x11 cfg=0x0001 subscribed=1
+[SLE-HUB] write req conn=0x0 handle=0x11 len=32 need_rsp=0        （83 条）
+[speed server] ssaps write request cbk server_id:0, conn_id:0, mtu_size:1500, status:0
+addr:11:**:**:**:55:99, conn_id:00
+```
+
+- 对端写描述符 `01 00` 被识别为**订阅（CCCD, cfg=0x0001）**，节点进入已订阅并开始 notify；
+- 对端的写请求（`len=32`，即 `poll` 命令的 JSON）每次都在节点侧触发回调（`ssaps write request cbk … status:0`），节点以 notify 应答（§14.4 的 `[M1] tx …`）；
+- **没有任何**「把 `01 00` 当命令入队」的行（`grep -c "01 00"` = 0）。
+
+### 14.9 未做 / 边界
+
+- **网关侧（RK2206）仍未接入**：本节证的是「汇聚把自己的 UART 0x01 发出去了、内容与节点原文一致、poll 结算正确」；**网关收到并解析**留待网关岗与用户实测（§12.5 的「RK2206 未被系统识别」问题依旧）。
+- 多节点并发（2–3 节点同时在线）与长稳（>1 h）未做：本卡只跑 1 节点 260 s。
+- 一次误操作如实记录：`tools/ws63flash-port.exe` **不带参数**会按默认值直接开始烧写（默认 COM14 + 默认镜像），当时被管道截断导致 COM14 半砖，随后用 `out/NODE_M1.fwpkg` 正式重烧恢复（`FLASH_NODE_RC=0`）。**该 exe 必须带参数**：`ws63flash-port.exe <fwpkg> app <COMxx> <log>`。
+
+### 14.10 收尾（板子与串口状态）
+
+| 板 | 现烧镜像 | 说明 |
+|---|---|---|
+| COM14 节点 | `ws63-firmware/out/NODE_M1.fwpkg` | t2 生产节点镜像（本卡用它验 CCCD，见 §14.8） |
+| COM15 汇聚 | `ws63-firmware/out/HUB_HUB.fwpkg`（`sha256 6abfcbe5…`，**无钩子**） | 本卡重编的生产镜像，`RESTORE_FLASH_RC=0` |
+
+- 烧回生产镜像后 20 s 被动抓包（`C:\tmp\t70-restore-verify-COM15.txt`，18 行）：只有
+  `[HUB] seek hit #… mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-3` 与 `seek stop`，
+  `grep -icE "prebind|hub_test_prebind|CONNECTED|-> 0x01"` = **0** ⇒ 钩子确实不在镜像里（没有网关配对就不连）。
+- 两块板都不是钩子/调试镜像；**COM14 / COM15 已释放**（无残留抓包进程）。

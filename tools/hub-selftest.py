@@ -857,8 +857,242 @@ def check_uart_tx_path():
     return bad
 
 
+BOARD_UPLINK_RE = re.compile(r"\[GLINK\] -> 0x01 sn=(\S+) seq=(\d+) len=(\d+) body=(.*)$")
+BOARD_NODE_TX_RE = re.compile(r"\[(\S+)\] tx (\d+) bytes: (\{.*\})\s*$")
+BOARD_TS_RE = re.compile(r'"ts":(\d+)')
+BOARD_STAT_KEYS = {
+    "up_sent": r"up_sent=(\d+)",
+    "poll_ok": r"poll_ok=(\d+)",
+    "poll_miss": r"poll_miss=(\d+)",
+    "late": r"late=(\d+)",
+    "ev_off": r"ev_off=(\d+)",
+}
+BOARD_STAT_TX_RE = re.compile(r"tx\(ok=(\d+) err=(\d+) short=(\d+) param=(\d+)\)")
+
+
+def _board_parse_stat(text):
+    """把一条 STAT 行拆成 dict；行被截断（缺键）时返回 None，由调用方往前找上一条。"""
+    out = {}
+    for key, pat in BOARD_STAT_KEYS.items():
+        m = re.search(pat, text)
+        if m is None:
+            return None
+        out[key] = int(m.group(1))
+    m = BOARD_STAT_TX_RE.search(text)
+    if m is None:
+        return None
+    out["tx_ok"], out["tx_err"], out["tx_short"], out["tx_param"] = (int(g) for g in m.groups())
+    return out
+
+
+def _board_strip(line):
+    """串口抓包每行前缀 `<epoch_ms>|`（tools/serial-capture.ps1），剥掉它再匹配。"""
+    _, sep, text = line.partition("|")
+    return text if sep else line
+
+
+def _board_node_frames(path):
+    """读节点板日志（COM14）：`[M1] tx 154 bytes: {…}` → {ts: [(字节数, JSON 原文), …]}。
+
+    节点板自己打印的是**它发给汇聚的原文**，所以它可以给汇聚侧的转发结果当"真值"。
+    同一个 ts 可能对应两帧（poll 一次问两问：status + 主类型），故用列表。
+    """
+    frames = {}
+    if not path or not os.path.isfile(path):
+        return frames
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = BOARD_NODE_TX_RE.search(_board_strip(line))
+            if m is None:
+                continue
+            js = m.group(3)
+            tsm = BOARD_TS_RE.search(js)
+            if tsm is None:
+                continue
+            frames.setdefault(tsm.group(1), []).append((int(m.group(2)), js))
+    return frames
+
+
+def check_board_log(path, node_log=None):
+    """上板实跑日志 → 机械判定（t70 验收 1/2；不传 --board-log 时 SKIP）。
+
+    日志来源与格式（都在仓库里，不用猜）：
+      `[GLINK] -> 0x01 sn=%s seq=%u len=%d body=%s` —— hub_glink.c 的 hub_glink_send_uplink()
+      `STAT … up_sent=… poll_ok=… poll_miss=… ev_off=… tx(ok=… err=… short=… param=…)` —— hub_client.c 的 hub_stat()
+      `[M1] tx <N> bytes: {…}`（节点板，给 --node-log 做逐字节真值）
+
+    判据：
+      A. 透传真的发生：`-> 0x01` 行数 > 0 且**等于最后一条 STAT 之前**出现的条数 == 该 STAT 的 up_sent
+         （STAT 每 30 s 一条，快照之后还会有新帧，所以只比快照之前的）；
+         每条完整行的 len == body 的 UTF-8 字节数 + 10（hub_frame.h: HUB_FRAME_MAX = HUB_PAYLOAD_MAX + 10）；
+      B. 可被网关侧解析：完整行的 body 用 Python json 真解析，信封带 sn/ts/type/payload 且 sn 与帧头一致；
+      C. 板端日志截断要认得出来，不能混过关：串口行上限实测 ≈198 字符（SDK console 行缓冲），
+         超过它的打印会把行尾吃掉 —— 这类行必须**恰好等于**本文件里的行上限、且仍以该 sn 的信封开头；
+         既解析不了又没顶到行上限的，判 FAIL（那才是真的被改坏）；
+      D. seq 单调递增（16 位回绕算递增；不要求连续 —— 0x02/0x03 也吃 seq）；
+      E. poll 结算：poll_ok ≥ 10、poll_miss ≤ 2、ev_off == 0；UART 写路径 tx(err=0 short=0 param=0)；
+      F. 给了 --node-log 时逐字节对账：汇聚转发的每一帧都要能对上节点板打印的同 ts 帧 ——
+         `节点字节数 + 10 == 帧头 len`，且汇聚侧正文是节点正文的**前缀**（完整行则要求完全相等）。
+    """
+    if not path:
+        print("  SKIP  上板日志断言（未提供 --board-log <日志文件>）")
+        return 0
+    if not os.path.isfile(path):
+        print("  FAIL  --board-log 指向的文件不存在：%s" % path)
+        return 1
+
+    ups, stats, last_stat_idx = [], [], None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            text = _board_strip(line)
+            m = BOARD_UPLINK_RE.search(text)
+            if m:
+                ups.append((m.group(1), int(m.group(2)), int(m.group(3)), m.group(4), len(text)))
+            elif "STAT up=" in text:
+                stats.append(text)
+                last_stat_idx = len(ups)
+
+    bad = 0
+    print("  上板日志：%s（-> 0x01 %d 条，STAT %d 条）" % (path, len(ups), len(stats)))
+    if not ups:
+        print("  FAIL  日志里没有任何 [GLINK] -> 0x01 —— 上行透传没发生（t59 的原始病）")
+        return 1
+
+    upcap = max(u[4] for u in ups)
+    stat, stat_line = None, None
+    for text in reversed(stats):
+        stat = _board_parse_stat(text)
+        if stat is not None:
+            stat_line = text
+            break
+    if stat is None:
+        print("  FAIL  日志里没有一条完整的 STAT 行 —— 判不了 poll 结算与 UART 写路径")
+        bad += 1
+
+    node_frames = _board_node_frames(node_log)
+    complete, truncated = [], []
+    json_bad, key_bad, sn_bad, len_bad, cut_bad = [], [], [], [], []
+    for sn, _seq, flen, body, linelen in ups:
+        try:
+            env = json.loads(body)
+        except ValueError as exc:
+            if linelen == upcap and body.startswith('{"sn":"%s","ts":' % sn):
+                truncated.append((sn, flen, body, linelen))
+                continue
+            json_bad.append("%s（行 %d 字符）" % (exc, linelen))
+            continue
+        complete.append((sn, flen, body))
+        missing = [k for k in ("sn", "ts", "type", "payload") if k not in env]
+        if missing:
+            key_bad.append("%s 缺 %s" % (body[:50], ",".join(missing)))
+        if env.get("sn") != sn:
+            sn_bad.append("帧头 sn=%s / body sn=%s" % (sn, env.get("sn")))
+        expect = len(body.encode("utf-8")) + 10
+        if flen != expect:
+            len_bad.append("len=%d ≠ body %d B + 10" % (flen, len(body.encode("utf-8"))))
+    for sn, flen, body, linelen in truncated:
+        if linelen != upcap:
+            cut_bad.append("sn=%s 行 %d ≠ 上限 %d" % (sn, linelen, upcap))
+
+    def _report(name, items, hint=""):
+        nonlocal bad
+        if items:
+            bad += len(items)
+            print("  FAIL  %s：%d 条，首条 %s%s" % (name, len(items), items[0], hint))
+        else:
+            print("  PASS  %s" % name)
+
+    print("  INFO  行上限 %d 字符：完整行 %d 条、板端截断行 %d 条（截断是串口日志行上限，不是帧被改）"
+          % (upcap, len(complete), len(truncated)))
+    _report("0x01 完整行正文是合法 JSON（%d 条）" % len(complete), json_bad)
+    _report("0x01 完整行信封带 sn/ts/type/payload（%d 条）" % len(complete), key_bad)
+    _report("0x01 帧头 sn 与正文一致（%d 条）" % len(complete), sn_bad)
+    _report("0x01 帧长 == 正文 + 10（%d 条）" % len(complete), len_bad, " —— 正文被改过？")
+    _report("板端截断行恰好顶到行上限（%d 条）" % len(truncated), cut_bad)
+
+    seq_bad, prev_all = [], [u[1] for u in ups]
+    for prev, cur in zip(prev_all, prev_all[1:]):
+        if not (cur > prev or prev > 60000):
+            seq_bad.append("%d → %d" % (prev, cur))
+    _report("0x01 seq 单调递增（%d 条，跳号正常）" % len(ups), seq_bad)
+
+    if node_log:
+        if not node_frames:
+            print("  FAIL  --node-log 给了但没解析出任何 `[sn] tx N bytes: {…}` 行：%s" % node_log)
+            bad += 1
+        else:
+            full, prefix, unmatched, mismatch = 0, 0, [], []
+            for _sn, _seq, flen, body, linelen in ups:
+                tsm = BOARD_TS_RE.search(body)
+                cands = [f for f in node_frames.get(tsm.group(1) if tsm else "", [])
+                         if f[0] + 10 == flen]
+                if not cands:
+                    unmatched.append("ts=%s len=%d" % (tsm.group(1) if tsm else "?", flen))
+                    continue
+                js = cands[0][1]
+                if body == js:
+                    full += 1
+                elif js.startswith(body) and linelen == upcap:
+                    prefix += 1
+                else:
+                    mismatch.append("ts=%s len=%d" % (tsm.group(1) if tsm else "?", flen))
+            print("  与节点板逐字节对账：完全相等 %d 条、截断前缀一致 %d 条、对不上 %d 条、找不到对应帧 %d 条"
+                  % (full, prefix, len(mismatch), len(unmatched)))
+            if mismatch:
+                bad += len(mismatch)
+                print("  FAIL  汇聚转发内容与节点发出内容不一致：%d 条，首条 %s" % (len(mismatch), mismatch[0]))
+            else:
+                print("  PASS  每一帧都能对上节点板原文（字节数 +10 == len，正文前缀/全等）")
+            if unmatched:
+                bad += len(unmatched)
+                print("  FAIL  有 %d 帧在节点日志里找不到对应帧（ts+len 对不上）：首条 %s"
+                      % (len(unmatched), unmatched[0]))
+            else:
+                print("  PASS  所有 %d 帧都能在节点日志里定位" % len(ups))
+
+    if stat is not None:
+        print("  STAT 末条：up_sent=%d poll_ok=%d poll_miss=%d late=%d ev_off=%d "
+              "tx(ok=%d err=%d short=%d param=%d)" % (
+                  stat["up_sent"], stat["poll_ok"], stat["poll_miss"], stat["late"],
+                  stat["ev_off"], stat["tx_ok"], stat["tx_err"], stat["tx_short"], stat["tx_param"]))
+        before = len(ups) if last_stat_idx is None else last_stat_idx
+        if stat["up_sent"] != before:
+            print("  FAIL  末条 STAT 的 up_sent=%d ≠ 该行之前出现的 0x01 条数 %d"
+                  % (stat["up_sent"], before))
+            bad += 1
+        else:
+            print("  PASS  up_sent == 该 STAT 之前出现的 0x01 条数（%d）：队列取出后确实发了" % before)
+        for cond, ok_msg, fail_msg in (
+            (stat["poll_ok"] >= 10, "  PASS  poll_ok=%d ≥ 10" % stat["poll_ok"],
+             "  FAIL  poll_ok=%d < 10 —— 轮询应答没被结算" % stat["poll_ok"]),
+            (stat["poll_miss"] <= 2, "  PASS  poll_miss=%d ≤ 2（无系统性误判）" % stat["poll_miss"],
+             "  FAIL  poll_miss=%d > 2 —— 还在按固定时延误判丢应答（t70 的病）" % stat["poll_miss"]),
+            (stat["ev_off"] == 0, "  PASS  ev_off=0（无在线/离线反复）",
+             "  FAIL  ev_off=%d —— 出现节点在线/离线反复" % stat["ev_off"]),
+            (not (stat["tx_err"] or stat["tx_short"] or stat["tx_param"]),
+             "  PASS  UART 写路径无失败（err=0 short=0 param=0）",
+             "  FAIL  UART 写路径有失败：err=%d short=%d param=%d"
+             % (stat["tx_err"], stat["tx_short"], stat["tx_param"])),
+        ):
+            print(ok_msg if cond else fail_msg)
+            if not cond:
+                bad += 1
+    return bad
+
+
 def main():
     in_docker = "--inside-docker" in sys.argv
+    board_log, node_log = None, None
+    for flag, name in (("--board-log", "board_log"), ("--node-log", "node_log")):
+        if flag in sys.argv:
+            k = sys.argv.index(flag)
+            if k + 1 >= len(sys.argv):
+                print("%s 后面要跟日志文件路径" % flag, file=sys.stderr)
+                return 2
+            if name == "board_log":
+                board_log = sys.argv[k + 1]
+            else:
+                node_log = sys.argv[k + 1]
     cc = find_cc()
     if cc is None:
         if in_docker:
@@ -867,7 +1101,7 @@ def main():
         if shutil.which("docker") is None:
             print("主机与容器都没有 C 编译器，无法自测", file=sys.stderr)
             return 2
-        return run_inside_docker()
+        return run_inside_docker(extra=sys.argv[1:])
 
     rc = compile_and_run(cc)
     if rc == 2:
@@ -881,8 +1115,9 @@ def main():
     upfail = check_uplink_forward(cc)
     pffail = check_pump_forwards()
     txfail = check_uart_tx_path()
+    blfail = check_board_log(board_log, node_log)
     total_bad = ((1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail + ssfail
-                 + pafail + upfail + pffail + txfail)
+                 + pafail + upfail + pffail + txfail + blfail)
     print("\n==== hub-selftest 总判定：%s ====" % ("PASS" if total_bad == 0 else "FAIL"))
     print("日志：ws63-firmware/out/hub-selftest.log；mock 聚合证据：ws63-firmware/out/hub-mock-agg.log")
     return 0 if total_bad == 0 else 1
