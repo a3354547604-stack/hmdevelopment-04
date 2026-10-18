@@ -1,0 +1,774 @@
+{
+  "meta": {
+    "ts": "2026-10-17 16:27:53Z",
+    "contract": "接口契约.md · 142692 B · mtime 2026-10-17 23:04",
+    "git": "6c686f3",
+    "base": "内置 mock（tools/test/mock_server.py）",
+    "python": "3.14.4",
+    "docker": "Docker version 27.5.1, build 9f9e405"
+  },
+  "suites": [
+    {
+      "name": "s01_schema",
+      "description": "契约 schema 与示例一致性",
+      "passed": 11,
+      "failed": 0,
+      "skipped": 1,
+      "notes": [],
+      "cases": [
+        {
+          "case": "§2.3 每个 type 都有 payload 字段表",
+          "status": "passed",
+          "message": "",
+          "ms": 0.47462500015171827
+        },
+        {
+          "case": "§2.4.x 字段类型都能映射成 schema",
+          "status": "passed",
+          "message": "",
+          "ms": 0.4953950001436169
+        },
+        {
+          "case": "§2.2 信封四个必填字段",
+          "status": "passed",
+          "message": "",
+          "ms": 0.07291000019904459
+        },
+        {
+          "case": "§2.2 缺 payload 会被 schema 拒绝",
+          "status": "passed",
+          "message": "",
+          "ms": 0.05454499978441163
+        },
+        {
+          "case": "§2.2+§2.4.2 最小 fall 报文可通过",
+          "status": "passed",
+          "message": "",
+          "ms": 0.08362199969269568
+        },
+        {
+          "case": "§4.6 属性示例符合 §4.3 定义",
+          "status": "passed",
+          "message": "",
+          "ms": 0.2558629998929973
+        },
+        {
+          "case": "§4.3 声明属性都在 schema 里",
+          "status": "passed",
+          "message": "",
+          "ms": 0.18442600003254483
+        },
+        {
+          "case": "§6 响应示例符合 §6.1 信封",
+          "status": "passed",
+          "message": "",
+          "ms": 0.21960300000500865
+        },
+        {
+          "case": "§6.9 items 键集合与类型自洽",
+          "status": "passed",
+          "message": "",
+          "ms": 0.05370400003812392
+        },
+        {
+          "case": "§8 可配参数都能在 §6.9 改",
+          "status": "skipped",
+          "message": "[M4] §6.9 settings items 缺 gas_l1_to_l2_s（§8.2 声明可配=是）",
+          "ms": 0.14740400001755916
+        },
+        {
+          "case": "字段名无重复",
+          "status": "passed",
+          "message": "",
+          "ms": 0.06477499982793233
+        },
+        {
+          "case": "§2.5 下行 cmd 枚举完整",
+          "status": "passed",
+          "message": "",
+          "ms": 0.5734759997721994
+        }
+      ]
+    },
+    {
+      "name": "s02_codec",
+      "description": "UART 帧编解码与 CRC（§3）",
+      "passed": 13,
+      "failed": 1,
+      "skipped": 0,
+      "notes": [],
+      "cases": [
+        {
+          "case": "§3.3 CRC 自检向量 0x4B37",
+          "status": "passed",
+          "message": "",
+          "ms": 0.02439699983369792
+        },
+        {
+          "case": "§3.7/§3.9 完整示例帧逐字节复现",
+          "status": "passed",
+          "message": "",
+          "ms": 1.8279440000696923
+        },
+        {
+          "case": "§3.9 SEQ/LEN 列与字节一致",
+          "status": "passed",
+          "message": "",
+          "ms": 0.17915499984155758
+        },
+        {
+          "case": "§3.9 帧 TYPE 都在 §3.4 中",
+          "status": "passed",
+          "message": "",
+          "ms": 0.7383629999822006
+        },
+        {
+          "case": "§3.7 省略帧已登记（M1）",
+          "status": "failed",
+          "message": "§3.7 省略帧数量变少了（0）——若已补齐完整 hex，请把本用例改成硬断言",
+          "ms": 0.07770000001983135
+        },
+        {
+          "case": "§3.6 粘包按 LEN 切分",
+          "status": "passed",
+          "message": "",
+          "ms": 0.04649899983633077
+        },
+        {
+          "case": "§3.6 半包保留残余",
+          "status": "passed",
+          "message": "",
+          "ms": 0.008306000381708145
+        },
+        {
+          "case": "§3.6 假帧头滑动重找",
+          "status": "passed",
+          "message": "",
+          "ms": 0.02074999974865932
+        },
+        {
+          "case": "§3.6 LEN 越界 reason=5",
+          "status": "passed",
+          "message": "",
+          "ms": 0.014117999853624497
+        },
+        {
+          "case": "§3.6 CRC 错 reason=4",
+          "status": "passed",
+          "message": "",
+          "ms": 0.029557000289059943
+        },
+        {
+          "case": "§3.2 CRC 覆盖 VER..PAYLOAD",
+          "status": "passed",
+          "message": "",
+          "ms": 0.026219999654131243
+        },
+        {
+          "case": "§3.2 SEQ/LEN/CRC 小端",
+          "status": "passed",
+          "message": "",
+          "ms": 0.007645000096090371
+        },
+        {
+          "case": "§3.5 PAYLOAD 必须是 JSON 对象",
+          "status": "passed",
+          "message": "",
+          "ms": 0.02909600016209879
+        },
+        {
+          "case": "§3.6 残余阈值口径",
+          "status": "passed",
+          "message": "",
+          "ms": 0.008476999937556684
+        }
+      ]
+    },
+    {
+      "name": "s03_iotda",
+      "description": "IoTDA 物模型与鉴权（§4）",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "notes": [],
+      "cases": [
+        {
+          "case": "§4.1 ClientId/Password 结构与长度",
+          "status": "passed",
+          "message": "",
+          "ms": 0.07876199970269226
+        },
+        {
+          "case": "§4.1 鉴权算法与取时口径有明文",
+          "status": "passed",
+          "message": "",
+          "ms": 0.012152999715908663
+        },
+        {
+          "case": "§4.1 ClientId 第 4 段与 HMAC 时间戳一致",
+          "status": "passed",
+          "message": "",
+          "ms": 0.06470500011346303
+        },
+        {
+          "case": "§4.1 鉴权失败码与样例坑已写明",
+          "status": "passed",
+          "message": "",
+          "ms": 0.016901999970286852
+        },
+        {
+          "case": "§4.1 keepalive/QoS/will/retain",
+          "status": "passed",
+          "message": "",
+          "ms": 0.03943700039599207
+        },
+        {
+          "case": "§4.2 P0 topic 齐全",
+          "status": "passed",
+          "message": "",
+          "ms": 0.09117600029640016
+        },
+        {
+          "case": "§4.6 messages/up 批量信封自洽",
+          "status": "passed",
+          "message": "",
+          "ms": 0.45241199995871284
+        },
+        {
+          "case": "§4.4 event_id 格式",
+          "status": "passed",
+          "message": "",
+          "ms": 0.07222900012493483
+        },
+        {
+          "case": "§4.6 event_time 格式",
+          "status": "passed",
+          "message": "",
+          "ms": 0.028805000056308927
+        },
+        {
+          "case": "§4.4 三个事件与 paras 字段",
+          "status": "passed",
+          "message": "",
+          "ms": 0.06590700013475725
+        },
+        {
+          "case": "§4.5 三个命令与取值范围",
+          "status": "passed",
+          "message": "",
+          "ms": 0.11801700020441785
+        },
+        {
+          "case": "§4.3 核心属性齐全",
+          "status": "passed",
+          "message": "",
+          "ms": 0.17617899993638275
+        },
+        {
+          "case": "§4.6 示例 lpg/co 与 P0 口径冲突（已登记 M6）",
+          "status": "passed",
+          "message": "",
+          "ms": 0.00800500038167229
+        }
+      ]
+    },
+    {
+      "name": "s04_models",
+      "description": "阈值状态机与数据模型（§7/§8/§9）",
+      "passed": 19,
+      "failed": 0,
+      "skipped": 1,
+      "notes": [],
+      "cases": [
+        {
+          "case": "§8.2 燃气一级需连续 10 s",
+          "status": "passed",
+          "message": "",
+          "ms": 0.10578399997029919
+        },
+        {
+          "case": "§8.2 燃气二级需连续 6 s 或一级滞留 60 s",
+          "status": "passed",
+          "message": "",
+          "ms": 0.05631800013361499
+        },
+        {
+          "case": "§8.2 燃气恢复需干净 30 s",
+          "status": "passed",
+          "message": "",
+          "ms": 0.024686999950063182
+        },
+        {
+          "case": "§8.2 单次尖峰不告警",
+          "status": "passed",
+          "message": "",
+          "ms": 0.01859499980128021
+        },
+        {
+          "case": "§8.4 跌倒立即进入 ALARM",
+          "status": "passed",
+          "message": "",
+          "ms": 0.15739400032543926
+        },
+        {
+          "case": "§8.4 跌倒退出需 K=3 且 ≥30 s",
+          "status": "passed",
+          "message": "",
+          "ms": 0.023816000066290144
+        },
+        {
+          "case": "§8.4 ALARM 期内重复触发被抑制",
+          "status": "passed",
+          "message": "",
+          "ms": 0.016601999959675595
+        },
+        {
+          "case": "§8.5 无活动 30 min 报警",
+          "status": "passed",
+          "message": "",
+          "ms": 0.07128799961719778
+        },
+        {
+          "case": "§8.5 开门后外出模式与 600 s 窗口",
+          "status": "passed",
+          "message": "",
+          "ms": 0.01978799991775304
+        },
+        {
+          "case": "§8.7 离线 9 s / 180 s",
+          "status": "passed",
+          "message": "",
+          "ms": 0.09442200007470092
+        },
+        {
+          "case": "§8.8 重推 [0,60,300] 与停推条件",
+          "status": "passed",
+          "message": "",
+          "ms": 0.14512999996441067
+        },
+        {
+          "case": "§7 表结构覆盖计划 10 张 + push_tokens",
+          "status": "passed",
+          "message": "",
+          "ms": 0.08912099974622834
+        },
+        {
+          "case": "§7.7 alerts 含推送/恢复字段",
+          "status": "passed",
+          "message": "",
+          "ms": 0.09784799976841896
+        },
+        {
+          "case": "§7.x 每张表都有列",
+          "status": "passed",
+          "message": "",
+          "ms": 0.48357199966631015
+        },
+        {
+          "case": "§9.2 业务码与 §9.1 HTTP 映射自洽",
+          "status": "passed",
+          "message": "",
+          "ms": 0.3898119998666516
+        },
+        {
+          "case": "§9.2 必查业务码齐全",
+          "status": "passed",
+          "message": "",
+          "ms": 0.1330469999629713
+        },
+        {
+          "case": "§3.6 result=1502 越界（已登记 B2）",
+          "status": "skipped",
+          "message": "[B2] §3.6 用 result=1502 表示「下发失败」，与 §9.2（1502=webhook 校验失败）/§9.3（0–7）冲突；本次观测：§3.6 出现 result=1502，§9.3 只有 0–12",
+          "ms": 0.08780899997873348
+        },
+        {
+          "case": "§9.3 设备侧码 0–7",
+          "status": "passed",
+          "message": "",
+          "ms": 0.030649000109406188
+        },
+        {
+          "case": "§6.9 默认值与 §8 阈值一致",
+          "status": "passed",
+          "message": "",
+          "ms": 0.08175699986168183
+        },
+        {
+          "case": "§6.9 重推/抑制键与 §8.8 一致",
+          "status": "passed",
+          "message": "",
+          "ms": 0.016973000128928106
+        }
+      ]
+    },
+    {
+      "name": "s05_rest",
+      "description": "REST 契约冒烟（mock 内置）",
+      "passed": 12,
+      "failed": 0,
+      "skipped": 1,
+      "notes": [
+        "被测服务：http://127.0.0.1:38743",
+        "请求数：57"
+      ],
+      "cases": [
+        {
+          "case": "§6.1 信封与 health 无鉴权",
+          "status": "passed",
+          "message": "",
+          "ms": 5.379801999879419
+        },
+        {
+          "case": "§6.1 无 token 401/1100",
+          "status": "passed",
+          "message": "",
+          "ms": 1.3595109999187116
+        },
+        {
+          "case": "§6.2 接口总表逐条可达",
+          "status": "skipped",
+          "message": "以下接口尚未覆盖（mock 未实现或基线未写）：[('GET', '/api/time', '验收基线未覆盖该接口')]",
+          "ms": 19.353382999725
+        },
+        {
+          "case": "§6.3/§6.4 注册登录错误码",
+          "status": "passed",
+          "message": "",
+          "ms": 1.4778690001548966
+        },
+        {
+          "case": "§6.6 绑定码错误 1201",
+          "status": "passed",
+          "message": "",
+          "ms": 1.1790829998972185
+        },
+        {
+          "case": "§6.8 读数分页与越界",
+          "status": "passed",
+          "message": "",
+          "ms": 2.625172000080056
+        },
+        {
+          "case": "§6.9/§6.10 settings 校验与生效",
+          "status": "passed",
+          "message": "",
+          "ms": 3.4679870000218216
+        },
+        {
+          "case": "§6.11/§6.12 命令投递语义",
+          "status": "passed",
+          "message": "",
+          "ms": 2.3479569999835803
+        },
+        {
+          "case": "§6.13–§6.15 告警与处置状态机",
+          "status": "passed",
+          "message": "",
+          "ms": 4.6438530002888
+        },
+        {
+          "case": "§6.16–§6.18 报表结构",
+          "status": "passed",
+          "message": "",
+          "ms": 4.241223999997601
+        },
+        {
+          "case": "§6.19 推送注册幂等",
+          "status": "passed",
+          "message": "",
+          "ms": 1.9789469997704145
+        },
+        {
+          "case": "§5 webhook token 校验",
+          "status": "passed",
+          "message": "",
+          "ms": 1.4551760000358627
+        },
+        {
+          "case": "§6.1 HTTP 200 不得配非 0 code",
+          "status": "passed",
+          "message": "",
+          "ms": 0.006492000011348864
+        }
+      ]
+    },
+    {
+      "name": "s06_audit",
+      "description": "契约自身一致性与交叉引用（§0–§12）",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 4,
+      "notes": [],
+      "cases": [
+        {
+          "case": "§12.6 口令约束自洽（已登记 M14）",
+          "status": "skipped",
+          "message": "[M14] §12.6 password 同时写「必填 8–63 字节」与「开放网络传空串」，两条互斥（P0 只做 WPA2，按 8–63 实现）；本次观测：§12.6 两条约束互斥；mock 与 s07 按 WPA2 的 8–63 执行",
+          "ms": 0.02487800020389841
+        },
+        {
+          "case": "§ 章节编号唯一",
+          "status": "passed",
+          "message": "",
+          "ms": 0.020400000266818097
+        },
+        {
+          "case": "§ 交叉引用都指向存在的章节",
+          "status": "passed",
+          "message": "",
+          "ms": 1.4123729997663759
+        },
+        {
+          "case": "§2.5 settings 键名引用 §6.9",
+          "status": "passed",
+          "message": "",
+          "ms": 0.0461390000054962
+        },
+        {
+          "case": "§6.5 离线引用 §8.7",
+          "status": "passed",
+          "message": "",
+          "ms": 0.0060810002651123796
+        },
+        {
+          "case": "§8.4 处置引用 §6.15",
+          "status": "passed",
+          "message": "",
+          "ms": 0.006202000349730952
+        },
+        {
+          "case": "§6.19 push_tokens 引用 §7.12",
+          "status": "passed",
+          "message": "",
+          "ms": 0.0035170000955986325
+        },
+        {
+          "case": "§3.8 door 分派引用 §8.5",
+          "status": "passed",
+          "message": "",
+          "ms": 0.003377000211912673
+        },
+        {
+          "case": "§5.3 活动归并引用 §7.9/§7.10",
+          "status": "skipped",
+          "message": "[M3] 契约 §2.5/§3.4/§6.5/§3.8/§8.4 的交叉引用编号错（settings/离线/处置）；本次观测：活动归并引用 §7.6（原始读数），实际 §7.9/§7.10：§0.2, §4.1",
+          "ms": 0.016040999980759807
+        },
+        {
+          "case": "§11 #2 adc_mv 顺序声明",
+          "status": "skipped",
+          "message": "[M5] §11 #2 声称 adc_mv 顺序 [ch2,ch3,ch4,ch5] 与 §2.4.1 冲突（P0 长度 1）；本次观测：§11 #2 声称 [ch2]，而 §2.4.1 P0 只发 [ch2]；L187",
+          "ms": 0.24463099998683902
+        },
+        {
+          "case": "§8 告警类型都有 summary 文案",
+          "status": "passed",
+          "message": "",
+          "ms": 0.1494279999860737
+        },
+        {
+          "case": "§6.13 summary 表 9 行且 level 合法",
+          "status": "passed",
+          "message": "",
+          "ms": 0.07040599984975415
+        },
+        {
+          "case": "§6.2 总表路径都在正文",
+          "status": "passed",
+          "message": "",
+          "ms": 0.19183899985364405
+        },
+        {
+          "case": "§10 CAL 标定表完整",
+          "status": "passed",
+          "message": "",
+          "ms": 0.04477599986785208
+        },
+        {
+          "case": "§0 时间戳单位统一",
+          "status": "passed",
+          "message": "",
+          "ms": 0.008014999821170932
+        },
+        {
+          "case": "§0.2 时间换算示例（已登记 M7）",
+          "status": "passed",
+          "message": "",
+          "ms": 0.061548000303446315
+        },
+        {
+          "case": "契约版本标题与内容一致（已登记 V11-3）",
+          "status": "skipped",
+          "message": "[V11-3] 契约标题仍写 v1 定版，正文却多处标「v1.1 新增」（版本口径）；本次观测：首行标题是 '# 接口契约 v1.2（接口契约与数据字典）'，但正文含 v1.1 内容",
+          "ms": 0.21873199966648826
+        }
+      ]
+    },
+    {
+      "name": "s07_provision",
+      "description": "本地配网/配对（§12 + §13 + §3.9 + §2.7）",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "notes": [
+        "被测服务：mock_server（provision=True/False/timeout=0 三个实例）"
+      ],
+      "cases": [
+        {
+          "case": "§12 接口与安全边界声明",
+          "status": "passed",
+          "message": "",
+          "ms": 0.23698699988017324
+        },
+        {
+          "case": "§9.2 1600–1606 语义与 HTTP",
+          "status": "passed",
+          "message": "",
+          "ms": 0.8439869998255745
+        },
+        {
+          "case": "未进配网模式 → 1600",
+          "status": "passed",
+          "message": "",
+          "ms": 0.8328559997607954
+        },
+        {
+          "case": "窗口超时 → 1601",
+          "status": "passed",
+          "message": "",
+          "ms": 0.9487969996371248
+        },
+        {
+          "case": "§12.5 状态字段完整",
+          "status": "passed",
+          "message": "",
+          "ms": 0.5619839998871612
+        },
+        {
+          "case": "§12.6 Wi-Fi 预检与错误码",
+          "status": "passed",
+          "message": "",
+          "ms": 4.2180939999525435
+        },
+        {
+          "case": "§12.7/§12.8 扫描与节点列表",
+          "status": "passed",
+          "message": "",
+          "ms": 2.2552329996869958
+        },
+        {
+          "case": "§12.9 绑定前置条件（先扫后绑）",
+          "status": "passed",
+          "message": "",
+          "ms": 2.9162279997763108
+        },
+        {
+          "case": "§12.9 add/list/del 与槽位",
+          "status": "passed",
+          "message": "",
+          "ms": 4.330359000050521
+        },
+        {
+          "case": "§12.9 八路白名单上限 → 1606",
+          "status": "passed",
+          "message": "",
+          "ms": 8.609007999893947
+        },
+        {
+          "case": "§13.2 端到端配网顺序",
+          "status": "passed",
+          "message": "",
+          "ms": 504.97960099983175
+        },
+        {
+          "case": "§12.10 与云端命令通道的关系",
+          "status": "passed",
+          "message": "",
+          "ms": 0.47940500007825904
+        },
+        {
+          "case": "§3.9 配网帧逐字节往返",
+          "status": "passed",
+          "message": "",
+          "ms": 0.7132450000426616
+        }
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "name": "契约可解析",
+      "status": "passed",
+      "summary": "契约结构解析正常：biz_codes=33, db_tables=11, device_codes=13, endpoints=20, envelope_fields=6, fall=5, gas=8, motion=3",
+      "evidence": [
+        {
+          "cmd": "/usr/bin/python3 /mnt/c/Users/Administrator/Desktop/HMProgram/tools/test/contract/contract_source.py",
+          "rc": 0,
+          "out": "{\n  \"path\": \"docs/技术/接口契约.md\",\n  \"sections\": 119,\n  \"types\": [\n    \"gas\",\n    \"fall\",\n    \"door\",\n    \"presence\",\n    \"status\",\n    \"env\"\n  ],\n  \"envelope_fields\": [\n    \"字段\",\n    \"类型\",\n    \"必填\",\n    \"单位\",\n    \"说明\",\n    \"示例\"\n  ],\n  \"uart_types\": {\n    \"0x01\": \"NODE_DATA\",\n    \"0x02\": \"HUB_STATUS\",\n    \"0x03\": \"HUB_EVENT\",\n    \"0x10\": \"GW_ACK\",\n    \"0x11\": \"GW_CMD\",\n    \"0x12\": \"GW_NACK\",\n    \"0x13\": \"GW_TIME\",\n    \"0x20\": \"SLE_SCAN_REQ\",\n    \"0x21\": \"SLE_SCAN_RSP\",\n    \"0x22\": \"PAIR_BIND\",\n    \"0x23\": \"PAIR_BIND_ACK\",\n    \"0x24\": \"NODE_LIST\"\n  },\n  \"endpoints\": 20,\n  \"biz_codes\": [\n    0,\n    1000,\n    1001,\n    1002,\n    1003,\n    1004,\n    1100,\n    1101,\n    1102,\n    1103,\n    1104,\n    1105,\n    1200,\n    1201,\n    1202,\n    1203,\n    1204,\n    1205,\n    1206,\n    1300,\n    1301,\n    1302,\n    1400,\n    1500,\n    1501,\n    1502,\n    1600,\n    1601,\n    1602,\n    1603,\n    1604,\n    1605,\n    1606\n  ],\n  \"device_codes\": [\n    0,\n    1,\n    2,\n    3,\n    4,\n    5,\n    6,\n    7,\n    8,\n    9,\n    10,\n    11,\n    12\n  ],\n  \"db_tables\": [\n    \"users\",\n    \"devices\",\n    \"user_devices\",\n    \"nodes\",\n    \"sensor_readings\",\n    \"alerts\",\n    \"alert_dispositions\",\n    \"activity_hourly\",\n    \"activity_daily\",\n    \"device_online\",\n    \"push_tokens\"\n  ],\n  \"settings\": {\n    \"no_motion_min\": 30,\n    \"presence_hold_s\": 60,\n    \"gas_t1_mv\": 1500,\n    \"gas_t2_mv\": 2500,\n    \"gas_l1_hold_s\": 10,\n    \"gas_l2_hold_s\": 6,\n    \"gas_recover_mv\": 200,\n    \"gas_recover_hold_s\": 30,\n    \"away_after_open_s\": 600,\n    \"door_open_alarm_s\": 180,\n    \"report_interval_s\": 60,\n    \"node_offline_timeout_s\": 9,\n    \"gateway_offline_timeout_s\": 180,\n    \"temp_high_c\": 35.0,\n    \"temp_low_c\": 5.0,\n    \"humi_high_pct\": 85.0,\n    \"humi_low_pct\": 20.0,\n    \"env_hold_min\": 30,\n    \"alert_repush_s\": [\n      0,\n      60,\n      300\n    ],\n    \"alert_suppress_s\": 60,\n    \"fall_suppress_s\": 30\n  },\n  \"gas\": {\n    \"采样周期\": 2,\n    \"gas_t1_mv\": 1500,\n    \"gas_t2_mv\": 2500,\n    \"gas_l1_hold_s\": 10,\n    \"gas_l2_hold_s\": 6,\n    \"gas_l1_to_l2_s\": 60,\n    \"gas_recover_mv\": 200,\n    \"gas_recover_hold_s\": 30\n  },\n  \"fall\": {\n    \"enter_delay_s\": 0,\n    \"fall_suppress_s\": 30,\n    \"k_fall_zero\": 3,\n    \"t_hold_s\": 30,\n    \"exit_needs_last_trigger_age\": true\n  },\n  \"motion\": {\n    \"no_motion_min\": 30,\n    \"away_after_open_s\": 600,\n    \"presence_hold_s\": 60\n  },\n  \"offline\": {\n    \"node_offline_s\": 9,\n    \"gateway_offline_s\": 180\n  },\n  \"repush\": {\n    \"alert_repush_s\": [\n      0,\n      60,\n      300\n    ],\n    \"alert_suppress_s\": 60\n  }\n}\n",
+          "err": "",
+          "ms": 81
+        }
+      ],
+      "hint": ""
+    },
+    {
+      "name": "server 构建检查",
+      "status": "passed",
+      "summary": "Python 编译 + schema.sql 结构检查通过",
+      "evidence": [
+        {
+          "cmd": "/usr/bin/python3 -m compileall -q /mnt/c/Users/Administrator/Desktop/HMProgram/server",
+          "rc": 0,
+          "out": "",
+          "err": "",
+          "ms": 298
+        },
+        {
+          "cmd": "grep -c 'create table' server/db/schema.sql",
+          "rc": 0,
+          "out": "11 张表",
+          "err": "",
+          "ms": 0
+        },
+        {
+          "cmd": "docker compose -f /mnt/c/Users/Administrator/Desktop/HMProgram/server/docker-compose.yml config --quiet",
+          "rc": 0,
+          "out": "",
+          "err": "",
+          "ms": 65
+        }
+      ],
+      "hint": ""
+    },
+    {
+      "name": "网关构建检查",
+      "status": "skipped",
+      "summary": "主机没有 gcc/clang，无法做语法检查",
+      "evidence": [],
+      "hint": ""
+    },
+    {
+      "name": "HAP 构建检查",
+      "status": "skipped",
+      "summary": "主机没有 hvigorw（HarmonyOS SDK 未安装或未进 PATH），无法真编译 HAP",
+      "evidence": [],
+      "hint": "在装了 DevEco/HarmonyOS SDK 的机器上跑 hvigorw assembleHap；本机只做工程结构检查"
+    },
+    {
+      "name": "WS63 固件构建检查",
+      "status": "skipped",
+      "summary": "默认只做静态检查；整包编译需 --full（容器 ws63wsl:latest + SDK）",
+      "evidence": [
+        {
+          "cmd": "find ws63-firmware/src -name '*.c'",
+          "rc": 0,
+          "out": "20 个 .c 文件",
+          "err": "",
+          "ms": 0
+        }
+      ],
+      "hint": "验收构建时用：python3 tools/test/build_checks.py --full"
+    }
+  ]
+}

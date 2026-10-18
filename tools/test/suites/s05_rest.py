@@ -234,6 +234,10 @@ def case_settings_validation_and_effects():
     keys = set(payload["data"]["items"])
     declared = set(C.settings_defaults())
     require(not (declared - keys), "GET settings 缺 §6.9 声明的键：%r" % sorted(declared - keys))
+    # v1.2 D-01：items 是闭集，gas_l1_to_l2_s 属 §8.2 算法参数、**不进 items**（多出即 FAIL）
+    require(not (keys - declared),
+            "GET settings 多出 §6.9 之外的键：%r（v1.2 D-01：gas_l1_to_l2_s 不进 items）"
+            % sorted(keys - declared))
 
 
 def case_demo_and_config_semantics():
@@ -248,6 +252,28 @@ def case_demo_and_config_semantics():
     blob = json.dumps(payload["data"], ensure_ascii=False)
     require("已成功" not in blob and "success" not in blob.lower(),
             "§6.11：下发接口绝不能返回“已成功”")
+    # §6.11（PM 最终裁定，契约 L942）：accepted/rejected 是键名字符串数组，不是整型计数
+    for key in ("accepted", "rejected"):
+        value = payload["data"][key]
+        require(isinstance(value, list) and all(isinstance(x, str) for x in value),
+                "§6.11 %s 必须是键名字符串数组，实际 %r" % (key, value))
+    require_eq(payload["data"]["accepted"], ["demo_trigger"], "demo 的 accepted 应为 demo_trigger")
+    require_eq(payload["data"]["rejected"], [], "demo 无拒绝项")
+    # config：一个可下发键 + 一个服务器判定键 → accepted/rejected 分流，reasons 键 ⊆ rejected
+    st, payload = CLIENT.call("POST", "/api/devices/%s/config" % dev,
+                              {"keys": ["no_motion_min", "alert_repush_s"]}, token=token)
+    require_eq(payload["code"], 0, "config 受理")
+    data = payload["data"]
+    require_eq(data["accepted"], ["no_motion_min"], "可下发键进 accepted（元素=键名）")
+    require_eq(data["rejected"], ["alert_repush_s"], "服务器判定键进 rejected（元素=键名）")
+    require_eq(set(data.get("reasons", {})), {"alert_repush_s"}, "§6.11 reasons 键 ⊆ rejected")
+    require(all(isinstance(v, str) and v for v in data["reasons"].values()),
+            "§6.11 reasons 文案必须为非空字符串")
+    # 全量下发：accepted + rejected 恰覆盖 §6.9 全部 21 键（不重不漏、无整型计数）
+    st, payload = CLIENT.call("POST", "/api/devices/%s/config" % dev, {}, token=token)
+    data = payload["data"]
+    require_eq(sorted(data["accepted"] + data["rejected"]), sorted(C.settings_defaults()),
+               "§6.11 全量下发的 accepted+rejected 应恰为 §6.9 的键集")
 
 
 def case_alerts_detail_and_disposition():
@@ -291,7 +317,24 @@ def case_reports_shapes():
     require_eq(payload["code"], 1000, "缺 device_id 应 1000")
     st, payload = CLIENT.call("GET", "/api/reports/trend?device_id=%s&days=7" % dev, token=token)
     require_in("compare", payload["data"], "trend 应带 compare")
-    require_in("text", payload["data"]["compare"], "§6.17 compare.text")
+    cmp7 = payload["data"]["compare"]
+    require_eq(cmp7.get("title"), "今日活动频次", "§6.17 compare.title 固定文案（必现）")
+    require_in("today", cmp7, "§6.17 compare.today 必现")
+    if "yesterday" in cmp7:
+        require(not isinstance(cmp7.get("delta_pct"), bool) and isinstance(cmp7.get("delta_pct"), int),
+                "§6.17 有基线时 delta_pct 必须是整数百分比，实际 %r" % cmp7.get("delta_pct"))
+        require_eq(cmp7["delta_pct"],
+                   int(round((cmp7["today"] - cmp7["yesterday"]) / cmp7["yesterday"] * 100)),
+                   "§6.17 delta_pct 规则：round((today-yesterday)/yesterday*100)")
+        require(isinstance(cmp7.get("text"), str) and cmp7["text"], "§6.17 有基线必须有 text 规则行")
+    else:
+        require("delta_pct" not in cmp7 and "text" not in cmp7,
+                "§6.17 无昨日基线时省略 delta_pct/text，只留 title/today")
+    # 无基线场景：days=1 → 没有昨天，compare 只留 title/today（v1.2 明文）
+    st, payload = CLIENT.call("GET", "/api/reports/trend?device_id=%s&days=1" % dev, token=token)
+    cmp1 = payload["data"]["compare"]
+    require_eq(sorted(cmp1), ["title", "today"], "§6.17 无基线只留 title/today")
+    require_eq(cmp1["title"], "今日活动频次", "§6.17 无基线时 title 仍必现")
     st, payload = CLIENT.call("GET", "/api/reports/summary?device_id=%s" % dev, token=token)
     for key in ("activity", "alerts", "env"):
         require_in(key, payload["data"], "§6.18 summary 结构")

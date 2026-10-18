@@ -45,6 +45,14 @@ RANGES = {
     "alert_suppress_s": (0, 3600), "fall_suppress_s": (0, 3600),
 }
 
+# §6.11：这些键由服务器判定、不经过设备（与 server/app/settings_keys.py 的 dispatchable=False 同集合）
+# → 出现在 config 请求里时落 rejected 并带 reasons，其余落 accepted。
+SERVER_SIDE_KEYS = {
+    "node_offline_timeout_s", "gateway_offline_timeout_s", "temp_high_c", "temp_low_c",
+    "humi_high_pct", "humi_low_pct", "env_hold_min", "alert_repush_s", "alert_suppress_s",
+    "door_open_alarm_s",
+}
+
 ERR = {
     0: "ok", 1000: "缺少必填参数", 1001: "参数格式错误", 1002: "参数超出允许范围",
     1003: "未知参数名", 1004: "时间范围非法", 1100: "未提供凭证", 1101: "凭证过期",
@@ -443,12 +451,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(*envelope(1204))
                 if action == "demo" and body.get("event") not in ("fall", "gas", "sos"):
                     return self._send(*envelope(1206, {"event": body.get("event")}))
-                accepted = body.get("keys") or (["demo_trigger"] if action == "demo" else
-                                                list(st.settings[dev_id].keys()))
-                return self._send(*envelope(0, {
-                    "command_id": "cmd-%d-7" % NOW_MS(), "request_id": "a1b2c3",
-                    "accepted": accepted, "rejected": [], "dispatched_at": NOW_MS(),
-                    "timeout_s": 10}))
+                # §6.11（PM 最终裁定）：accepted/rejected 是键名字符串数组，rejected 可带 reasons。
+                # 服务器判定键（不经过设备）落 rejected，与 server 的 dispatch_targets 同口径。
+                wanted = (["demo_trigger"] if action == "demo"
+                          else (body.get("keys") or list(st.settings[dev_id].keys())))
+                accepted = [k for k in wanted if k not in SERVER_SIDE_KEYS]
+                rejected = {k: "服务器判定参数，不经过设备" for k in wanted if k in SERVER_SIDE_KEYS}
+                result = {"command_id": "cmd-%d-7" % NOW_MS(), "request_id": "a1b2c3",
+                          "accepted": accepted, "rejected": sorted(rejected),
+                          "dispatched_at": NOW_MS(), "timeout_s": 10}
+                if rejected:
+                    result["reasons"] = {k: rejected[k] for k in sorted(rejected)}
+                return self._send(*envelope(0, result))
 
         if path == "/api/alerts" and method == "GET":
             limit, err = _limit(params)
@@ -513,11 +527,24 @@ class Handler(BaseHTTPRequestHandler):
                                                 "total": 0, "hourly": hourly, "daily": daily}))
             if path.endswith("/trend"):
                 days = int(params.get("days", 7))
+                # 序列取非零：既有今日也有昨日基线，才能覆盖 §6.17 的「有基线」形状；
+                # days=1 时没有昨天 → 自动走「无基线只留 title/today」分支（s05_rest 两个场景都跑）。
+                series = [{"date": "2026-10-%02d" % d, "count": 100 + d} for d in range(11, 11 + days)]
+                today = series[-1]["count"] if series else 0
+                yesterday = series[-2]["count"] if len(series) > 1 else 0
+                compare = {"title": "今日活动频次", "today": today}  # v1.2：title 必现
+                if yesterday:
+                    delta = int(round((today - yesterday) / yesterday * 100))  # §6.17 整数百分比
+                    compare["yesterday"] = yesterday
+                    compare["delta_pct"] = delta
+                    if delta <= -10:
+                        compare["text"] = "较昨日下降 %d%%" % abs(delta)
+                    elif delta >= 10:
+                        compare["text"] = "较昨日上升 %d%%" % abs(delta)
+                    else:
+                        compare["text"] = "与昨日基本持平"
                 return self._send(*envelope(0, {"device_id": params["device_id"], "days": days,
-                                                "series": [{"date": "2026-10-%02d" % d, "count": 0}
-                                                           for d in range(11, 11 + days)],
-                                                "compare": {"today": 0, "yesterday": 0,
-                                                            "delta_pct": 0, "text": "暂无活动数据"}}))
+                                                "series": series, "compare": compare}))
             return self._send(*envelope(0, {"device_id": params["device_id"], "period": "week",
                                             "from": NOW_MS() - 604800000, "to": NOW_MS(),
                                             "activity": {"total": 0, "active_days": 0, "avg_daily": 0,

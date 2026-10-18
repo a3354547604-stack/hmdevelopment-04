@@ -165,16 +165,17 @@ async function main(): Promise<void> {
     && rd.data.items[1].payload['fall'] === 1 && rd.data.items[1].id === 8,
     `total=${rd.data?.total} p0=${JSON.stringify(rd.data?.items[0]?.payload)}`);
 
-  // ---- 4) settings：GET 解析 22 键；PUT 只提交改动键 + 范围外键被拒
+  // ---- 4) settings：GET 解析 §6.9 的 21 键（v1.2 D-01：gas_l1_to_l2_s 不进 items）；PUT 只提交改动键
   RecordingTransport.reset();
   const gs = await api.getSettings(7);
   req = RecordingTransport.last();
   check('D1-settings-url', req !== undefined && req.method === 'GET'
     && req.url === `${fx.base}/devices/7/settings`, `url=${req === undefined ? '-' : req.url}`);
   const keysCount: number = gs.ok && gs.data !== undefined ? Object.keys(gs.data.items).length : -1;
-  check('D2-settings-22-keys', keysCount === 22 && gs.data?.items.gas_l1_to_l2_s === 60
+  check('D2-settings-21-keys', keysCount === 21 && gs.data?.items.gas_l1_to_l2_s === undefined
     && gs.data?.items.alert_repush_s !== undefined && gs.data?.items.alert_repush_s?.length === 3,
-    `keys=${keysCount} gas_l1_to_l2_s=${gs.data?.items.gas_l1_to_l2_s} repush=${JSON.stringify(gs.data?.items.alert_repush_s)}`);
+    `keys=${keysCount} gas_l1_to_l2_s=${gs.data?.items.gas_l1_to_l2_s} repush=${JSON.stringify(gs.data?.items.alert_repush_s)}`
+    + `（App SettingsItems 仍声明 22 键、含 v1.2 D-01 不进 items 的 gas_l1_to_l2_s → App 侧待修 t38/t45）`);
 
   RecordingTransport.reset();
   const ps = await api.putSettings(7, { no_motion_min: 45 });
@@ -213,10 +214,12 @@ async function main(): Promise<void> {
     `daily=${act.data?.daily.length} hourly=${act.data?.hourly.length} total=${act.data?.total}`);
 
   const tr = await api.trendReport(7, 7);
-  check('F3-trend-compare-text', tr.ok && tr.data !== undefined
-    && tr.data.compare.text === '今日活动频次较昨日下降 20%' && tr.data.compare.delta_pct === -20
-    && tr.data.series.length === 7,
-    `text='${tr.data?.compare.text}' delta=${tr.data?.compare.delta_pct} points=${tr.data?.series.length}`);
+  check('F3-trend-compare-v12', tr.ok && tr.data !== undefined
+    && tr.data.compare.title === '今日活动频次' && tr.data.compare.text === '较昨日下降 20%'
+    && tr.data.compare.delta_pct === -20 && tr.data.series.length === 7,
+    `title=${JSON.stringify(tr.data?.compare.title)} text='${tr.data?.compare.text}' delta=${tr.data?.compare.delta_pct} points=${tr.data?.series.length}`
+    + `（App TrendCompare 未解析 v1.2 必现键 title；且 Types.ets 把 yesterday/delta_pct/text 当必填，`
+    + `无基线响应会整条解析失败 → App 侧待修 t38/t45）`);
 
   const sm = await api.summaryReport(7, 'week');
   check('F4-summary-deep', sm.ok && sm.data !== undefined

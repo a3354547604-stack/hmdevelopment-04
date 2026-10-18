@@ -37,10 +37,8 @@ PAYLOAD_TYPES = {"fall": {"fall": 1, "presence": 1, "src": "uart"}, "gas": {"smo
 
 
 def settings_items() -> dict:
-    """§6.9 示例里的键 + §8.2 的 gas_l1_to_l2_s（D-01 的存在理由）。"""
-    items = dict(CONTRACT.settings_defaults())
-    items["gas_l1_to_l2_s"] = 60
-    return items
+    """§6.9 items 的 21 个键（v1.2 D-01：gas_l1_to_l2_s 属 §8.2 算法参数，**不在 items 里**）。"""
+    return dict(CONTRACT.settings_defaults())
 
 
 def alert_item(alert_id: int = 101) -> dict:
@@ -84,8 +82,8 @@ def build_fixtures() -> dict:
                 "daily": [{"date": "2026-10-%02d" % (11 + i), "count": 90 + i} for i in range(7)]}
     trend = {"device_id": 7, "days": 7,
              "series": [{"date": "2026-10-%02d" % (11 + i), "count": 100 + i} for i in range(7)],
-             "compare": {"today": 128, "yesterday": 160, "delta_pct": -20,
-                         "text": "今日活动频次较昨日下降 20%"}}
+             "compare": {"title": "今日活动频次", "today": 128, "yesterday": 160,
+                         "delta_pct": -20, "text": "较昨日下降 20%"}}
     summary = {"device_id": 7, "period": "week", "from": 1759795200000, "to": 1760400000000,
                "activity": {"total": 760, "active_days": 5, "avg_daily": 108.6, "peak_hour": 9,
                             "min_hour": 3, "compare_prev": "较上周期上升 5%"},

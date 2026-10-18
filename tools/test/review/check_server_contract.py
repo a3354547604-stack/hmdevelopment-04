@@ -10,10 +10,14 @@
 4. 每个检查项都打印 OK / DIFF / NOTE；DIFF=与契约不符（需人工定级），NOTE=契约未规定或已知待办。
 
 用法：
+    cd server && docker compose exec -T api python -m app.seed --reset --bind-code   # 取全新绑定码（每次跑前必做）
     VERIFIER_BIND_CODE=123456 python3 tools/test/review/check_server_contract.py
     VERIFIER_BIND_CODE=123456 python3 tools/test/review/check_server_contract.py --base http://127.0.0.1:3000
 
-退出码：0=无 DIFF；1=有 DIFF（需复核人判定）；2=环境不可用（服务未起/绑定码缺失）。
+注意：绑定码一次性、备用网关只能被一个账号绑定。**用同一个码连跑第二次会 bind 409**，
+此时本脚本判「环境不可用」并以退出码 2 中止（不生成假 DIFF）；重新 `--reset --bind-code` 再跑即可。
+
+退出码：0=无 DIFF；1=有 DIFF（需复核人判定）；2=环境不可用（服务未起/绑定码缺失/备用网关已被占用）。
 """
 from __future__ import annotations
 
@@ -254,6 +258,7 @@ class Walk:
         self.user: dict = {}
         self.token: str = ""
         self.device_id: int = 0
+        self.env_dirty: bool = False
         self.device_sn: str = ""
         self.alert_id: int = 0
 
@@ -301,13 +306,21 @@ class Walk:
                 # 备用网关若已被**上一次复核**绑走，本次会以 family 身份加入：bind 照样 201，
                 # 但 §6.10–§6.12 会全部 1104（非 owner），把"环境脏"伪装成一堆契约 DIFF。
                 # 这里显式判 owner，让环境问题在最早一步暴露。
+                self.env_dirty = True
                 diff("bind 返回 role=%s（期望 owner）：备用网关 %s 已有 owner，"
                      "请先清库（docker compose down -v 重建卷，或 DELETE FROM user_devices WHERE device_id=%d）"
                      % (role, self.bind_sn, self.device_id))
             else:
                 ok("bind 201：device_id=%s sn=%s role=owner（§6.6）" % (self.device_id, self.device_sn))
         else:
-            diff("bind 失败：HTTP %d code=%s message=%s" % (status, parsed.get("code"), parsed.get("message")))
+            # 绑定码是一次性的且备用网关只能被一个账号绑定：连跑两次（或用同一个 code 重跑）必然失败，
+            # 随后 C/D 段会拿不到 device_id，把「环境脏」伪装成几十条 404 契约 DIFF（2026-10-18 实测 26 条）。
+            # 因此这里直接判环境不可用并中止，退出码 2，不污染 DIFF 列表。
+            self.env_dirty = True
+            diff("bind 失败：HTTP %d code=%s message=%s；若 code=1202 说明备用网关已被占用——"
+                 "先 `cd server && docker compose exec -T api python -m app.seed --bind-code` 取新绑定码后重跑"
+                 "（或清库重建卷），不要把它读成契约不符"
+                 % (status, parsed.get("code"), parsed.get("message")))
 
     # --- 18 端点
     def walk_endpoints(self) -> None:
@@ -405,12 +418,12 @@ class Walk:
         status, _, cfg = self.http.req("POST", "/api/devices/%d/config" % dev,
                                       {"keys": ["no_motion_min"]}, token=self.token)
         self._check("§6.11 POST /{id}/config", status, 200, cfg, "6.11",
-                    extra_checks=lambda d: self._accepted_rejected_ints(d))
+                    extra_checks=lambda d: self._accepted_rejected_arrays(d))
         # §6.12 演示
         status, _, demo = self.http.req("POST", "/api/devices/%d/demo" % dev,
                                        {"event": "fall"}, token=self.token)
         self._check("§6.12 POST /{id}/demo", status, 200, demo, "6.12",
-                    extra_checks=lambda d: self._accepted_rejected_ints(d))
+                    extra_checks=lambda d: self._accepted_rejected_arrays(d))
         if isinstance(demo.get("data"), dict) and demo["data"].get("alert"):
             note("demo 响应带附加键 alert（契约 §6.12 未列，README §5 已说明为便于验收）")
         status, _, bad = self.http.req("POST", "/api/devices/%d/demo" % dev,
@@ -704,16 +717,26 @@ class Walk:
         if not isinstance(data, dict) or data.get("source") not in ("local", "device"):
             diff("settings.source 取值非法：%s（§6.9）" % (data or {}).get("source"))
 
-    def _accepted_rejected_ints(self, data: Any) -> None:
+    def _accepted_rejected_arrays(self, data: Any) -> None:
+        """§6.11（PM 最终裁定，契约 L942）：accepted/rejected 是 data 内的两个**字符串数组**，
+        元素为键名；可选 reasons 为「键 → 文案」对象。整型计数是已被推翻的旧口径，必须判 DIFF。"""
         if not isinstance(data, dict):
             return
         for key in ("accepted", "rejected"):
             value = data.get(key)
-            if not isinstance(value, int) or isinstance(value, bool):
-                diff("PM 裁定：%s 必须是 data 内的整型计数，实际 %r" % (key, value))
-        if isinstance(data.get("accepted"), int) and isinstance(data.get("rejected"), int):
-            ok("PM 裁定 accepted/rejected 为整型：accepted=%s rejected=%s"
-               % (data["accepted"], data["rejected"]))
+            if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+                diff("§6.11：%s 必须是键名字符串数组，实际 %r" % (key, value))
+                return
+        ok("§6.11 accepted/rejected 为键名字符串数组：accepted=%r rejected=%r"
+           % (data["accepted"], data["rejected"]))
+        reasons = data.get("reasons")
+        if reasons is None:
+            return
+        if (not isinstance(reasons, dict) or not set(reasons) <= set(data["rejected"])
+                or not all(isinstance(v, str) and v for v in reasons.values())):
+            diff("§6.11 reasons 必须是「键 → 非空文案」且键 ⊆ rejected，实际 %r" % (reasons,))
+        else:
+            ok("§6.11 reasons 键 ⊆ rejected 且文案非空（%d 项）" % len(reasons))
 
 
 # --------------------------------------------------------------------------- D. webhook
@@ -794,10 +817,12 @@ def section_webhook(http: Http, token: str, device_sn: str) -> None:
 def section_pm_rulings() -> None:
     section("E. PM 裁定与背景口径的静态核对")
     src = (REPO / "server/app/routers/devices.py").read_text(encoding="utf-8")
-    if re.search(r'"accepted":\s*len\(', src) or re.search(r'"accepted":\s*1', src):
-        ok("config/demo 的 accepted/rejected 由计数（int）构造")
+    if re.search(r'"accepted":\s*(len\(|1[,\s}])', src):
+        diff("config/demo 的 accepted 仍是整型计数构造（§6.11 PM 最终裁定：键名字符串数组）")
+    elif re.search(r'"accepted":\s*sorted\(', src):
+        ok("§6.11 config/demo 的 accepted 为键名字符串数组（sorted(...)）")
     else:
-        diff("未在 devices.py 找到 accepted 整型计数的构造")
+        diff("未在 devices.py 找到 accepted 字符串数组的构造")
     if "set_threshold" in src or "set_threshold" in (REPO / "server/app/services/iotda.py").read_text(
             encoding="utf-8"):
         ok("阈值下发命令名 set_threshold（§3.4 0x11 set 帧）")
@@ -828,7 +853,7 @@ def section_pm_rulings() -> None:
     if defaults - key_names:
         diff("settings_keys.py 缺契约 §6.9 的键：%s" % sorted(defaults - key_names))
     else:
-        ok("settings_keys.py 覆盖 §6.9 全部 %d 键（静态核对；契约外多出的 gas_l1_to_l2_s 见 C 段 D-01 DIFF）"
+        ok("settings_keys.py 覆盖 §6.9 全部 %d 键（v1.2 D-01：gas_l1_to_l2_s 属 §8.2 算法参数、不在 items）"
            % len(defaults))
 
 
@@ -941,6 +966,10 @@ def main() -> int:
     section_check_endpoints()
     walk = Walk(http, bind_code, bind_sn)
     walk.setup_account()
+    if walk.env_dirty:
+        print("\n环境不可用（脏）：备用网关 %s 已被占用或绑定码已失效，"
+              "C/D 段按设计跳过——避免把环境问题伪装成契约 DIFF（退出码 2）" % bind_sn)
+        return 2
     walk.walk_endpoints()
     event_id = section_webhook(http, walk.token, walk.device_sn)
     section_pm_rulings()
