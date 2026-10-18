@@ -27,7 +27,8 @@
 ## 2. 复现命令（复制即可跑）
 
 ```bash
-cd /mnt/c/Users/Administrator/Desktop/HMProgram
+# 约定：<仓库根> = 本仓库根目录（WSL 形态 /mnt/c/Users/<本机用户>/Desktop/HMProgram；Windows 形态 C:\Users\<本机用户>\Desktop\HMProgram）
+cd <仓库根>
 
 # ① 秒级编译自检（25 个「目标×文件」组合，约 0.5 s；不用 Docker）
 python3 tools/node-compile-check.py
@@ -236,7 +237,7 @@ grep -c "packet success" build-*.log
 
 ## 7. 上板自检步骤（**待用户实测**）
 
-前置：`C:\Users\Administrator\ws63-tools\fw\` 里有**救砖包**与既有固件
+前置：`C:\Users\<本机用户>\ws63-tools\fw\` 里有**救砖包**与既有固件（`<本机用户>` = 你的 Windows 用户名）
 （`xfat-rescue.fwpkg` 1468460 B、`ws63-liteos-app_all.fwpkg`、`ws63-sle-server-KNOWNGOOD.fwpkg`、
 `ws63-sensor-sle-wifi-KNOWNGOOD.fwpkg`）；仓库内也有 `ws63-firmware/output/ws63-liteos-app_all.fwpkg`
 可作回退。烧录只写 app 分区（`ws63flash.exe <fwpkg> app`，约 2.5 分钟）。
@@ -322,7 +323,8 @@ fall=0 的采样源 = 汇聚 3 s 一次的轮询应答（`docs/技术/接口契�
 ### 9.5 无板证据（可复现的命令 + 计数）
 
 ```bash
-cd /mnt/c/Users/Administrator/Desktop/HMProgram
+# 约定：<仓库根> = 本仓库根目录（WSL 形态 /mnt/c/Users/<本机用户>/Desktop/HMProgram；Windows 形态 C:\Users\<本机用户>\Desktop\HMProgram）
+cd <仓库根>
 HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh python3 tools/node-radar-cache-check.py \
   | tee ws63-firmware/out/radar-cache-check.txt
 # 本次实测输出已入库：ws63-firmware/out/radar-cache-check.txt（24 帧 / 24 条字段断言 / 0 失败）

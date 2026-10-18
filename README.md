@@ -121,21 +121,22 @@
 ## 环境速查
 
 ```bash
-# 编译（增量约 12 秒）
-docker run --rm -v /home/qinyixiang/ws63/fbb_ws63-master:/sdk -w /sdk/src ws63wsl:latest \
+# 编译（增量约 12 秒）；<SDK 路径> = 你本机的 WS63 SDK 检出（本机示例 ~/ws63/fbb_ws63-master，换机只改这一处）
+# 约定：<本机用户> = 你的 WSL 用户名（/home/<本机用户>）或 Windows 用户名（C:\Users\<本机用户>）
+docker run --rm -v "<SDK 路径>:/sdk" -w /sdk/src ws63wsl:latest \
   /bin/bash -c "export PATH=/usr/bin:/bin:/usr/sbin:/sbin; python3 build.py ws63-liteos-app"
 
 # 烧录（约 2.5 分钟，只覆盖 app 分区 0x230000）
-cd /mnt/c/Users/Administrator/ws63-tools/flasher && \
-  ./ws63flash.exe "C:\Users\Administrator\ws63-tools\fw\ws63-liteos-app_all.fwpkg" app
+cd /mnt/c/Users/<本机用户>/ws63-tools/flasher && \
+  ./ws63flash.exe "C:\Users\<本机用户>\ws63-tools\fw\ws63-liteos-app_all.fwpkg" app
 
 # 抓串口（COM14）—— 给人看：解码+高亮+结束给结论
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
-  -File 'C:\Users\Administrator\ws63-tools\watch.ps1' -Seconds 40 -HideAdc
+  -File 'C:\Users\<本机用户>\ws63-tools\watch.ps1' -Seconds 40 -HideAdc
 
 # 抓串口 —— 原始输出（AI/脚本用）
 powershell.exe -NoProfile -ExecutionPolicy Bypass \
-  -File 'C:\Users\Administrator\ws63-tools\ser.ps1' -Action listen -Seconds 20
+  -File 'C:\Users\<本机用户>\ws63-tools\ser.ps1' -Action listen -Seconds 20
 ```
 
 **看串口 / 判读日志 → 看 [docs/技术笔记/串口查看与日志判读.md](docs/技术笔记/串口查看与日志判读.md)**
