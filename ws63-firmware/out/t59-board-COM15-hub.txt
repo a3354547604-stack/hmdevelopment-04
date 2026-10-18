@@ -1,0 +1,171 @@
+1792288577005|boot.
+1792288577052|Flash Init Fail! ret = 0x80001341
+1792288577052|verify_public_rootkey secure verify disable!
+1792288577052|verify_params_key_area secure verify disable!
+1792288577052|verify_params_area_info secure verify disable!
+1792288577052|verify_image_key_area secure verify disable!
+1792288577052|verify_image_code_info secure verify disable!
+1792288577608|APP|dbg uart init ok.
+1792288577608|[UPG] init OK!
+1792288577609|APP|sle_mac:0x 0,0x 1,0x 9,0x40,0x**,0x**,
+1792288577609|APP|mac_addr:0x34,0x1f,0xc4,0x 7,0x**,0x**,
+1792288577609|xo_trim_temp_comp val:0 0
+1792288577639|los_at_plt_cmd_register EXCUTE
+1792288577639|cpu 0 entering scheduler
+1792288577639|APP|cali_is on
+1792288577670|APP|btc open
+1792288577670|[RADAR_LOG] radar_timer_init succ
+1792288577670|[RADAR_LOG] alg ctrl read from nv [1][2][0][0][1][1][20]
+1792288577670|device_main_init: 0!
+1792288577702|===hal_initialize_phy===226===
+1792288577702|device_module_init:: succ!
+1792288577702|cali_set_cali_mask:old[0x0] -> new[0x1fa2]
+1792288577702|fe_rf_initialize
+1792288577702|cali_offline_cali_entry enter
+1792288577702|cali_set_cali_done_flag:old[0x0] -> new[0x1]
+1792288577702|rf cali OK. time cost:21, ret:0
+1792288579180|[HUB] HUB-ROLE=CENTRAL sn=H1 fw=0.1.0 mock=0 (uart1 115200)
+1792288579180|[HUB] WARN: TEST HOOK prebind M1 (no gateway on this bench)
+1792288579180|[HUB] uart1 init ret=0 (IO15=TX/IO16=RX mode=1 115200 8N1)
+1792288579212|[HUB] uart rx callback ret=0
+1792288580273|[HUB] uart1 loopback no echo (pin 23/24 not shorted; normal when a gateway is attached)
+1792288580273|[HUB] calling enable_sle() ...
+1792288580273|[ACore] sle enable cbk in, result:0
+1792288580273|[HUB] sle_enable_cbk status=0x0 (boot=1100ms)
+1792288580304|[HUB] local addr=11:22:33:44:55:99
+1792288580304|[HUB] seek start ret=0x0
+1792288580304|[HUB] seek_enable_cbk status=0x0
+1792288580304|sle enable
+1792288580304|[HUB] enable_sle() returned 0x0
+1792288580304|[HUB] seek start ret=0x8000600a
+1792288580304|[HUB] connecting to addr=11:22:33:44:55:01
+1792288580304|[HUB] connect sn=M1 ret=0x0
+1792288580335|[adv_report] event_type: 0x03, addr_type: 0x0000, addr: 11:**:**:**:55:01
+1792288580335|[HUB] seek hit #1 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-23
+1792288580335|[HUB] seek hit #2 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-23
+1792288580366|[HUB] seek hit #3 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-25
+1792288580399|[HUB] seek hit #4 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-21
+1792288580430|[HUB] seek hit #5 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-20
+1792288580462|[HUB] seek hit #6 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-26
+1792288580493|[HUB] seek hit #7 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-20
+1792288580524|[HUB] seek hit #8 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-23
+1792288580555|[HUB] seek hit #9 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-22
+1792288580586|[HUB] seek hit #10 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-22
+1792288580648|[Connected]
+1792288580648|addr:11:**:**:**:55:01, conn_id:00
+1792288580648|[HUB] conn_state_changed conn=0x0 state=1 pair=1 reason=0x0
+1792288580649|[HUB] connected addr=11:22:33:44:55:01
+1792288580678|[HUB] slot=0 sn=M1 conn=0x0
+1792288580772|[HUB] pair_complete conn=0x0 status=0x0
+1792288580835|[HUB] conn=0x0 exchange MTU(req=1500) -> discover svc 0x060b
+1792288580897|ssapc exchange info, conn_id:0, err_code:0
+1792288580897|[HUB] exchange_info conn=0x0 status=0x0 mtu=1500
+1792288580961|[HUB] service found conn=0x0 status=0x0 hdl=[0x10..0x11] uuid=0x060b
+1792288580961|[HUB] discovery DONE conn=0x0 type=1 status=0x0
+1792288580961|[HUB] conn=0x0 discover properties in [0x10..0x11]
+1792288580992|[HUB] property found conn=0x0 hdl=0x11 uuid=0x1122 status=0x0
+1792288580992|[HUB] discovery DONE conn=0x0 type=3 status=0x0
+1792288580992|[HUB] conn=0x0 subscribe: write CCCD handle=0x11 (prop) type=0x2 val=0x0001 try=1/3
+1792288581024|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288581631|xo update temp:3,diff:0,xo:0x30a3a
+1792288582347|[HUB] seek stop (session 2000ms)
+1792288582347|[HUB] seek_disable_cbk status=0x0
+1792288582533|[HUB] CCCD not confirmed in 1500ms (cfm=0x7) -> rewrite CCCD (1/3)
+1792288582533|[HUB] conn=0x0 subscribe: write CCCD handle=0x11 (prop) type=0x2 val=0x0001 try=2/3
+1792288582564|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288584096|[HUB] CCCD not confirmed in 1500ms (cfm=0x7) -> rewrite CCCD (2/3)
+1792288584097|[HUB] conn=0x0 subscribe: write CCCD handle=0x11 (prop) type=0x2 val=0x0001 try=3/3
+1792288584126|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288585602|[HUB] WARN: CCCD unconfirmed after 3 writes (cfm=0x7) -> force READY, start polling
+1792288588273|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288588584|[HUB] event node_online sn=M1 sent (0x03)
+1792288588708|APP|[SYS INFO] mem: used:110448, free:237716; log: drop/all[0/2], at_recv 0.
+1792288591293|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288592385|[HUB] seek_enable_cbk status=0x0
+1792288592385|[HUB] seek start ret=0x0
+1792288594302|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288594429|[HUB] seek_disable_cbk status=0x0
+1792288594429|[HUB] seek stop (session 2000ms)
+1792288597290|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288597473|[HUB] event node_offline sn=M1 sent (0x03)
+1792288597597|[HUB] event node_online sn=M1 sent (0x03)
+1792288598714|APP|[SYS INFO] mem: used:110228, free:237936; log: drop/all[0/2], at_recv 0.
+1792288600287|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288603294|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288604426|[HUB] seek_enable_cbk status=0x0
+1792288604426|[HUB] seek start ret=0x0
+1792288606288|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288606475|[HUB] event node_offline sn=M1 sent (0x03)
+1792288606475|[HUB] seek stop (session 2000ms)
+1792288606475|[HUB] seek_disable_cbk status=0x0
+1792288606599|[HUB] event node_online sn=M1 sent (0x03)
+1792288608716|APP|[SYS INFO] mem: used:110180, free:237984; log: drop/all[0/2], at_recv 0.
+1792288609262|[HUB] STAT up=31s rx=14 poll_ok=0 poll_miss=7 ev_on=3 ev_off=2 ev_fall=0 disc=10 unknown=0 retrans=0 gw_miss=0 drop(ev=0 up=0 uart=0) conns=1 wl=1
+1792288609292|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288612306|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288615310|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288615481|[HUB] event node_offline sn=M1 sent (0x03)
+1792288615619|[HUB] event node_online sn=M1 sent (0x03)
+1792288616521|[HUB] seek_enable_cbk status=0x0
+1792288616521|[HUB] seek start ret=0x0
+1792288618298|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288618545|[HUB] seek stop (session 2000ms)
+1792288618545|[HUB] seek_disable_cbk status=0x0
+1792288618730|APP|[SYS INFO] mem: used:110248, free:237916; log: drop/all[0/2], at_recv 0.
+1792288621308|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288624298|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288624483|[HUB] event node_offline sn=M1 sent (0x03)
+1792288624607|[HUB] event node_online sn=M1 sent (0x03)
+1792288627314|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288628570|[HUB] seek_enable_cbk status=0x0
+1792288628570|[HUB] seek start ret=0x0
+1792288628725|APP|[SYS INFO] mem: used:110416, free:237748; log: drop/all[0/2], at_recv 0.
+1792288630315|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288630627|[HUB] seek stop (session 2000ms)
+1792288630627|[HUB] seek_disable_cbk status=0x0
+1792288633317|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288633504|[HUB] event node_offline sn=M1 sent (0x03)
+1792288633628|[HUB] event node_online sn=M1 sent (0x03)
+1792288636303|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288638710|APP|[SYS INFO] mem: used:110192, free:237972; log: drop/all[0/2], at_recv 0.
+1792288639271|[HUB] STAT up=61s rx=34 poll_ok=0 poll_miss=17 ev_on=6 ev_off=5 ev_fall=0 disc=10 unknown=0 retrans=0 gw_miss=0 drop(ev=0 up=0 uart=0) conns=1 wl=1
+1792288639301|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288640652|[HUB] seek_enable_cbk status=0x0
+1792288640652|[HUB] seek start ret=0x0
+1792288642343|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288642499|[HUB] event node_offline sn=M1 sent (0x03)
+1792288642622|[HUB] event node_online sn=M1 sent (0x03)
+1792288642684|[HUB] seek_disable_cbk status=0x0
+1792288642684|[HUB] seek stop (session 2000ms)
+1792288645319|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288648313|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288648714|APP|[SYS INFO] mem: used:110368, free:237796; log: drop/all[0/2], at_recv 0.
+1792288651325|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288651526|[HUB] event node_offline sn=M1 sent (0x03)
+1792288651619|[HUB] event node_online sn=M1 sent (0x03)
+1792288652711|[HUB] seek_enable_cbk status=0x0
+1792288652712|[HUB] seek start ret=0x0
+1792288654325|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288654745|[HUB] seek stop (session 2000ms)
+1792288654745|[HUB] seek_disable_cbk status=0x0
+1792288657339|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288658709|APP|[SYS INFO] mem: used:110244, free:237920; log: drop/all[0/2], at_recv 0.
+1792288660323|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288660508|[HUB] event node_offline sn=M1 sent (0x03)
+1792288660633|[HUB] event node_online sn=M1 sent (0x03)
+1792288663337|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288664768|[HUB] seek_enable_cbk status=0x0
+1792288664768|[HUB] seek start ret=0x0
+1792288666322|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288666839|[HUB] seek_disable_cbk status=0x0
+1792288666839|[HUB] seek stop (session 2000ms)
+1792288668715|APP|[SYS INFO] mem: used:110184, free:237980; log: drop/all[0/2], at_recv 0.
+1792288669288|[HUB] STAT up=91s rx=53 poll_ok=0 poll_miss=27 ev_on=9 ev_off=8 ev_fall=0 disc=10 unknown=0 retrans=0 gw_miss=0 drop(ev=0 up=0 uart=0) conns=1 wl=1
+1792288669319|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288669506|[HUB] event node_offline sn=M1 sent (0x03)
+1792288669631|[HUB] event node_online sn=M1 sent (0x03)
+1792288672340|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288675331|[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+1792288676829|[HUB] seek_enable_cbk status=0x0
+1792288676829|[HUB] seek start ret=0x0
+# EOF port=COM15 seconds=100 lines=170

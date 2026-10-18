@@ -239,3 +239,123 @@ t16 的两条教训在本版**已经是显式状态机**，不是 0 值哨兵：
 | 2026-10-18 | 首版：hub_client/hub_agg/hub_frame/hub_glink/hub_adv/hub_vnode + 自测 192 条 + 契约 11 帧逐字节回归；修 0x01 信封错误、`hub_wl_del` 返回值当结果码、环形队列少一槽、重传次数少一次、跌倒事件未边沿化 |
 | 2026-10-18 | attempt 4 收口：独立复现三项全绿（含出镜像 sha256 与 attempt 3 逐位相同）；注释 2058→2068（5 处）；`hub-selftest.py` 新增 mock fw 版本一致性断言（含反例验证）+ `hub_vnode.c` 注释宏名更正；doc §4 mock 日志摘录按实测更正 |
 | 2026-10-18 | t32 顺手收尾：§6 三条契约缺口按 PM 书面裁定标为「已裁（PM）」（三条都维持本版实现，不改代码、不改契约） |
+
+## 10. t59：SLE 订阅链路修复（CCCD 句柄/类型 + 判据 + READY 卡死）
+
+### 10.1 缺陷与一手依据
+
+汇聚连接节点后**永远到不了 READY**，所以一条 poll 都发不出去（`hub_poll_schedule()`
+只对 `state == HUB_SLOT_READY` 发）。两处根因都能在既有 spike 日志里直接读到：
+
+| 错误做法 | 现象 | 一手日志 |
+|---|---|---|
+| CCCD 写 `prop_handle + 1`（0x12，BLE 的「描述符 = 特征值 + 1」惯例） | 本机协议栈直接拒，对端**完全没有** WRITE 记录 | `spike/logs/run2-slave-COM14.log:7603` 起 status=0x4 |
+| 写对句柄（0x11）+ `type=0x02` | 对端收到订阅 | 客户端 `rerun-slave-COM14.log:56`；服务端 `rerun-master-COM15.log:61-62` `WRITE req … type=0x02` + `CCCD written by client … subscribed` |
+| 拿 write cfm 当「订阅成功」 | 本 SDK 对**有效**的 CCCD 写 cfm 恒为 0x7 ≠ `ERRCODE_SLE_SUCCESS(0)` → 永远走失败分支 → 回退重发现 → 死循环 | 同上日志 + 本次上板 `write_cfm … status=0x7` |
+
+SLE 的描述符按 **(属性句柄, 描述符类型)** 定位，句柄就是属性句柄本身，没有 BLE 那套 +1。
+
+### 10.2 改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `ws63-firmware/src/hub_client.c` | ① `cli_subscribe()` 句柄改 `c->prop_handle`；② `hub_write_cfm_cbk()` 只把 cfm 记进 `last_cfm_status`，不再判定 stage；③ `HUB_STAGE_CCCD` 分支改由纯函数 `hub_sub_decide()` 决策，重试用尽 → **强制进 READY 并开始轮询**（WARN）；④ 新增 `hub_sub_confirm_on_frame()`，在 `hub_pump_uplinks()` 里「收到该节点首个数据帧」时确认订阅并进 READY；⑤ 两处中文日志改 ASCII（`osal_printk` 不认 UTF-8） |
+| `ws63-firmware/src/hub_cfg.h` | 新增 CCCD 段：`HUB_CCCD_STATUS_REJECTED 0x4`、`HUB_SUB_CONFIRM_MS 1500`、`HUB_SUB_RETRY_MAX 3`、`HUB_SUB_WAIT/RETRY/CONFIRMED/FORCE`，以及**纯函数** `hub_sub_decide()`（只依赖 stdint，所以能在主机上直接编出来跑用例表） |
+| `ws63-firmware/src/sle_hub.c` | 节点侧 `ssaps_write_request_cbk()` 按 `type == SSAP_DESCRIPTOR_CLIENT_CONFIGURATION` 识别 CCCD 写：置 `g_peer_subscribed`（只用于日志与排查，不影响上报）并回响应，**不再把那两字节 `01 00` 当命令塞进下行队列**；断开时清标志 |
+| `tools/hub-selftest.py` | 新增两条断言：源码级（句柄/类型写对、判据不看 cfm、判定集中在纯函数里）+ `hub_sub_decide()` 用例表（直接 include 真 `hub_cfg.h` 编译运行）。断言跑在**去注释后**的文本上——注释里必须能出现 `prop_handle+1` 来说明这是错的 |
+
+### 10.3 无板验证（可复现）
+
+```bash
+python3 tools/hub-selftest.py          # PASS：192 断言 + 11 条样例帧逐字节 + 新增两条
+python3 tools/node-compile-check.py    # 41 个（目标 × 文件）编译，失败 0
+```
+
+**断言有牙（变异检验，三个变异全部被抓，做法见 §10.6）**：
+
+| 变异 | 结果 |
+|---|---|
+| 句柄改回 `prop_handle + 1` | `FAIL hub_client.c 里还有 prop_handle + 1` |
+| 把 `ERRCODE_SLE_SUCCESS` 重新当订阅成功判据 | `FAIL … 又拿 cfm 当判据` + `FAIL … 直接置 DONE` |
+| 把 `HUB_SUB_FORCE` 换成 `HUB_SUB_RETRY`（=旧 livelock） | `FAIL force@bound/deadline ×4` + `FAIL force@rejected-immediate` |
+
+`hub_sub_decide()` 用例表里有一条是**livelock 的反例证明**：只要窗口到了，
+`sub_tries == HUB_SUB_RETRY_MAX` 时任何 cfm 值都不得返回 WAIT。
+
+### 10.4 台架钩子：为什么需要、怎么保证默认关闭
+
+白名单**只**由网关的 `0x22 PAIR_BIND` 填充（契约 §3.4）。两板台架上没有网关时汇聚
+永远连不上任何节点，也就走不到写 CCCD 那一步。因此加了默认关闭的
+`HUB_TEST_PREBIND_ON / HUB_TEST_PREBIND_SN`（`ws63-firmware/src/hub_cfg.h`），
+它**只替换「网关下发配对」这一次交互**。
+
+**默认关闭时镜像与「没有钩子」逐位一致（实测）**：
+
+| 构建 | 命令 | bytes | sha256 |
+|---|---|---|---|
+| A 提交源码（`HUB_TEST_PREBIND_ON 0`） | `tools/build-lock.sh bash -c 'cd ws63-firmware && bash scripts/node-build.sh hub'` | 1473000 | `81992394383a56d6046a3c06b244ea9bfbf8bf14e0929f6560bedeef6d50ee71` |
+| B 把钩子代码整段删掉 | 同上 | 1473000 | `81992394383a56d6046a3c06b244ea9bfbf8bf14e0929f6560bedeef6d50ee71` |
+| — | `cmp /tmp/A.fwpkg /tmp/B.fwpkg` | — | **IDENTICAL** |
+| C 测试镜像（`ON 1`，`SN "M1"`，**未提交**） | 同上 + 临时改两行 | 1473192 | `84ba68443ae254b8107d0877a6ad3893fe7020db0c1b3a870974d390cac9cf25` |
+
+（钩子的函数体与调用点都在 `#if HUB_TEST_PREBIND_ON` 内，关闭时连符号都不存在，
+所以 A 与 B 必然是同一份机器码——上表是实测而不是推理。）
+
+### 10.5 上板实测（板 A COM15 = 测试镜像，板 B COM14 = NODE_M1）
+
+日志：`ws63-firmware/spike/logs/hub-sub-fix-COM15.log`（汇聚侧，100 s）、
+`hub-sub-fix-COM14.log`（节点侧，100 s）；烧录日志 `ws63-firmware/out/flash-hub-test-COM15.txt`。
+
+**整条链路走通了**（汇聚侧）：
+
+```
+[HUB] HUB-ROLE=CENTRAL sn=H1 fw=0.1.0 mock=0 (uart1 115200)
+[HUB] WARN: TEST HOOK prebind M1 (no gateway on this bench)
+[HUB] seek hit #1 mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-23
+[HUB] conn_state_changed conn=0x0 state=1 pair=1 reason=0x0
+[HUB] pair_complete conn=0x0 status=0x0
+[HUB] exchange_info conn=0x0 status=0x0 mtu=1500
+[HUB] service found conn=0x0 status=0x0 hdl=[0x10..0x11] uuid=0x060b
+[HUB] property found conn=0x0 hdl=0x11 uuid=0x1122 status=0x0
+[HUB] conn=0x0 subscribe: write CCCD handle=0x11 (prop) type=0x2 val=0x0001 try=1/3
+[HUB] write_cfm conn=0x0 hdl=0x0 len=0 status=0x7
+[HUB] CCCD not confirmed in 1500ms (cfm=0x7) -> rewrite CCCD (1/3)
+…（2/3、3/3 同上）…
+[HUB] WARN: CCCD unconfirmed after 3 writes (cfm=0x7) -> force READY, start polling
+[HUB] event node_online sn=M1 sent (0x03)
+```
+
+**修掉的三件事，逐条对应一手证据**：
+1. **句柄写对了**：`subscribe: write CCCD handle=0x11 (prop) type=0x2`，节点侧确实收到
+   ——`[SLE-HUB] write req conn=0x0 handle=0x11 len=2 need_rsp=0`（×3，与三次写一一对应）。
+2. **cfm 不再当判据**：三次写的 cfm **都是 0x7**（与 spike 一手结论一致）。旧代码在这里
+   就会回退重发现，永远到不了 READY；现在 cfm 只被记录，窗口到点重写，**写满 3 次强制进 READY**，
+   随后立刻见到 `node_online` 与轮询。**READY 路径可达性 = 本次上板最核心的一条。**
+3. **轮询真的在跑**：节点侧 `[M1] <- poll id=1/2/3/4 …` 与 `[M1] tx 147/124 bytes …"req_id":N`
+   ——下行写与上行应答都是真链路。
+
+**⚠️ 结论口径（必须照此理解）**：本次**配对是台架钩子注入的**，
+**网关 `0x22 PAIR_BIND` 真路径未验证**；本卡**没有**做到「三节点在网关侧全部上线 +
+阈值下发端到端回 ack」。上面证明的是「连接 → 交换信息 → 服务发现 → 写 CCCD → 进 READY → 轮询」
+这一段在真板上成立。
+
+### 10.6 上板顺带发现的两个新缺陷（**不在本卡范围，未修，已单独立项报告**）
+
+1. **节点 0x01 透传帧根本没发给网关**。`hub_client.c` 的 `hub_pump_uplinks()` 用
+   `hub_glink_pop_uplink()` 把上行环形队列**消费掉**（喂聚合状态机），而同一队列正是
+   `hub_glink_tick()` 的发送源 → 队列永远是空的，`[GLINK] -> 0x01 …` 一条都没有
+   （实测 100 s 内 0 条，而 `rx=53` 说明 53 条节点帧确实到了）。**根因是队列被二次消费**，
+   修法在 `hub_client.c`（消费后重发/改为 peek）。P0：这是「汇聚透传」本身。
+2. **`poll_ok=0` 而每条 poll 都有应答**。`STAT up=91s rx=53 poll_ok=0 poll_miss=27
+   ev_on=9 ev_off=8`：53 帧 ≈ 27 次 poll × 2 条应答，即**每次都答了**，但一条都没被结算成
+   `poll_ok`，3 次 miss 就把节点判离线 → 节点每几秒在线/离线反复（§8.7 误判）。
+   候选根因：`hub_agg.h` 的 `HUB_POLL_DEADLINE_MS 200` 比真实通知到达时延还短
+   （节点 30 ms 就发了，但通知送到汇聚的时延未测），或 `req_id` 对不上。
+
+### 10.7 本次未做
+
+- 未验证网关 `0x22 PAIR_BIND` 真路径（无网关、无第三路 USB-TTL 给 UART1 排针 23/24）。
+- 未验证阈值下发端到端回 ack（依赖网关 + 节点侧 F-01，属 t55/t4）。
+- 节点侧 CCCD 识别**未在板上验证**：板 B 烧的是 t23 时编的 `NODE_M1.fwpkg`（不含本卡对
+  `sle_hub.c` 的改动），所以日志里是旧路径的 `write req … len=2` +
+  `[M1] downlink not a command, ignored:`。**节点侧改动只有编译与源码级覆盖**（§10.3）。

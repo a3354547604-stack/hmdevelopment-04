@@ -72,9 +72,10 @@
 /* 扫描到白名单节点后发起连接的重试间隔：连不上就等 2 s 再试，
  * 别每 50 ms 拍一次把射频时间全花在 connect 上 */
 #define HUB_CONNECT_RETRY_MS   2000u
-/* 订阅重试：CCCD 写入属于"尽力而为"（节点侧是连上就发），但能订上最好。
- * 属性发现结束后写一次；失败/无响应则每 5 s 重试，最多 HUB_PROC_RETRY_MAX 次。 */
-#define HUB_SUBSCRIBE_RETRY_MS 5000u
+/* 订阅重试（t59 改）：CCCD 写完不是等 cfm，而是等"这个节点的首帧"。
+ * 每 HUB_SUB_CONFIRM_MS 一个窗口，写满 HUB_SUB_RETRY_MAX 次仍未确认就强制进 READY。
+ * 判定逻辑在 hub_cfg.h 的 hub_sub_decide()（放那里是为了能主机单测）。 */
+#define HUB_SUBSCRIBE_RETRY_MS HUB_SUB_CONFIRM_MS
 
 /* 日志节流：统计行 30 s 一行，扫描命中前 10 条逐条打、之后每 20 条打一条
  * （日志是验收证据，但把 UART 打满会把轮询挤丢） */
@@ -111,6 +112,8 @@ typedef struct {
     uint8_t  stage;
     uint8_t  prop_started;          /* 属性发现已发起（防止重复发起，t16 根因） */
     uint8_t  sub_tries;
+    int16_t  last_cfm_status;       /* t59：最近一次 write cfm 的 status，-1 = 还没有 */
+    int64_t  sub_deadline_ms;       /* t59：本次等"首帧"的截止时刻 */
     int64_t  next_sub_ms;
     int64_t  conn_at_ms;
     int64_t  next_connect_ms;
@@ -233,6 +236,42 @@ static hub_cli_t *cli_of_conn(uint16_t conn_id)
         }
     }
     return NULL;
+}
+
+/* t59：按 SN 找客户端状态。上行帧里只有 sn（没有 conn_id），而客户端状态按 MAC 索引，
+ * 所以要绕一步：白名单 sn → MAC → 客户端。 */
+static hub_cli_t *cli_of_sn(const char *sn)
+{
+    int slot;
+
+    if (sn == NULL) {
+        return NULL;
+    }
+    slot = hub_wl_index(&g_agg, sn);
+    if (slot < 0) {
+        return NULL;
+    }
+    return cli_of_mac(g_agg.node[slot].mac);
+}
+
+/* t59：订阅生效的确认 = **这个节点的数据真的到了**。
+ * 不依赖 write cfm（本 SDK 那笔 cfm 恒非 0，见 hub_cfg.h 的注释），
+ * 也不依赖节点在帧里额外带订阅标志（生产节点根本不看订阅状态）。
+ * 一旦确认就把槽位置成 READY，轮询随即开始。 */
+static void hub_sub_confirm_on_frame(const char *sn)
+{
+    hub_cli_t *c = cli_of_sn(sn);
+
+    if (c == NULL || c->stage == HUB_STAGE_DONE || c->stage == HUB_STAGE_IDLE) {
+        return;
+    }
+    if (c->stage != HUB_STAGE_CCCD && c->stage != HUB_STAGE_PROP) {
+        return;
+    }
+    c->stage = HUB_STAGE_DONE;
+    hub_agg_set_proc(&g_agg, c->conn_id, HUB_PROC_DONE, c->prop_handle);
+    HUB_LOG("sub-confirmed by first frame sn=%s conn=0x%x handle=0x%x (cfm=0x%x ignored)",
+            sn, (unsigned)c->conn_id, (unsigned)c->prop_handle, (unsigned)c->last_cfm_status);
 }
 
 /* 当前已建立的连接数（§3.4：SLE 官方 8 路，白名单上限也是 8） */
@@ -457,12 +496,19 @@ static void cli_subscribe(hub_cli_t *c)
     }
     c->sub_tries++;
     c->stage = HUB_STAGE_CCCD;
-    param.handle = (uint16_t)(c->prop_handle + 1u);     /* CCCD 紧跟属性句柄 */
+    c->last_cfm_status = -1;                            /* 这一次写还没有 cfm */
+    c->sub_deadline_ms = hub_now() + (int64_t)HUB_SUB_CONFIRM_MS;
+    /* t59：**句柄就是属性句柄本身**，不是 BLE 的"描述符 = 特征值 + 1"。
+     * SLE 用「(属性句柄, 描述符类型)」定位描述符；写 prop_handle+1 会被本机协议栈
+     * 直接拒（status=0x4），对端**根本收不到** WRITE。一手证据见 hub_cfg.h
+     * 「CCCD 订阅链路」段的注释（rerun-slave-COM14.log:56 成功 / run2-slave-COM14.log:7603 被拒）。 */
+    param.handle = c->prop_handle;
     param.type = SSAP_DESCRIPTOR_CLIENT_CONFIGURATION;
     param.data_len = sizeof(cccd);
     param.data = cccd;
-    HUB_LOG("conn=0x%x subscribe: write CCCD hdl=0x%x val=0x0001 try=%u",
-            c->conn_id, (unsigned)param.handle, (unsigned)c->sub_tries);
+    HUB_LOG("conn=0x%x subscribe: write CCCD handle=0x%x (prop) type=0x%x val=0x0001 try=%u/%u",
+            c->conn_id, (unsigned)param.handle, (unsigned)param.type,
+            (unsigned)c->sub_tries, (unsigned)HUB_SUB_RETRY_MAX);
     (void)ssapc_write_req(HUB_CLIENT_ID, c->conn_id, &param);
 }
 
@@ -745,7 +791,6 @@ static void hub_find_structure_cmp_cbk(uint8_t client_id, uint16_t conn_id,
 static void hub_write_cfm_cbk(uint8_t client_id, uint16_t conn_id, ssapc_write_result_t *write_result,
     errcode_t status)
 {
-    hub_cli_ev_t ev = {0};
     hub_cli_t *c = cli_of_conn(conn_id);
 
     unused(client_id);
@@ -758,20 +803,14 @@ static void hub_write_cfm_cbk(uint8_t client_id, uint16_t conn_id, ssapc_write_r
     if (c->stage != HUB_STAGE_CCCD) {
         return;                         /* 这条 cfm 是 poll 下行写的回执，不是 CCCD */
     }
-    if (status == ERRCODE_SLE_SUCCESS) {
-        c->stage = HUB_STAGE_DONE;
-        ev.kind = HUB_EV_PROC;
-        ev.conn_id = conn_id;
-        ev.proc = HUB_PROC_DONE;
-        ev.prop_handle = c->prop_handle;
-        hub_ev_push(&ev);
-        HUB_LOG("SUBSCRIBED conn=0x%x hdl=0x%x ready for poll", (unsigned)conn_id,
-                (unsigned)c->prop_handle);
-    } else {
-        /* 订阅失败不算致命：节点侧是"连上就发"（§2.7），但下一拍会重试 */
-        c->stage = HUB_STAGE_PROP;
-        c->next_sub_ms = hub_now() + (int64_t)HUB_SUBSCRIBE_RETRY_MS;
-        HUB_LOG("CCCD write failed status=0x%x (will retry)", (unsigned)status);
+    /* t59：**不在这里做决策**。本 SDK 对有效 CCCD 写的 cfm 恒非 0（spike 实测 0x7，
+     * 且 need_rsp=0），拿它当"订阅成功"会永远走失败分支；这里只记录状态，
+     * 由主循环的 hub_discovery_manage() 调 hub_sub_decide() 统一判定。
+     * 协议栈线程只搬事实，判定集中在一处 —— 这条分工本身也是修复的一部分。 */
+    c->last_cfm_status = (int16_t)status;
+    if ((unsigned)status == (unsigned)HUB_CCCD_STATUS_REJECTED) {
+        HUB_LOG("WARN: CCCD write rejected by local stack status=0x%x handle=0x%x (see hub_cfg.h)",
+                (unsigned)status, (unsigned)c->prop_handle);
     }
 }
 
@@ -825,7 +864,7 @@ static int hub_reply_bind_ack(int ack_seq, int result, const char *op, const cha
     n = hub_json_bind_ack(buf, sizeof(buf), ack_seq, result, op, sn, wl, cnt,
                           hub_wl_slots_free(&g_agg));
     if (n < 0) {
-        HUB_LOG("ERROR: bind_ack 组装失败");
+        HUB_LOG("ERROR: bind_ack build failed");
         return -1;
     }
     return hub_glink_send(&g_glink, HUB_T_PAIR_BIND_ACK, buf, (uint16_t)n);
@@ -1182,12 +1221,24 @@ static void hub_discovery_manage(int64_t now)
             continue;
         }
         if (c->stage == HUB_STAGE_CCCD) {
-            /* 等 write cfm；超时当失败处理 */
-            if (now - c->conn_at_ms >= (int64_t)HUB_PROC_TIMEOUT_MS) {
-                c->conn_at_ms = now;
-                c->stage = HUB_STAGE_PROP;
-                c->next_sub_ms = now + (int64_t)HUB_SUBSCRIBE_RETRY_MS;
-                HUB_LOG("CCCD write timeout conn=0x%x", (unsigned)c->conn_id);
+            /* t59：CCCD 之后**等首帧**，不等 cfm；判定全在纯函数里（可主机单测）。
+             * 旧实现拿 cfm 当判据 + 失败回 PROP 再整轮重发现 = 死循环，
+             * 永远到不了 READY，而 hub_poll_schedule() 只对 READY 发 poll。 */
+            int action = hub_sub_decide(c->sub_tries, (int)c->last_cfm_status, 0,
+                                        (now >= c->sub_deadline_ms) ? 1 : 0);
+            if (action == HUB_SUB_RETRY) {
+                HUB_LOG("CCCD not confirmed in %ums (cfm=0x%x) -> rewrite CCCD (%u/%u)",
+                        (unsigned)HUB_SUB_CONFIRM_MS, (unsigned)c->last_cfm_status,
+                        (unsigned)c->sub_tries, (unsigned)HUB_SUB_RETRY_MAX);
+                cli_subscribe(c);       /* 自增 sub_tries 并重置窗口 */
+            } else if (action == HUB_SUB_FORCE) {
+                /* 写了 HUB_SUB_RETRY_MAX 次还没有首帧：**不能继续卡在这里**。
+                 * 节点侧本来就是"连上就发"（§2.7），订阅与否不影响它发通知；
+                 * 强制进 READY 让轮询跑起来，真有问题会在 poll 上暴露出来。 */
+                HUB_LOG("WARN: CCCD unconfirmed after %u writes (cfm=0x%x) -> force READY, start polling",
+                        (unsigned)c->sub_tries, (unsigned)c->last_cfm_status);
+                c->stage = HUB_STAGE_DONE;
+                hub_agg_set_proc(&g_agg, c->conn_id, HUB_PROC_DONE, c->prop_handle);
             }
             continue;
         }
@@ -1281,6 +1332,9 @@ static void hub_pump_uplinks(int64_t now)
         /* 先喂状态机（刷新 last_seen/在线表/rtt/离线计数），再让链路层把 0x01 发出去。
          * 顺序反了的话，网关可能在 0x02 心跳里先看到"离线"、后收到同一条数据。 */
         (void)hub_agg_on_uplink(&g_agg, &u, now, &g_act);
+        /* t59：这一帧同时是"订阅真的生效了"的证据（见 hub_sub_confirm_on_frame）。
+         * 放在 on_uplink 之后：状态机先记账，再让订阅状态机跟着跳 READY。 */
+        hub_sub_confirm_on_frame(u.sn);
         if (strcmp(u.type, "fall") == 0 && u.fall == 1) {
             (void)memcpy_s(body, sizeof(body), g_up.json, sizeof(body));
             g_fall_body[sizeof(g_fall_body) - 1u] = '\0';
@@ -1453,7 +1507,8 @@ static void hub_uart_loopback_check(void)
             return;
         }
     }
-    HUB_LOG("uart1 loopback no echo (23/24 未短接；接网关时这是正常现象)");
+    /* osal_printk 走串口时不认 UTF-8（中文会打成 '?'），固件日志一律 ASCII */
+    HUB_LOG("uart1 loopback no echo (pin 23/24 not shorted; normal when a gateway is attached)");
 }
 
 static void hub_port_init(void)
@@ -1496,6 +1551,30 @@ static void hub_register_cbks(void)
     ssapc_register_callbacks(&g_ssapc_cbk);
 }
 
+#if HUB_TEST_PREBIND_ON
+/* 测试钩子（t59）：把白名单预置成 HUB_TEST_PREBIND_SN。
+ *
+ * 为什么需要它：白名单**只**由网关的 0x22 PAIR_BIND 填充（契约 §3.4），
+ * 所以"汇聚 + 节点"两块板的台架在没有网关时，汇聚永远连不上任何节点 ——
+ * 连不上就测不到 CCCD 这一步。这个钩子只替换"网关下发配对"这一次交互，
+ * 之后的连接 / 交换信息 / 服务发现 / 写 CCCD / 首帧确认 / 轮询全是真路径。
+ *
+ * 默认 HUB_TEST_PREBIND_SN = ""（关闭），镜像与不带钩子的完全一致；
+ * 上板时**临时**把它改成 "M1" 再编（做法与证据见 doc/12 的 t59 记录）。
+ * 代码内注释说明何时启用：只在没有网关的台架上做订阅链路实测时启用。 */
+static void hub_test_prebind(int64_t now)
+{
+    uint8_t mac[HUB_MAC_BYTES] = {0};
+
+    if (hub_adv_mac_from_sn(HUB_TEST_PREBIND_SN, mac) != 0) {
+        HUB_LOG("WARN: test prebind sn=%s invalid, ignored", HUB_TEST_PREBIND_SN);
+        return;
+    }
+    HUB_LOG("WARN: TEST HOOK prebind %s (no gateway on this bench)", HUB_TEST_PREBIND_SN);
+    (void)hub_wl_add(&g_agg, HUB_TEST_PREBIND_SN, mac, now);
+}
+#endif /* HUB_TEST_PREBIND_ON */
+
 void hub_client_boot(void)
 {
     int64_t now = hub_now();
@@ -1511,6 +1590,9 @@ void hub_client_boot(void)
 
     HUB_LOG("%s (uart%d 115200)", HUB_BUILD_TAG, (int)HUB_UART_BUS);
     hub_agg_init(&g_agg, HUB_SN_STR, now);
+#if HUB_TEST_PREBIND_ON
+    hub_test_prebind(now);          /* 台架钩子：默认关闭，见 hub_cfg.h */
+#endif
     hub_port_init();
     hub_uart_init();
     hub_uart_loopback_check();

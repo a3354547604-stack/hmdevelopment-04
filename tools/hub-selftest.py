@@ -14,6 +14,9 @@ hub-selftest.py — 汇聚 H1 的独立校验（主机侧，不需要硬件，�
      （含 CRC 小端）。这一步是"帧编码正确"的硬证据 —— 不是"我打印了类似的东西"，是**逐字节相等**。
   4. 用 Python 的 json 解析器真正解析每一条样例 PAYLOAD，并核对 LEN 字段 = 实际长度
      （C 里的 strstr 断言不了"这串是不是合法 JSON"，少一个引号照样能匹配到子串）。
+  5. **t59 订阅链路**：源码级断言 CCCD 句柄/类型写对、判据不看 write cfm；
+     并把 hub_cfg.h 里订阅判定纯函数 hub_sub_decide() 的用例表编出来跑
+     （含"写满重试次数后任何 cfm 都必须强制进 READY"这条 livelock 反例）。
 
 退出码：0 = 全通过；1 = 有失败；2 = 环境缺编译器 / 缺源文件。
 
@@ -225,6 +228,202 @@ def check_fw_version_consistency():
     return 0
 
 
+SUBDECIDE_SRC = r"""
+/* 由 tools/hub-selftest.py 生成：订阅判定纯函数的用例表（t59）。
+ * 被测代码就是 ws63-firmware/src/hub_cfg.h 里的 hub_sub_decide() —— 直接 include 真源码，
+ * 不复制一份逻辑到测试里（复制品永远会通过它自己的测试）。 */
+#include <stdio.h>
+#include "hub_cfg.h"
+
+static int g_fails;
+
+static void ck(const char *name, int got, int want)
+{
+    if (got == want) {
+        return;
+    }
+    printf("  FAIL  %s: got=%d want=%d\n", name, got, want);
+    g_fails++;
+}
+
+int main(void)
+{
+    /* 1. 窗口未到、没有首帧 -> 什么都不做（不是失败，只是还在等） */
+    ck("wait/cfm0", hub_sub_decide(1u, 0x0, 0, 0), HUB_SUB_WAIT);
+    ck("wait/no-cfm", hub_sub_decide(1u, -1, 0, 0), HUB_SUB_WAIT);
+    ck("wait/cfm7", hub_sub_decide(2u, 0x7, 0, 0), HUB_SUB_WAIT);
+
+    /* 2. 本 SDK 对有效 CCCD 写的 cfm 恒非 0（spike 实测 0x7）：**不能**当失败。
+     *    窗口到了就该重写，而不是回退重发现（旧实现正是这里死循环）。 */
+    ck("retry/cfm7", hub_sub_decide(1u, 0x7, 0, 1), HUB_SUB_RETRY);
+    ck("retry/cfm0", hub_sub_decide(2u, 0x0, 0, 1), HUB_SUB_RETRY);
+    ck("retry/no-cfm", hub_sub_decide(1u, -1, 0, 1), HUB_SUB_RETRY);
+
+    /* 3. 只有 0x4（本机协议栈拒绝 / 候选无效）值得立刻重写，不必等满一个窗口 */
+    ck("retry/rejected", hub_sub_decide(1u, (int)HUB_CCCD_STATUS_REJECTED, 0, 0), HUB_SUB_RETRY);
+
+    /* 4. 首帧到了就是订阅生效 —— 优先于任何 cfm 值 */
+    ck("confirmed/cfm7", hub_sub_decide(1u, 0x7, 1, 0), HUB_SUB_CONFIRMED);
+    ck("confirmed/rejected", hub_sub_decide(1u, (int)HUB_CCCD_STATUS_REJECTED, 1, 1),
+       HUB_SUB_CONFIRMED);
+
+    /* 5. 上界：写满 HUB_SUB_RETRY_MAX 次后，**任何** cfm 组合都必须强制进 READY。
+     *    这条是 livelock 的反例证明 —— 只要窗口到了，就不存在"永远 WAIT"的组合。 */
+    {
+        const int cfms[4] = { -1, 0x0, (int)HUB_CCCD_STATUS_REJECTED, 0x7 };
+        int i;
+
+        for (i = 0; i < 4; i++) {
+            ck("force@bound/deadline", hub_sub_decide(HUB_SUB_RETRY_MAX, cfms[i], 0, 1), HUB_SUB_FORCE);
+            ck("never-wait@bound", hub_sub_decide(HUB_SUB_RETRY_MAX, cfms[i], 0, 1) != HUB_SUB_WAIT, 1);
+        }
+        ck("force@rejected-immediate",
+           hub_sub_decide(HUB_SUB_RETRY_MAX, (int)HUB_CCCD_STATUS_REJECTED, 0, 0), HUB_SUB_FORCE);
+    }
+
+    /* 6. 也不能提前放弃：还差一次时窗口到了应当重写，不是 FORCE */
+    ck("not-early-force", hub_sub_decide((uint8_t)(HUB_SUB_RETRY_MAX - 1u), 0x7, 0, 1), HUB_SUB_RETRY);
+
+    /* 7. 上界与文档声明一致：3 次、4.5 s，且远小于任务给的 15 s 上限 */
+    ck("bound==3", (HUB_SUB_RETRY_MAX == 3u) ? 1 : 0, 1);
+    ck("bound<=15s", ((unsigned)HUB_SUB_CONFIRM_MS * (unsigned)HUB_SUB_RETRY_MAX <= 15000u) ? 1 : 0, 1);
+
+    printf("  %s  hub_sub_decide 用例表：%s（fails=%d）\n",
+           g_fails ? "FAIL" : "PASS", g_fails ? "FAIL" : "OK", g_fails);
+    return g_fails ? 1 : 0;
+}
+"""
+
+
+def _strip_comments(text):
+    """去掉 C 注释（保留字符串字面量）。
+
+    为什么不直接对全文做正则：t59 修的就是"注释里写着错误做法、代码里跟着写"这种事故 ——
+    hub_client.c 的注释里必须能出现 `prop_handle+1` 来说明"这是错的"，而断言只该盯代码。
+    """
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '"' or c == "'":                    # 字符串/字符字面量整段保留
+            q = c
+            out.append(c)
+            i += 1
+            while i < n:
+                out.append(text[i])
+                if text[i] == "\\" and i + 1 < n:
+                    out.append(text[i + 1])
+                    i += 2
+                    continue
+                if text[i] == q:
+                    i += 1
+                    break
+                i += 1
+            continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            out.append(" ")
+            continue
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _func_body(text, name):
+    """抠出 `<name>(...)` 那个函数的函数体（从名字到下一个行首 '}'）。"""
+    i = text.find(name)
+    if i < 0:
+        return None
+    j = text.find("\n}", i)
+    return text[i:j + 2] if j > 0 else text[i:]
+
+
+def check_cccd_handle():
+    """t59 三条：CCCD 句柄/类型、订阅判据不看 cfm、判定集中在纯函数里。"""
+    print("\n== CCCD 订阅链路（t59）==")
+    path = os.path.join(SRC, "hub_client.c")
+    if not os.path.isfile(path):
+        print("  FAIL  没有 %s" % path)
+        return 1
+    with open(path, encoding="utf-8") as f:
+        raw = f.read()
+    text = _strip_comments(raw)          # 断言只盯代码；注释里出现错误做法是**必须允许**的
+    fails = 0
+
+    if re.search(r"prop_handle\s*\+\s*1", text):
+        print("  FAIL  hub_client.c 里还有 `prop_handle + 1` —— BLE 的「描述符 = 特征值 + 1」"
+              "对 SLE 不成立（见 hub_cfg.h 的 CCCD 注释）")
+        fails += 1
+    if not re.search(r"param\.handle\s*=\s*c->prop_handle\s*;", text):
+        print("  FAIL  cli_subscribe() 没写成 `param.handle = c->prop_handle;`")
+        fails += 1
+    if not re.search(r"param\.type\s*=\s*SSAP_DESCRIPTOR_CLIENT_CONFIGURATION\s*;", text):
+        print("  FAIL  CCCD 写的 type 必须是 SSAP_DESCRIPTOR_CLIENT_CONFIGURATION(0x02)")
+        fails += 1
+
+    body = _func_body(text, "hub_write_cfm_cbk(")
+    if body is None:
+        print("  FAIL  找不到 hub_write_cfm_cbk()")
+        fails += 1
+    else:
+        if "ERRCODE_SLE_SUCCESS" in body:
+            print("  FAIL  hub_write_cfm_cbk() 又拿 cfm 当订阅成功判据了"
+                  "（本 SDK 那笔 cfm 恒非 0 → 永远进不了 READY）")
+            fails += 1
+        if "HUB_STAGE_DONE" in body:
+            print("  FAIL  hub_write_cfm_cbk() 里直接置 DONE —— 判定应当集中在 hub_sub_decide()")
+            fails += 1
+        if "last_cfm_status" not in body:
+            print("  FAIL  hub_write_cfm_cbk() 没有把 cfm 记进 last_cfm_status（只该记录事实）")
+            fails += 1
+
+    if not re.search(r"hub_sub_decide\s*\(", text):
+        print("  FAIL  hub_client.c 没有调用 hub_sub_decide()（订阅判定必须走这个纯函数，"
+              "否则没法在主机上覆盖它）")
+        fails += 1
+    if "HUB_SUB_FORCE" not in text:
+        print("  FAIL  hub_client.c 没有处理 HUB_SUB_FORCE —— 没有这条就还是可能卡在 CCCD")
+        fails += 1
+    if not re.search(r"hub_sub_confirm_on_frame\s*\(", text):
+        print("  FAIL  没有 hub_sub_confirm_on_frame()（订阅生效只能由节点首帧确认）")
+        fails += 1
+    if "sub-confirmed by first frame" not in text:
+        print("  FAIL  没有 `sub-confirmed by first frame` 日志 —— 上板时无法确认订阅何时生效")
+        fails += 1
+
+    if fails == 0:
+        print("  PASS  handle=c->prop_handle / type=SSAP_DESCRIPTOR_CLIENT_CONFIGURATION(0x02)"
+              " / 判据不看 cfm / 判定集中且强制 READY / 首帧确认")
+    return fails
+
+
+def check_sub_decide(cc):
+    """把 hub_sub_decide() 的用例表编出来跑（被测的是真源码，不是复制品）。"""
+    with tempfile.TemporaryDirectory() as td:
+        csrc = os.path.join(td, "subdecide.c")
+        exe = os.path.join(td, "subdecide")
+        with open(csrc, "w", encoding="utf-8") as f:
+            f.write(SUBDECIDE_SRC)
+        cmd = [cc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-O1", "-I", SRC, "-o", exe, csrc]
+        cp = subprocess.run(cmd, capture_output=True, text=True)
+        if cp.returncode != 0:
+            print("  FAIL  订阅判定用例表编译失败")
+            print(cp.stdout)
+            print(cp.stderr, file=sys.stderr)
+            return 1
+        rp = subprocess.run([exe], capture_output=True, text=True)
+    print(rp.stdout, end="")
+    if rp.stderr.strip():
+        print(rp.stderr, file=sys.stderr)
+    return 1 if rp.returncode != 0 else 0
+
+
 def main():
     in_docker = "--inside-docker" in sys.argv
     cc = find_cc()
@@ -242,7 +441,9 @@ def main():
         return 2
     cfail = check_contract_frames(cc)
     fwfail = check_fw_version_consistency()
-    total_bad = (1 if rc != 0 else 0) + cfail + fwfail
+    hfail = check_cccd_handle()
+    sfail = check_sub_decide(cc)
+    total_bad = (1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail
     print("\n==== hub-selftest 总判定：%s ====" % ("PASS" if total_bad == 0 else "FAIL"))
     print("日志：ws63-firmware/out/hub-selftest.log；mock 聚合证据：ws63-firmware/out/hub-mock-agg.log")
     return 0 if total_bad == 0 else 1

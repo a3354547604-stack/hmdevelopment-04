@@ -93,6 +93,84 @@
  * 到点就照常往下走（t12 实测教训之一） */
 #define HUB_PAIR_GRACE_MS       1200u
 
+/* ------------------------------------------------------------------ */
+/* CCCD 订阅链路（t59）—— 每个数字都有一手日志出处，不要凭 BLE 直觉改        */
+/* ------------------------------------------------------------------ */
+/**
+ * 为什么单独设一段：SLE 的订阅和 BLE 的**不一样**，凭直觉写会写出"永远订阅不上、
+ * 三个节点永远离线"的固件。三条一手结论（日志在 ws63-firmware/spike/logs/）：
+ *
+ * 1. **描述符按「(属性句柄, 描述符类型)」定位，句柄就是属性句柄本身**，
+ *    不是 BLE 那种"描述符 = 特征值句柄 + 1"：
+ *      rerun-slave-COM14.log:56     客户端 write CCCD try#1/4 handle=0x11 type=0x02  → 成功
+ *      rerun-master-COM15.log:61-62 服务端 WRITE req … handle=0x11 type=0x02
+ *                                   + "CCCD written by client … subscribed"
+ *      run2-slave-COM14.log:7603    用 handle=0x12 被**本机协议栈**拒（status=0x4），
+ *                                   服务端从头到尾没有 WRITE 记录
+ * 2. **不能拿 write cfm 当"订阅成功"判据**：本 SDK 对有效 CCCD 写的 cfm 恒非 0
+ *    （spike 实测 0x7，且 need_rsp=0）。只有 0x4（本机拒绝/候选无效）才值得重试。
+ * 3. 订阅生效的**唯一可信证据**是"这个节点的数据真的到了"（首帧）。
+ *
+ * 参数取值：写完 CCCD 后给 HUB_SUB_CONFIRM_MS 等首帧；到期未确认就重写一次，
+ * 写满 HUB_SUB_RETRY_MAX 次还没确认就**强制进 READY 并开始轮询**（打 WARN）。
+ * 上界 = 3 × 1500 ms = 4.5 s，远小于任务要求的 15 s 上限。
+ * 为什么不一直重试：旧实现"CCCD 失败 → 回 PROP → 整轮重发现"是死循环，
+ * 而 hub_poll_schedule() 只对 READY 发 poll → 一个节点都轮询不到。
+ */
+/**
+ * 台架测试钩子（t59）：没有网关时把白名单预置成一个 SN（默认 "" = 关闭）。
+ *
+ * 白名单只由网关的 0x22 PAIR_BIND 填充，所以"汇聚 + 节点"两块板的台架上，
+ * 汇聚永远连不上任何节点，也就测不到写 CCCD 那一步。启用它只替换"网关下发配对"
+ * 这一次交互，其余（连接/交换信息/服务发现/写 CCCD/首帧确认/轮询）都是真路径。
+ * **默认必须留空**：留空时 hub_client.c 里那段整体被预处理掉，镜像与不带钩子完全一致。
+ * 何时启用：只在没有网关的台架上做订阅链路实测时临时改成 "M1"/"M2"/"M4"。
+ */
+#define HUB_TEST_PREBIND_ON     0
+#define HUB_TEST_PREBIND_SN     ""
+
+#define HUB_CCCD_STATUS_REJECTED 0x4u    /* 本机拒绝：唯一值得重试的 cfm 状态（见上文第 2 条） */
+#define HUB_SUB_CONFIRM_MS       1500u   /* 写完 CCCD 后等"首帧"的窗口 */
+#define HUB_SUB_RETRY_MAX        3u      /* CCCD 写次数上限（含首发） */
+
+/* hub_sub_decide() 的返回值 */
+#define HUB_SUB_WAIT       0             /* 继续等（首帧或到期），本拍什么都不做 */
+#define HUB_SUB_RETRY      1             /* 再写一次 CCCD */
+#define HUB_SUB_CONFIRMED  2             /* 首帧到了 → 订阅确认，进 READY */
+#define HUB_SUB_FORCE      3             /* 重试用尽仍未确认 → 仍然进 READY（打 WARN） */
+
+/**
+ * 订阅状态机的**判定部分**（t59）。
+ *
+ * 为什么把这个小函数放在配置头里，而不是 hub_client.c：
+ *   写 cfm 的回调跑在协议栈线程上，它只该记录事实；判定集中在主循环里。
+ *   而 hub_client.c include SLE 协议栈头，**无法在主机上编译**，于是这段判定
+ *   也没法被逐条用例覆盖 —— 偏偏 t59 修的就是这段判定。
+ *   放在只依赖 stdint 的 hub_cfg.h 里，tools/hub-selftest.py 就能直接
+ *   #include 真源码跑用例表（与 hub_frame/hub_json 做纯 C 模块是同一个理由）。
+ *
+ * 输入全部由调用方从 hub_cli_t 取（函数本身不碰任何全局状态，所以可重复调用）：
+ *   sub_tries    已经写了几次 CCCD（含首发）
+ *   cfm_status   最近一次 write cfm 的 status；-1 = 还没有 cfm
+ *   got_frame    是否已经收到该节点的数据帧
+ *   deadline_hit 是否已经过了等首帧的窗口
+ */
+static inline int hub_sub_decide(uint8_t sub_tries, int cfm_status, int got_frame, int deadline_hit)
+{
+    if (got_frame) {
+        return HUB_SUB_CONFIRMED;        /* 首帧优先：它是唯一的可信证据 */
+    }
+    if (cfm_status == (int)HUB_CCCD_STATUS_REJECTED) {
+        /* 本机拒绝：不必等窗口，立刻重写（到上限则强制 READY） */
+        return (sub_tries < (uint8_t)HUB_SUB_RETRY_MAX) ? HUB_SUB_RETRY : HUB_SUB_FORCE;
+    }
+    /* 其余 cfm（含 0 与非 0）都不是判据：先等首帧，窗口到了再看写了几次 */
+    if (deadline_hit) {
+        return (sub_tries < (uint8_t)HUB_SUB_RETRY_MAX) ? HUB_SUB_RETRY : HUB_SUB_FORCE;
+    }
+    return HUB_SUB_WAIT;
+}
+
 /* 断开后的重连冷却：避免对端不在时把射频时间全花在重连上 */
 #define HUB_RECONNECT_COOL_MS   3000u
 

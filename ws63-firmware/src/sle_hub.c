@@ -61,6 +61,10 @@ static uint16_t g_sle_conn_hdl = 0;
  * 连接的 conn_id 就是 0x0000，用 0 当哨兵会让人以为永远没连上（spike_server.c 就因此空转）。
  * 连接状态只有一个权威来源：connect_state_changed 回调。 */
 static volatile uint8_t g_sle_connected = 0;
+/* 对端（汇聚）是否写了 CCCD 表示要订阅（t59）。
+ * 注意：这个标志**只用于日志与排查**，不影响上报 —— 节点是"连上就发通知"（契约 §2.7），
+ * 汇聚不订阅也照样收得到。它存在的意义是让现场日志能回答"汇聚到底订上没有"。 */
+static volatile uint8_t g_peer_subscribed = 0;
 /* sle server handle */
 static uint8_t g_server_id = 0;
 /* sle service handle */
@@ -160,14 +164,35 @@ static void ssaps_read_request_cbk(uint8_t server_id, uint16_t conn_id, ssaps_re
 }
 
 /* 下行入口（契约 §2.5）：汇聚往属性 0x1122 写一条 JSON 命令。
- * 这里只入队不处理 —— 处理（尤其回包）放在采样任务里做，避免在协议栈线程里再调通知接口。 */
+ * 这里只入队不处理 —— 处理（尤其回包）放在采样任务里做，避免在协议栈线程里再调通知接口。
+ *
+ * t59 的两条修正（都在这个回调里）：
+ *  1. **CCCD 写不是命令**。汇聚订阅时写的是描述符（type=SSAP_DESCRIPTOR_CLIENT_CONFIGURATION，
+ *     值 01 00），句柄与属性句柄相同。旧实现不看 type，把这两个字节当 JSON 命令塞进下行队列
+ *     （node_link_on_write 照单全收），队列里就多出一条永远解析不出来的垃圾。
+ *  2. 写请求要回响应，否则对端 API 会一直等到超时（对端确实以「写请求」语义发送）。 */
 static void ssaps_write_request_cbk(uint8_t server_id, uint16_t conn_id, ssaps_req_write_cb_t *write_cb_para,
     errcode_t status)
 {
     unused(status);
-    osal_printk("[SLE-HUB] write req conn=0x%x handle=0x%x len=%u need_rsp=%d\r\n",
-        conn_id, write_cb_para->handle, write_cb_para->length, (int)write_cb_para->need_rsp);
-    node_link_on_write(write_cb_para->value, write_cb_para->length, write_cb_para->handle);
+    if (write_cb_para->type == SSAP_DESCRIPTOR_CLIENT_CONFIGURATION) {
+        uint16_t cfg = 0;
+
+        if (write_cb_para->value != NULL && write_cb_para->length >= 2u) {
+            cfg = (uint16_t)((uint16_t)write_cb_para->value[0] |
+                             ((uint16_t)write_cb_para->value[1] << 8));
+        }
+        /* 只在状态翻转时打日志：订阅是低频事件，但冲刷日志会把轮询挤丢 */
+        if ((cfg != 0u) != (g_peer_subscribed != 0u)) {
+            g_peer_subscribed = (cfg != 0u) ? 1u : 0u;
+            osal_printk("[SLE-HUB] CCCD written by client conn=0x%x handle=0x%x cfg=0x%04x subscribed=%u\r\n",
+                conn_id, write_cb_para->handle, (unsigned)cfg, (unsigned)g_peer_subscribed);
+        }
+    } else {
+        osal_printk("[SLE-HUB] write req conn=0x%x handle=0x%x len=%u need_rsp=%d\r\n",
+            conn_id, write_cb_para->handle, write_cb_para->length, (int)write_cb_para->need_rsp);
+        node_link_on_write(write_cb_para->value, write_cb_para->length, write_cb_para->handle);
+    }
     if (write_cb_para->need_rsp) {
         /* 对端用「写请求」发令时必须回响应，否则对端 API 会一直等到超时（官方 client 就是请求语义） */
         ssaps_send_rsp_t rsp = {0};
@@ -400,6 +425,7 @@ static void sle_connect_state_changed_cbk(uint16_t conn_id, const sle_addr_t *ad
         sle_update_connect_param(&parame);
     } else if (conn_state == SLE_ACB_STATE_DISCONNECTED) {
         g_sle_connected = 0;
+        g_peer_subscribed = 0;   /* t59：订阅关系随连接一起消失，重连后要重新写 CCCD */
 #if NODE_LEGACY_SPEED_TEST
         destroy_send_data_thread();
 #endif
