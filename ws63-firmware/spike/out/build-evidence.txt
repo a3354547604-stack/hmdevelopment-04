@@ -1,7 +1,8 @@
 星闪双板冒烟固件 —— 构建与核对证据（t8）
 生成时间：2026-10-17 20:45 (+08:00)  |  机器：WSL / Docker 镜像 ws63wsl:latest
-SDK：/home/qinyixiang/ws63/fbb_ws63-master
-（本文件是命令输出的原文留存；*.log 被 .gitignore 忽略，所以原文抄在这里。）
+SDK：<SDK 路径>
+（本文件是命令输出的原文留存；*.log 被 .gitignore 忽略，所以原文抄在这里。
+  t79：下面的本机用户目录已替换为 `<SDK 路径>`，其余字节未动。）
 
 ================================================================================
 [1] 复现命令
@@ -13,7 +14,7 @@ $ python3 tools/spike-compile-check.py   # 约 0.5 秒：3 源文件 × 2 角色
 ================================================================================
 [2] bash tools/spike-build.sh all 的输出（exit 0）
 ================================================================================
-[spike-build] 已暂存生产源文件 → /home/qinyixiang/ws63/fbb_ws63-master/.spike-stash
+[spike-build] 已暂存生产源文件 → <SDK 路径>/.spike-stash
 [spike-build] 已安装冒烟源码：spike_client.c spike_server.c spike_server_adv.c
 [spike-build] ==== 编译 master（extra=''）→ 日志 ws63-firmware/spike/out/build-master.log
 [spike-build] master 角色断言通过：'[SPIKE-SRV]'×38，'SPIKE-ROLE=MASTER'×1，'SPIKE-ROLE=SLAVE'×0（必须为 0）
@@ -34,7 +35,7 @@ built_at=2026-10-17T20:45:13+08:00
 role_marker=SPIKE-ROLE=SLAVE count=1
 [spike-build] slave 产物：ws63-firmware/spike/out/SPIKE_SLAVE.fwpkg
 [spike-build] 完成。烧录与验收见 ws63-firmware/spike/施工单-双板星闪冒烟.md
-[spike-build] 已还原 /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom（生产固件源码与 CMakeLists 回到编译前状态）
+[spike-build] 已还原 <SDK 路径>/src/application/samples/custom（生产固件源码与 CMakeLists 回到编译前状态）
 
 两次编译的 SDK 收尾（build-master.log / build-slave.log 末行）：
 packet ing...
@@ -73,7 +74,7 @@ SPIKE_SLAVE.fwpkg bytes=1458664 sha256=a27ca845adf670f45e55f1a0daa2ecad908ed07ca
 [4] 生产源码是否被污染（构建脚本的还原检查）
 ================================================================================
 $ for f in radar_hub.c sensor_hub.c sle_hub.c sle_hub.h sle_hub_adv.c sle_hub_adv.h wifi_hub.c; do
-    diff -q /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom/$f ws63-firmware/src/$f; done
+    diff -q <SDK 路径>/src/application/samples/custom/$f ws63-firmware/src/$f; done
   same: radar_hub.c
   same: sensor_hub.c
   same: sle_hub.c
@@ -81,7 +82,7 @@ $ for f in radar_hub.c sensor_hub.c sle_hub.c sle_hub.h sle_hub_adv.c sle_hub_ad
   same: sle_hub_adv.c
   same: sle_hub_adv.h
   same: wifi_hub.c
-$ ls -la /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom/
+$ ls -la <SDK 路径>/src/application/samples/custom/
   CMakeLists.txt 640B · radar_hub.c · sensor_hub.c · sle_hub.c · sle_hub.h
   sle_hub_adv.c · sle_hub_adv.h · wifi_hub.c      （无任何 spike_* 残留）
 
@@ -89,7 +90,7 @@ $ ls -la /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom/
 [5] python3 tools/spike-compile-check.py 的输出（exit 0）
 ================================================================================
 模板条目：/sdk/src/application/samples/custom/spike_server.c
-SDK：/home/qinyixiang/ws63/fbb_ws63-master
+SDK：<SDK 路径>
 OK    [server] spike_client.c
 OK    [server] spike_server.c
 OK    [server] spike_server_adv.c

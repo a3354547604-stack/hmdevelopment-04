@@ -15,6 +15,18 @@ OUT="${1:-$REPO/deliverables/01-HAP构建日志.txt}"
 PROBE_FILE="$REPO/entry/src/main/ets/pages/HomePage.ets"
 PROBE_ANCHOR="const POLL_INTERVAL_MS: number = 10 * LiteralConstants.MS_PER_SECOND;"
 
+# ── hvigor 配置物化（t79）───────────────────────────────────────────────────────
+# hvigor-config.json5 里那两条 file: 依赖指向**本机工具链绝对路径**，写进公开仓库会带上
+# 本机家目录（真实用户名）。仓库只存模板，这里在调 hvigorw 之前物化成 hvigor-config.json5。
+# 为什么要这一步：hvigor 自己不做 ${VAR} 展开（已核对工具链 bin/hvigorw.js 无变量替换逻辑，
+# file: 依赖原样交给 npm/pnpm install），所以模板里用 @TOOLCHAIN@ 占位、由本脚本替换。
+HVIGOR_CFG="$REPO/hvigor/hvigor-config.json5"
+HVIGOR_TPL="$REPO/hvigor/hvigor-config.template.json5"
+if grep -q '@TOOLCHAIN@' "$HVIGOR_CFG" 2>/dev/null || [ ! -f "$HVIGOR_CFG" ]; then
+  sed "s|@TOOLCHAIN@|$HOME/harmony-toolchain|g" "$HVIGOR_TPL" > "$HVIGOR_CFG" \
+    && echo "[setup] 已由模板物化 hvigor-config.json5（工具链：$HOME/harmony-toolchain）"
+fi
+
 source "$HOME/harmony-toolchain/env.sh" >/dev/null 2>&1
 # 工具链的 SDK 是扁平布局，hvigor 期望 sdk/<apiVersion>/<component>（见 ~/harmony-toolchain/BUILD-NOTES.md 坑 ③）
 export OHOS_BASE_SDK_HOME="$HOME/harmony-toolchain/clt/command-line-tools/sdk"

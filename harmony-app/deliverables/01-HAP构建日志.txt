@@ -47,7 +47,7 @@ SDK：12 default
 ==============================================================
 产物
 ==============================================================
--rwxrwxrwx 1 qinyixiang qinyixiang 971362 Oct 18 11:45 entry/build/default/outputs/default/entry-default-unsigned.hap
+-rwxrwxrwx 1 <user> <user> 971362 Oct 18 11:45 entry/build/default/outputs/default/entry-default-unsigned.hap
 
 说明：本机无 hdc 设备、CLT 内无模拟器、/dev/kvm 不可写，
       因此只做到「编译产 HAP」；安装/上架/真机运行标注为「待用户实测」。

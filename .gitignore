@@ -15,6 +15,8 @@ __pycache__/
 .agent-teams/
 
 # WS63 固件产物与上板日志（ws63-firmware/ 此前没有 .gitignore）
+# t79：规则本身早就覆盖 ws63-firmware/out/，但 18 个条目在规则加进来之前就已被跟踪，
+#      已用 `git rm --cached` 出库（文件留在磁盘；详见提交信息）
 *.fwpkg
 *.img
 ws63-firmware/out/
@@ -38,3 +40,17 @@ ws63-firmware/flasher/*.exe
 
 # 第三方厂商手册（版权归原厂；留磁盘供开发参考，不进仓库）
 docs/雷达LD6002C/*.pdf
+
+# ── t79 仓库卫生（2026-10-18）─────────────────────────────────────
+# ① hvigor 配置含**本机绝对路径**（本地工具链位置），是"每台机器生成一次"的配置、不是源码：
+#    仓库只存模板 harmony-app/hvigor/hvigor-config.template.json5，
+#    由 harmony-app/tools/build-hap.sh 在构建前物化成本文件
+#    （hvigor 自己不做 ${VAR} 展开——已核对工具链 bin/hvigorw.js 无变量替换逻辑，
+#      file: 依赖由 npm/pnpm install 原样消费，所以模板里用 @TOOLCHAIN@ 占位）
+harmony-app/hvigor/hvigor-config.json5
+
+# ② 主办方通知与原文：含主办方联系人手机号/座机/邮箱、单位与人名（第三方个人信息），
+#    留磁盘供查证、不入库（`docs/赛事资料/` 下的 .md 是内部材料清单，照旧入库）
+docs/赛事资料/*.pdf
+docs/赛事资料/notice.md
+docs/赛事资料/training.md

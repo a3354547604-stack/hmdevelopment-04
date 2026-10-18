@@ -1,7 +1,0 @@
-target=m2
-extra_build_args=-def=NODE_ROLE=2
-sources= node_main.c node_json.c node_link.c node_sensor_radar.c radar_hub.c sle_hub.c sle_hub_adv.c
-bytes=1468072
-sha256=d8324b9f8bf1b4654658009ee56c0b9e5115c5163c1136546cc9736028d8a005
-built_at=2026-10-18T20:08:08+08:00
-role_marker=EC-NODE-ROLE=M2 type=fall count=1

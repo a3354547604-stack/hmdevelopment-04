@@ -1,0 +1,37 @@
+/**
+ * hvigor 运行时配置 —— **模板**（仓库里只存这一份；hvigor-config.json5 是每台机器生成的，不入库）
+ *
+ * ⚠️ 位置敏感：生成物必须落在 `<工程>/hvigor/hvigor-config.json5`；放工程根目录不生效，
+ *    会报 `Hvigor config file .../hvigor/hvigor-config.json5 does not exist.`
+ *
+ * ⚠️ 依赖指向**本地命令行工具链**（file: 绝对路径）而不是 npm 源：
+ *    本机 npm 源慢且易失败，且拉公网插件会污染锁文件。
+ *
+ * ⚠️ 为什么用 @TOOLCHAIN@ 占位而不是直接写路径（t79）：
+ *    ① 写死绝对路径会把本机家目录（含真实用户名）带进公开仓库；
+ *    ② hvigor **不做 `${VAR}` 展开**——已核对工具链 `bin/hvigorw.js`：没有任何变量替换逻辑，
+ *       这两条 `file:` 依赖是被原样交给 npm/pnpm install 的，写 `${HOME}` 只会解析失败；
+ *    ③ 所以改成"模板 + 构建前物化"：`bash harmony-app/tools/build-hap.sh` 会在调 hvigorw 之前
+ *       把本文件里的 `@TOOLCHAIN@` 替换成 `$HOME/harmony-toolchain` 写到 hvigor-config.json5。
+ *
+ * 手工物化（不想跑完整构建时，一行即可；tools/build-hap.sh 里的就是这条）：
+ *   sed "s|@TOOLCHAIN@|$HOME/harmony-toolchain|g" \
+ *     harmony-app/hvigor/hvigor-config.template.json5 > harmony-app/hvigor/hvigor-config.json5
+ */
+{
+  "modelVersion": "5.0.0",
+  "dependencies": {
+    "@ohos/hvigor-ohos-plugin": "file:@TOOLCHAIN@/clt/command-line-tools/hvigor/hvigor-ohos-plugin",
+    "@ohos/hvigor": "file:@TOOLCHAIN@/clt/command-line-tools/hvigor/hvigor"
+  },
+  "execution": {},
+  "logging": {
+    "level": "info"
+  },
+  "debugging": {
+    "stacktrace": false
+  },
+  "nodeOptions": {
+    "maxOldSpaceSize": 8192
+  }
+}

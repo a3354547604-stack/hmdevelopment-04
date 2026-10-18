@@ -1,7 +1,0 @@
-target=hub
-extra_build_args=-def=HUB_MOCK=0
-sources= hub_main.c hub_client.c hub_agg.c hub_frame.c hub_json.c hub_glink.c hub_adv.c
-bytes=1473640
-sha256=6dd5272173bbe6413e35b817f889b398105dc1623ae4cef9eee22e7be7cfd66f
-built_at=2026-10-18T20:22:23+08:00
-role_marker=HUB-ROLE=CENTRAL sn=H1 fw=0.1.0 mock=0 count=1
