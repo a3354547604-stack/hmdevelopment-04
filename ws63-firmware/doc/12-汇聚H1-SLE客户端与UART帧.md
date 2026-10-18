@@ -565,10 +565,15 @@ t60 的 F-01 教训：验收③用过一条"板 B 是 t23 旧镜像"的日志。
 必须同时给出每块板的（体积 + sha256 + 代码提交号 + 台架开关状态）**——sha256 只作当次
 变化检测（`.fwpkg` 可复现，但基线随源码变），提交号才是可追溯的口径：
 
-| 板 | 端口 | 镜像 | 体积 | sha256(当次) | 源码提交号 | 台架开关 |
+| 板 | 端口 | 镜像 | 体积 | sha256（当次） | 源码提交号 | 台架开关 |
 |---|---|---|---|---|---|---|
-| A 汇聚 | COM15 | `/tmp/t85-hub-prebind.fwpkg` | 见 §13.7 | 见 §13.7 | `8e9719b` + 本卡工作树 | `HUB_TEST_PREBIND_ON=1, SN="M1"` |
-| B 节点 | COM14 | `ws63-firmware/out/NODE_M1.fwpkg` | 见 §13.7 | 见 §13.7 | `8e9719b` | 无 |
+| A 汇聚 | COM15 | `out/HUB_HUB.fwpkg`（钩子 ON=M1） | 1473832 B | `4a2dc175…5c55` | `8e9719b`（t76 当次构建） | `HUB_TEST_PREBIND_ON=1, SN="M1"` |
+| B 节点 | COM14 | `out/NODE_M1.fwpkg` | 1468136 B | `941316694f37…c38415` | `41fc446`（t55，节点源码其后未变；为 `8e9719b` 的祖先） | 无 |
+| A 汇聚 | COM15 | `/tmp/t85-hub-prebind.fwpkg`（**t85 本轮待烧**） | 1474344 B | `bc370b489b99…d3341d3` | `caa8c01` + 本卡工作树 | `HUB_TEST_PREBIND_ON=1, SN="M1"` |
+| A 汇聚 | COM15 | `out/HUB_HUB.fwpkg`（**交付口径，钩子 OFF**） | 1474152 B | `6abfcbe54f00…9471c02f` | `caa8c01` | `OFF` |
+
+（`41fc446` 是 `8e9719b` 的祖先，已用 `git merge-base --is-ancestor` 核过；sha256 一律只作
+当次变化检测，**可追溯的主口径是体积 + 提交号 + 台架开关**。）
 
 交付镜像必须钩子 **OFF**（`ws63-firmware/out/HUB_HUB.fwpkg`，见 §13.7）——两镜像只差
 `HUB_TEST_PREBIND_ON/SN` 两个宏。
