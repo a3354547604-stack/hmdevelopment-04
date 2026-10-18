@@ -282,7 +282,7 @@ $ curl -s http://127.0.0.1:3000/api/devices -H 'Authorization: Bearer $TOKEN'
 #### 7 绑定设备（HTTP 201）
 
 ```bash
-$ curl -s -X POST http://127.0.0.1:3000/api/devices/bind -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJkZW1vXzE3OTIyNDYxNzQiLCJpYXQiOjE3OTIyNDYxNzQsImV4cCI6MTc5Mjg1MDk3NH0.gjNhkfdDfo22H5NLNJefmNfdG1RQxyIq07adTuqsUbM' -d '{"sn":"M0-9C2D4E","bind_code":"923383"}'
+$ curl -s -X POST http://127.0.0.1:3000/api/devices/bind -H 'Content-Type: application/json' -H 'Authorization: Bearer <DEV_JWT>' -d '{"sn":"M0-9C2D4E","bind_code":"923383"}'
 ```
 
 ```json
