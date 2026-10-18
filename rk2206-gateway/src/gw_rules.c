@@ -9,7 +9,8 @@
 #include "gw_rules.h"
 #include <string.h>
 #include <stdio.h>
-#include "gw_proto.h"   /* GW_RC_OK / GW_RC_RANGE：结果码只在这一处定义 */
+#include "gw_proto.h"   /* GW_RC_OK / GW_RC_RANGE / GW_RC_UNSUPPORTED */
+#include <stddef.h>     /* offsetof：键 → gw_settings_t 字段的落值表 */
 
 /* ============================== 燃气（§8.2） ============================== */
 void gw_gas_init(gw_gas_state_t *g)
@@ -259,11 +260,24 @@ void gw_dedup_init(gw_dedup_table_t *t)
 {
     if (t == NULL) { return; }
     memset(t, 0, sizeof(*t));
+    t->other_ms = 60u * 1000u;      /* §8.8 默认（= alert_suppress_s 默认 60 s） */
+    t->fall_ms  = 30u * 1000u;      /* §8.8 默认（= fall_suppress_s 默认 30 s） */
 }
 
-static uint32_t dedup_window_ms(const char *type)
+void gw_dedup_set_windows(gw_dedup_table_t *t, uint32_t other_ms, uint32_t fall_ms)
 {
-    return (strcmp(type, "fall") == 0) ? 30u * 1000u : 60u * 1000u;
+    if (t == NULL) { return; }
+    if (other_ms > 0u) { t->other_ms = other_ms; }
+    if (fall_ms > 0u)  { t->fall_ms = fall_ms; }
+}
+
+/* 窗口取"建条时写进条目的值"，没有则用表上的当前设置。
+ * 已活跃条目保留自己开启时的窗口：一次 set_threshold 不应该让正在告警的条立刻过期。 */
+static uint32_t dedup_window_ms(const gw_dedup_table_t *t, const char *type)
+{
+    uint32_t other = (t != NULL && t->other_ms > 0u) ? t->other_ms : (60u * 1000u);
+    uint32_t fall  = (t != NULL && t->fall_ms > 0u) ? t->fall_ms : (30u * 1000u);
+    return (strcmp(type, "fall") == 0) ? fall : other;
 }
 
 gw_dedup_result_t gw_dedup_feed(gw_dedup_table_t *t, uint64_t now_ms,
@@ -283,7 +297,7 @@ gw_dedup_result_t gw_dedup_feed(gw_dedup_table_t *t, uint64_t now_ms,
             continue;
         }
         /* 窗口过期即视为可复用：去重表不是历史库，过期就等于空位 */
-        uint32_t win = e->window_ms ? e->window_ms : dedup_window_ms(e->type);
+        uint32_t win = e->window_ms ? e->window_ms : dedup_window_ms(t, e->type);
         if ((now_ms - e->window_start_ms) >= win) {
             if (free_slot == 8u) { free_slot = i; }
             continue;
@@ -314,7 +328,7 @@ gw_dedup_result_t gw_dedup_feed(gw_dedup_table_t *t, uint64_t now_ms,
         strncpy(e->type, type, sizeof(e->type) - 1u);
         e->level = level;
         e->window_start_ms = now_ms;
-        e->window_ms = dedup_window_ms(type);
+        e->window_ms = dedup_window_ms(t, type);
         e->active = 1;
         if (t->count < 8u) { t->count++; }
     }
@@ -426,4 +440,226 @@ uint32_t gw_threshold_describe(const gw_th_spec_t *spec, char *out, uint32_t cap
                      spec->p0_effective ? "" : " (P1:写入不生效但不报错)");
     }
     return (n > 0 && (uint32_t)n < cap) ? (uint32_t)n : 0u;
+}
+
+/* ============= 阈值下发落地（契约 §4.5 set_threshold → §8 生效） ============= */
+/* 键盘表 s_th_specs 已经是"21 键 + 类型 + 范围"的唯一来源，这一段只补两件事：
+ *   ① 每个键"当前生效值"存放处（gw_settings_t），默认值逐条对齐契约 §6.9 items 示例；
+ *   ② 把值推给真正消费它的状态机（gw_settings_sync）。
+ * 校验一律复用 gw_threshold_check_scalar/check_array，不另写一份范围判断——
+ * 两份判断迟早会不一致，而"App 放行、网关回 2"是最难查的一类不一致（§4.5 的原话）。 */
+
+void gw_settings_init(gw_settings_t *s)
+{
+    if (s == NULL) { return; }
+    memset(s, 0, sizeof(*s));
+
+    s->no_motion_min             = 30u;     /* 以下默认值逐条对齐契约 §6.9 items 示例 */
+    s->presence_hold_s           = 60u;
+    s->gas_t1_mv                 = 1500u;
+    s->gas_t2_mv                 = 2500u;
+    s->gas_recover_mv            = 200u;
+    s->gas_l1_hold_s             = 10u;
+    s->gas_l2_hold_s             = 6u;
+    s->gas_recover_hold_s        = 30u;
+    s->away_after_open_s         = 600u;
+    s->door_open_alarm_s         = 180u;
+    s->report_interval_s         = 60u;
+    s->node_offline_timeout_s    = 9u;
+    s->gateway_offline_timeout_s = 180u;
+    s->temp_high_c               = 35.0;
+    s->temp_low_c                = 5.0;
+    s->humi_high_pct             = 85.0;
+    s->humi_low_pct              = 20.0;
+    s->env_hold_min              = 30u;
+    s->alert_repush_n            = 3;
+    s->alert_repush_s[0]         = 0u;
+    s->alert_repush_s[1]         = 60u;
+    s->alert_repush_s[2]         = 300u;
+    s->alert_suppress_s          = 60u;
+    s->fall_suppress_s           = 30u;
+    s->applied_mask              = 0u;
+}
+
+uint32_t gw_threshold_key_count(void)
+{
+    return (uint32_t)(sizeof(s_th_specs) / sizeof(s_th_specs[0]));
+}
+
+const char *gw_threshold_key_at(uint32_t idx)
+{
+    return (idx < gw_threshold_key_count()) ? s_th_specs[idx].key : NULL;
+}
+
+/* 键 → gw_settings_t 里的存放位置。用 offsetof 而不是一长串 strcmp：
+ * 这样"表里有键、却忘了加落值分支"能被主机自测一次性查出来（见 gw_selftest 的
+ * test_set_threshold：枚举 21 键逐个下发，任何键没落值都会失败），
+ * 而手写分支最容易在加键时漏掉一个，运行时表现为"合法值也回 result=1"。 */
+typedef struct {
+    const char *key;
+    uint8_t     is_float;
+    uint16_t    off;
+} th_dst_t;
+
+static const th_dst_t s_th_dst[] = {
+    { "no_motion_min",             0, (uint16_t)offsetof(gw_settings_t, no_motion_min) },
+    { "presence_hold_s",           0, (uint16_t)offsetof(gw_settings_t, presence_hold_s) },
+    { "gas_t1_mv",                 0, (uint16_t)offsetof(gw_settings_t, gas_t1_mv) },
+    { "gas_t2_mv",                 0, (uint16_t)offsetof(gw_settings_t, gas_t2_mv) },
+    { "gas_recover_mv",            0, (uint16_t)offsetof(gw_settings_t, gas_recover_mv) },
+    { "gas_l1_hold_s",             0, (uint16_t)offsetof(gw_settings_t, gas_l1_hold_s) },
+    { "gas_l2_hold_s",             0, (uint16_t)offsetof(gw_settings_t, gas_l2_hold_s) },
+    { "gas_recover_hold_s",        0, (uint16_t)offsetof(gw_settings_t, gas_recover_hold_s) },
+    { "away_after_open_s",         0, (uint16_t)offsetof(gw_settings_t, away_after_open_s) },
+    { "door_open_alarm_s",         0, (uint16_t)offsetof(gw_settings_t, door_open_alarm_s) },
+    { "report_interval_s",         0, (uint16_t)offsetof(gw_settings_t, report_interval_s) },
+    { "node_offline_timeout_s",    0, (uint16_t)offsetof(gw_settings_t, node_offline_timeout_s) },
+    { "gateway_offline_timeout_s", 0, (uint16_t)offsetof(gw_settings_t, gateway_offline_timeout_s) },
+    { "temp_high_c",               1, (uint16_t)offsetof(gw_settings_t, temp_high_c) },
+    { "temp_low_c",                1, (uint16_t)offsetof(gw_settings_t, temp_low_c) },
+    { "humi_high_pct",             1, (uint16_t)offsetof(gw_settings_t, humi_high_pct) },
+    { "humi_low_pct",              1, (uint16_t)offsetof(gw_settings_t, humi_low_pct) },
+    { "env_hold_min",              0, (uint16_t)offsetof(gw_settings_t, env_hold_min) },
+    { "alert_suppress_s",          0, (uint16_t)offsetof(gw_settings_t, alert_suppress_s) },
+    { "fall_suppress_s",           0, (uint16_t)offsetof(gw_settings_t, fall_suppress_s) },
+    /* alert_repush_s（整型数组）不在本表：它落的是 s->alert_repush_s[]/alert_repush_n，
+     * 不是单个标量字段。21 键 = 20 行标量 + 1 个数组键。 */
+};
+
+static const th_dst_t *th_dst_of(const char *key)
+{
+    uint32_t i;
+    for (i = 0; i < sizeof(s_th_dst) / sizeof(s_th_dst[0]); i++) {
+        if (strcmp(s_th_dst[i].key, key) == 0) { return &s_th_dst[i]; }
+    }
+    return NULL;
+}
+
+/* 值 → JSON 字面量。整数键走 %ld：契约 §3.7 的实测帧要求 "value":30（不是 30.0），
+ * 差一个 ".0" 整条帧的 CRC 就对不上那份可做硬断言的字节向量了。 */
+static uint32_t th_value_json(const gw_th_spec_t *spec, const gw_th_value_t *v,
+                              char *out, uint32_t cap)
+{
+    int m;
+    int i;
+    uint32_t n = 0u;
+
+    if (spec == NULL || v == NULL || out == NULL || cap == 0u) { return 0u; }
+
+    if (spec->kind == GW_TH_INT_ARRAY) {
+        if (!v->is_array || v->n <= 0) { return 0u; }
+        m = snprintf(out, cap, "[");
+        if (m <= 0 || (uint32_t)m >= cap) { return 0u; }
+        n = (uint32_t)m;
+        for (i = 0; i < v->n; i++) {
+            m = snprintf(out + n, cap - n, "%s%ld", (i == 0) ? "" : ",", (long)v->elems[i]);
+            if (m <= 0 || (uint32_t)m >= cap - n) { return 0u; }
+            n += (uint32_t)m;
+        }
+        m = snprintf(out + n, cap - n, "]");
+        if (m <= 0 || (uint32_t)m >= cap - n) { return 0u; }
+        return n + (uint32_t)m;
+    }
+
+    if (v->is_array) { return 0u; }
+
+    if (spec->kind == GW_TH_INT) {
+        m = snprintf(out, cap, "%ld", (long)v->scalar);
+    } else {
+        m = snprintf(out, cap, "%.4g", v->scalar);
+    }
+    return (m > 0 && (uint32_t)m < cap) ? (uint32_t)m : 0u;
+}
+
+static void th_note_applied(gw_settings_t *s, const gw_th_spec_t *spec)
+{
+    uint32_t i;
+    for (i = 0; i < gw_threshold_key_count(); i++) {
+        if (&s_th_specs[i] == spec) { s->applied_mask |= (1u << i); return; }
+    }
+}
+
+int gw_threshold_apply(gw_settings_t *s, const char *key, const gw_th_value_t *v,
+                       char *echo, uint32_t echo_cap)
+{
+    const gw_th_spec_t *spec;
+    const th_dst_t *dst;
+    int rc;
+    char val[48];
+    int m;
+
+    if (s == NULL || v == NULL || key == NULL) { return GW_RC_RANGE; }
+
+    spec = gw_threshold_spec(key);
+    if (spec == NULL) { return GW_RC_UNSUPPORTED; }     /* §4.5：未知键 → result_code=1 */
+
+    if (spec->kind == GW_TH_INT_ARRAY) {
+        int i;
+        if (!v->is_array) { return GW_RC_RANGE; }       /* 类型不符按 §4.5 归入"参数越界"=2 */
+        rc = gw_threshold_check_array(spec, v->elems, v->n);
+        if (rc != GW_RC_OK) { return rc; }
+        if (v->n > (int)(sizeof(s->alert_repush_s) / sizeof(s->alert_repush_s[0]))) { return GW_RC_RANGE; }
+        for (i = 0; i < v->n; i++) { s->alert_repush_s[i] = (uint32_t)v->elems[i]; }
+        s->alert_repush_n = v->n;
+    } else {
+        if (v->is_array) { return GW_RC_RANGE; }
+        /* 整数键不收小数：节点侧按 int 解析会静默取整，那比现在报错更难查 */
+        if (spec->kind == GW_TH_INT && v->scalar != (double)(long)v->scalar) { return GW_RC_RANGE; }
+        rc = gw_threshold_check_scalar(spec, v->scalar);
+        if (rc != GW_RC_OK) { return rc; }
+        dst = th_dst_of(spec->key);
+        if (dst == NULL) { return GW_RC_UNSUPPORTED; }  /* 表里有键但没落值分支：宁可报错也不要静默成功 */
+        if (dst->is_float) {
+            *(double *)(void *)((char *)s + dst->off) = v->scalar;
+        } else {
+            if (v->scalar < 0.0) { return GW_RC_RANGE; }
+            *(uint32_t *)(void *)((char *)s + dst->off) = (uint32_t)v->scalar;
+        }
+    }
+
+    th_note_applied(s, spec);
+
+    if (echo != NULL && echo_cap > 0u) {
+        if (th_value_json(spec, v, val, sizeof(val)) == 0u) { echo[0] = '\0'; return GW_RC_RANGE; }
+        m = snprintf(echo, echo_cap, "{\"result\":\"ok\",\"key\":\"%s\",\"value\":%s}", spec->key, val);
+        if (m <= 0 || (uint32_t)m >= echo_cap) { echo[0] = '\0'; }
+    }
+    return GW_RC_OK;
+}
+
+uint32_t gw_threshold_cmd_payload(const char *key, const gw_th_value_t *v, char *out, uint32_t cap)
+{
+    const gw_th_spec_t *spec = gw_threshold_spec(key);
+    char val[48];
+    int m;
+
+    if (spec == NULL || v == NULL || out == NULL || cap == 0u) { return 0u; }
+    if (th_value_json(spec, v, val, sizeof(val)) == 0u) { return 0u; }
+    m = snprintf(out, cap, "{\"cmd\":\"set_threshold\",\"key\":\"%s\",\"value\":%s}", spec->key, val);
+    return (m > 0 && (uint32_t)m < cap) ? (uint32_t)m : 0u;
+}
+
+void gw_settings_sync(const gw_settings_t *s, gw_gas_state_t *gas,
+                      gw_motion_state_t *motion, gw_dedup_table_t *dedup)
+{
+    if (s == NULL) { return; }
+
+    if (gas != NULL) {
+        /* 范围已由 gw_threshold_check_scalar 限在 0..5000，不会截断 */
+        gas->t1_mv           = (uint16_t)s->gas_t1_mv;
+        gas->t2_mv           = (uint16_t)s->gas_t2_mv;
+        gas->recover_mv      = (uint16_t)s->gas_recover_mv;
+        gas->l1_hold_ms      = s->gas_l1_hold_s * 1000u;
+        gas->l2_hold_ms      = s->gas_l2_hold_s * 1000u;
+        gas->recover_hold_ms = s->gas_recover_hold_s * 1000u;
+    }
+    if (motion != NULL) {
+        gw_motion_set_no_motion_ms(motion, s->no_motion_min * 60u * 1000u);
+        if (s->away_after_open_s > 0u) {
+            motion->away_after_open_ms = s->away_after_open_s * 1000u;
+        }
+    }
+    if (dedup != NULL) {
+        gw_dedup_set_windows(dedup, s->alert_suppress_s * 1000u, s->fall_suppress_s * 1000u);
+    }
 }

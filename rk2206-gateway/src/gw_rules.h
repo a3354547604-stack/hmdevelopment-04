@@ -120,6 +120,8 @@ typedef enum {
 typedef struct {
     gw_dedup_t entries[8];      /* P0 三节点 × 少数类型，8 条够用；溢出时按最旧复用 */
     uint32_t   count;
+    uint32_t   other_ms;        /* §8.8 非跌倒窗口 = alert_suppress_s（默认 60 s） */
+    uint32_t   fall_ms;         /* §8.8 跌倒窗口  = fall_suppress_s（默认 30 s） */
 } gw_dedup_table_t;
 
 void             gw_dedup_init(gw_dedup_table_t *t);
@@ -161,5 +163,66 @@ int gw_threshold_check_scalar(const gw_th_spec_t *spec, double v);
 int gw_threshold_check_array(const gw_th_spec_t *spec, const double *v, int n);
 /* 变更日志/施工单自检用：格式化成一行 "key=value 范围[lo,hi] 来源=契约/结构" */
 uint32_t gw_threshold_describe(const gw_th_spec_t *spec, char *out, uint32_t cap);
+
+/* 键表遍历（主机自测用："21 键逐条下发都必须成功"这条断言需要能枚举键） */
+uint32_t    gw_threshold_key_count(void);
+const char *gw_threshold_key_at(uint32_t idx);
+
+/* --------------- 阈值下发落地（契约 §4.5 set_threshold → §8 生效） --------------- */
+/* 为什么值类型/范围判定放在这一层，而不是 gw_main.c 的 on_cmd()：
+ * 21 个键的类型与范围必须与 App（§6.9 items）、网关（§4.5 result_code）、节点（§2.5）
+ * 三处口径一致，而 gw_main.c 只能在板子上跑；放在这里，主机自测能穷举全部键。
+ * gw_main.c 只负责 cJSON → gw_th_value_t 的搬运与 0x11 收发。 */
+typedef struct {
+    uint8_t is_array;           /* 0=标量键，1=整型数组键（alert_repush_s） */
+    double  scalar;
+    double  elems[8];           /* §8.8：最多 3 个元素，表里 elem_max=3 */
+    int     n;
+} gw_th_value_t;
+
+/* 21 键的当前生效值。**默认值逐个对齐契约 §6.9 items 示例**（不是随口给的）：
+ * 网关重启后即使没有任何下发，本地规则也必须按契约默认值跑。 */
+typedef struct {
+    uint32_t no_motion_min;             /* §8.5 默认 30 */
+    uint32_t presence_hold_s;           /* §8.5 默认 60；P1 键：写入不生效但不得报错 */
+    uint32_t gas_t1_mv, gas_t2_mv, gas_recover_mv;                  /* §8.2 1500/2500/200 */
+    uint32_t gas_l1_hold_s, gas_l2_hold_s, gas_recover_hold_s;      /* §8.2 10/6/30 */
+    uint32_t away_after_open_s;         /* §8.5 默认 600 */
+    uint32_t door_open_alarm_s;         /* §8.6 默认 180 */
+    uint32_t report_interval_s;         /* §4.2 默认 60 */
+    uint32_t node_offline_timeout_s;    /* §8.7 默认 9（汇聚侧判定） */
+    uint32_t gateway_offline_timeout_s; /* §8.7 默认 180（服务器侧判定） */
+    double   temp_high_c, temp_low_c;   /* §8.3 35.0 / 5.0 */
+    double   humi_high_pct, humi_low_pct; /* §8.3 85.0 / 20.0 */
+    uint32_t env_hold_min;              /* §8.3 默认 30 */
+    uint32_t alert_repush_s[8];         /* §8.8 默认 [0,60,300] */
+    int      alert_repush_n;
+    uint32_t alert_suppress_s;          /* §8.8 默认 60（去重窗：非跌倒） */
+    uint32_t fall_suppress_s;           /* §8.8 默认 30（去重窗：跌倒） */
+    uint32_t applied_mask;              /* 第 i 位 = 键表第 i 个键被成功下发过 */
+} gw_settings_t;
+
+void gw_settings_init(gw_settings_t *s);
+
+/* 校验 + 落值。返回 GW_RC_OK / GW_RC_RANGE / GW_RC_UNSUPPORTED（= §4.5 的 result_code 0/2/1）。
+ * echo 非空时写入成功响应 paras：{"result":"ok","key":"...","value":<值>}（§4.5）。 */
+int gw_threshold_apply(gw_settings_t *s, const char *key, const gw_th_value_t *v,
+                       char *echo, uint32_t echo_cap);
+
+/* 拼 §3.4 的 0x11 下行 PAYLOAD：
+ *   {"cmd":"set_threshold","key":"<key>","value":<值>}
+ * 与契约 §3.7 的实测帧 SEQ=5 逐字节一致（no_motion_min=30 → 56 B）。返回字节数，0=失败。 */
+uint32_t gw_threshold_cmd_payload(const char *key, const gw_th_value_t *v, char *out, uint32_t cap);
+
+/* 把 settings 推给有消费方的状态机（幂等，可重复调用）：
+ *   燃气 t1/t2/recover/hold → gas；no_motion_min/away_after_open_s → motion；
+ *   fall_suppress_s/alert_suppress_s → 去重窗（§8.8：跌倒 30 s、其余 60 s）。
+ * 只落库不生效的键（温湿度阈值、门长开、离线超时、推送节奏、P1 键）见配网实现说明的偏差表。 */
+void gw_settings_sync(const gw_settings_t *s, gw_gas_state_t *gas,
+                      gw_motion_state_t *motion, gw_dedup_table_t *dedup);
+
+/* §8.8 去重窗口可配：改窗只影响此后新建的告警条（已活跃条保留开启时的窗口，
+ * 否则一次下发会把正在告警的条立刻置为过期，App 上会出现"告警凭空消失"）。 */
+void gw_dedup_set_windows(gw_dedup_table_t *t, uint32_t other_ms, uint32_t fall_ms);
 
 #endif /* GW_RULES_H */

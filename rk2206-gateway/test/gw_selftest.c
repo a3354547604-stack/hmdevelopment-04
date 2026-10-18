@@ -996,11 +996,279 @@ static void test_433_and_ring(void)
 
 /* ============================== main ============================== */
 
+/* ================= 12. §4.5 set_threshold（阈值下发） ================= */
+/* 期望值来源：§4.5 的 result_code 码表（0/1/2/7）、§6.9 items 的 21 键与默认值、
+ * §8 各参数表的范围、§8.8 的去重窗（跌倒 30 s / 其余 60 s）、§3.7 SEQ=5 的实测 payload。
+ * on_cmd() 本身在 gw_main.c（要板子），所以这里测的是它调用到的全部判定逻辑。 */
+
+static const gw_contract_frame_t *find_frame(const char *needle)
+{
+    int i;
+    for (i = 0; i < GW_CONTRACT_FRAME_COUNT; i++) {
+        if (strstr(k_contract_frames[i].name, needle) != NULL) { return &k_contract_frames[i]; }
+    }
+    return NULL;
+}
+
+static void test_set_threshold(void)
+{
+    gw_settings_t     st;
+    gw_gas_state_t    gas;
+    gw_motion_state_t motion;
+    gw_dedup_table_t  dedup;
+    gw_th_value_t     v;
+    char echo[192];
+    char payload[160];
+    char msg[256];
+    char desc[96];
+    uint32_t i;
+    int rc;
+
+    t_start("§4.5 set_threshold：21 键校验 / 0x11 payload / 本地规则生效");
+
+    gw_settings_init(&st);
+    t_ok(st.gas_t1_mv == 1500u && st.gas_t2_mv == 2500u && st.no_motion_min == 30u &&
+         st.alert_repush_n == 3 && st.alert_repush_s[0] == 0u && st.alert_repush_s[1] == 60u &&
+         st.alert_repush_s[2] == 300u && st.fall_suppress_s == 30u && st.alert_suppress_s == 60u &&
+         st.node_offline_timeout_s == 9u && st.report_interval_s == 60u && st.temp_high_c == 35.0,
+         "默认值逐条对齐契约 §6.9 items（1500/2500/30/[0,60,300]/30/60/9/60/35.0）");
+    t_ok(gw_threshold_key_count() == 21u, "键表恰好 21 个键（§6.9 items）");
+
+    /* ① 21 键逐个下发合法值：任何键"表里有、落值没分支"都会在这里暴露 */
+    {
+        int all_ok = 0;
+        int echoed = 0;
+        int described = 0;
+        uint32_t bit_set = 0;
+
+        for (i = 0; i < gw_threshold_key_count(); i++) {
+            const char *key = gw_threshold_key_at(i);
+            const gw_th_spec_t *spec = gw_threshold_spec(key);
+
+            if (spec == NULL) {   /* 键表枚举与查表不一致：让断言失败，别让自测段错误 */
+                t_ok(0, "gw_threshold_key_at 给出的键必须能被 gw_threshold_spec 查到");
+                continue;
+            }
+            memset(&v, 0, sizeof(v));
+            if (spec->kind == GW_TH_INT_ARRAY) {
+                v.is_array = 1u;
+                v.n = 2;
+                v.elems[0] = 0.0;
+                v.elems[1] = 60.0;
+            } else if (spec->kind == GW_TH_FLOAT) {
+                v.scalar = (spec->lo + spec->hi) / 2.0;
+            } else {
+                v.scalar = (double)(long)((spec->lo + spec->hi) / 2.0);
+            }
+
+            echo[0] = '\0';
+            desc[0] = '\0';
+            rc = gw_threshold_apply(&st, key, &v, echo, sizeof(echo));
+            if (rc == GW_RC_OK) {
+                all_ok++;
+            } else {
+                printf("     键 %s 合法值被拒 rc=%d\n", key, rc);
+            }
+            if (strstr(echo, "\"result\":\"ok\"") != NULL &&
+                strstr(echo, key) != NULL && strstr(echo, "\"value\":") != NULL) {
+                echoed++;
+            }
+            if (gw_threshold_describe(spec, desc, sizeof(desc)) > 0u) { described++; }
+            if ((st.applied_mask & (1u << i)) != 0u) { bit_set++; }
+        }
+        snprintf(msg, sizeof(msg), "21 键逐个下发合法值都回 result_code=0（%d/21）", all_ok);
+        t_ok(all_ok == 21, msg);
+        snprintf(msg, sizeof(msg), "21 键的成功响应都含 result/key/value（%d/21）", echoed);
+        t_ok(echoed == 21, msg);
+        snprintf(msg, sizeof(msg), "21 键都能被 gw_threshold_describe 格式化（%d/21）", described);
+        t_ok(described == 21, msg);
+        snprintf(msg, sizeof(msg), "applied_mask 记录全部下发过的键（%u/21）", (unsigned)bit_set);
+        t_ok(bit_set == 21u, msg);
+    }
+
+    /* ② 未知键 → §4.5 result_code=1 */
+    memset(&v, 0, sizeof(v));
+    v.scalar = 30.0;
+    t_ok(gw_threshold_apply(&st, "gas_l1_to_l2_s", &v, echo, sizeof(echo)) == GW_RC_UNSUPPORTED,
+         "gas_l1_to_l2_s（§8.2 算法参数、不在 items）→ 1 未知键");
+    t_ok(gw_threshold_apply(&st, "gas_l1", &v, echo, sizeof(echo)) == GW_RC_UNSUPPORTED,
+         "口语别名 gas_l1 → 1（§4.5：上线字段一律用 gas_t1_mv）");
+    t_ok(gw_threshold_apply(&st, "no_activity_min", &v, echo, sizeof(echo)) == GW_RC_UNSUPPORTED,
+         "口语别名 no_activity_min → 1（契约对应键是 no_motion_min）");
+    t_ok(gw_threshold_apply(&st, NULL, &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "key=NULL → 2（不崩、不静默成功）");
+
+    /* ③ 越界 → §4.5 result_code=2 */
+    v.scalar = 1.0;
+    t_ok(gw_threshold_apply(&st, "no_motion_min", &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "no_motion_min=1（§8.5 下限 5）→ 2");
+    v.scalar = 6000.0;
+    t_ok(gw_threshold_apply(&st, "gas_t1_mv", &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "gas_t1_mv=6000（§4.5 上限 5000）→ 2");
+    v.scalar = -1.0;
+    t_ok(gw_threshold_apply(&st, "humi_low_pct", &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "humi_low_pct=-1（§8.3 下限 0）→ 2");
+    v.scalar = 30.5;
+    t_ok(gw_threshold_apply(&st, "no_motion_min", &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "整数键 no_motion_min=30.5 → 2（节点按 int 解析会静默取整，宁可报错）");
+    v.scalar = 200.0;
+    t_ok(gw_threshold_apply(&st, "temp_high_c", &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "temp_high_c=200（§8.3 上限 125）→ 2");
+
+    /* ④ 类型不符 → 2；数组键元素个数 → 2 */
+    memset(&v, 0, sizeof(v));
+    v.is_array = 1u;
+    v.n = 2;
+    v.elems[0] = 0.0;
+    v.elems[1] = 60.0;
+    t_ok(gw_threshold_apply(&st, "no_motion_min", &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "标量键收到数组 → 2");
+    memset(&v, 0, sizeof(v));
+    v.scalar = 30.0;
+    t_ok(gw_threshold_apply(&st, "alert_repush_s", &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "数组键 alert_repush_s 收到标量 → 2");
+    memset(&v, 0, sizeof(v));
+    v.is_array = 1u;
+    v.n = 4;
+    v.elems[0] = 0.0;
+    v.elems[1] = 60.0;
+    v.elems[2] = 300.0;
+    v.elems[3] = 600.0;
+    t_ok(gw_threshold_apply(&st, "alert_repush_s", &v, echo, sizeof(echo)) == GW_RC_RANGE,
+         "alert_repush_s 4 个元素 → 2（§8.8 最多 3 次推送）");
+    memset(&v, 0, sizeof(v));
+    v.is_array = 1u;
+    v.n = 3;
+    v.elems[0] = 0.0;
+    v.elems[1] = 60.0;
+    v.elems[2] = 300.0;
+    echo[0] = '\0';
+    t_ok(gw_threshold_apply(&st, "alert_repush_s", &v, echo, sizeof(echo)) == GW_RC_OK &&
+         st.alert_repush_n == 3 && st.alert_repush_s[2] == 300u,
+         "alert_repush_s=[0,60,300] → 0 并落值");
+    t_ok(strstr(echo, "\"value\":[0,60,300]") != NULL,
+         "数组键的响应 paras 里 value 是 [0,60,300]（JSON 数组，不是标量）");
+
+    /* ⑤ §3.7 实测帧：0x11 payload 必须逐字节一致（value=30，不是 30.0） */
+    {
+        const gw_contract_frame_t *ref = find_frame("set_threshold");
+        uint32_t n;
+
+        memset(&v, 0, sizeof(v));
+        v.scalar = 30.0;
+        echo[0] = '\0';
+        rc = gw_threshold_apply(&st, "no_motion_min", &v, echo, sizeof(echo));
+        n = gw_threshold_cmd_payload("no_motion_min", &v, payload, sizeof(payload));
+        snprintf(msg, sizeof(msg),
+                 "0x11 payload 与契约 §3.7 SEQ=5 实测帧逐字节一致（%u B）", (unsigned)n);
+        t_ok(rc == GW_RC_OK && ref != NULL && n == (uint32_t)ref->len - GW_FRAME_OVERHEAD &&
+             memcmp(payload, ref->bytes + GW_FRAME_HDR_LEN, n) == 0, msg);
+        if (n == 0u || ref == NULL || n != (uint32_t)ref->len - GW_FRAME_OVERHEAD ||
+            memcmp(payload, ref->bytes + GW_FRAME_HDR_LEN, n) != 0) {
+            char got[256] = "";
+            char want[256] = "";
+            if (n < sizeof(got) / 2) { hex((const uint8_t *)payload, n, got); }
+            if (ref != NULL) { hex(ref->bytes + GW_FRAME_HDR_LEN, ref->len - GW_FRAME_OVERHEAD, want); }
+            printf("     契约: %s\n     实际: %s\n", want, got);
+        }
+    }
+
+    /* ⑥ 本地规则真的变了：燃气分级 */
+    gw_settings_init(&st);
+    gw_gas_init(&gas);
+    gw_motion_init(&motion, GW_NO_MOTION_MIN_DEF * 60000u, GW_AWAY_AFTER_OPEN_S * 1000u);
+    gw_dedup_init(&dedup);
+    gw_settings_sync(&st, &gas, &motion, &dedup);
+    {
+        gw_event_t ev = GW_EV_NONE;
+        uint32_t k;
+        for (k = 0; k < 6u; k++) {
+            ev = gw_gas_feed(&gas, 1000u + (uint64_t)k * 2000u, 1200u);
+            if (ev != GW_EV_NONE) { break; }
+        }
+        t_ok(ev == GW_EV_NONE, "默认 gas_t1_mv=1500：1200 mV 连续 10 s 不进一级");
+    }
+    memset(&v, 0, sizeof(v));
+    v.scalar = 1000.0;
+    echo[0] = '\0';
+    t_ok(gw_threshold_apply(&st, "gas_t1_mv", &v, echo, sizeof(echo)) == GW_RC_OK,
+         "gas_t1_mv=1000 下发成功（§4.5 逐键表内）");
+    gw_settings_sync(&st, &gas, &motion, &dedup);
+    t_ok(gas.t1_mv == 1000u, "同步后燃气状态机一级阈值 = 1000（不是代码里的老常量 1500）");
+    {
+        gw_event_t ev = GW_EV_NONE;
+        uint32_t k;
+        for (k = 0; k < 6u; k++) {
+            ev = gw_gas_feed(&gas, 100000u + (uint64_t)k * 2000u, 1200u);
+            if (ev != GW_EV_NONE) { break; }
+        }
+        t_ok(ev == GW_EV_GAS_L1_ENTER, "同一采样序列在 gas_t1_mv=1000 下 10 s 内进一级（阈值真的生效）");
+    }
+
+    /* ⑦ 无活动阈值 */
+    memset(&v, 0, sizeof(v));
+    v.scalar = 5.0;
+    echo[0] = '\0';
+    t_ok(gw_threshold_apply(&st, "no_motion_min", &v, echo, sizeof(echo)) == GW_RC_OK,
+         "no_motion_min=5 下发成功");
+    gw_settings_sync(&st, &gas, &motion, &dedup);
+    t_ok(motion.no_motion_ms == 5u * 60u * 1000u, "同步后 no_motion_ms = 300000（5 分钟）");
+    {
+        gw_motion_state_t m;
+        gw_motion_init(&m, GW_NO_MOTION_MIN_DEF * 60000u, GW_AWAY_AFTER_OPEN_S * 1000u);
+        gw_settings_sync(&st, NULL, &m, NULL);
+        (void)gw_motion_feed(&m, 1000u, 1u, 0u);
+        t_ok(gw_motion_tick(&m, 1000u + 4u * 60u * 1000u) == GW_EV_NONE,
+             "4 分钟无活动：还不到 5 分钟阈值，不报（阈值没被读成默认 30 分钟）");
+        t_ok(gw_motion_tick(&m, 1000u + 5u * 60u * 1000u) == GW_EV_NO_MOTION,
+             "5 分钟无活动：报 NO_MOTION");
+    }
+
+    /* ⑧ 去重窗（§8.8）：fall_suppress_s / alert_suppress_s */
+    memset(&v, 0, sizeof(v));
+    v.scalar = 10.0;
+    echo[0] = '\0';
+    (void)gw_threshold_apply(&st, "fall_suppress_s", &v, echo, sizeof(echo));
+    memset(&v, 0, sizeof(v));
+    v.scalar = 120.0;
+    echo[0] = '\0';
+    (void)gw_threshold_apply(&st, "alert_suppress_s", &v, echo, sizeof(echo));
+    gw_settings_sync(&st, &gas, &motion, &dedup);
+    t_ok(dedup.fall_ms == 10000u && dedup.other_ms == 120000u,
+         "同步后去重窗 = 跌倒 10 s / 其余 120 s");
+    {
+        gw_dedup_table_t d;
+        gw_dedup_init(&d);
+        gw_settings_sync(&st, NULL, NULL, &d);
+        t_ok(gw_dedup_feed(&d, 1000u, "M2", "fall", 2) == GW_DEDUP_NEW, "跌倒告警建条（NEW）");
+        t_ok(gw_dedup_feed(&d, 5000u, "M2", "fall", 2) == GW_DEDUP_UPDATE,
+             "5 s 内重复：窗口内只更新快照（UPDATE）");
+        t_ok(gw_dedup_feed(&d, 12000u, "M2", "fall", 2) == GW_DEDUP_NEW,
+             "11 s 后（> 10 s 窗）视为新告警：fall_suppress_s 生效");
+    }
+
+    /* ⑨ P1 键：写入不生效但不得报错（§6.9） */
+    memset(&v, 0, sizeof(v));
+    v.scalar = 60.0;
+    echo[0] = '\0';
+    t_ok(gw_threshold_apply(&st, "presence_hold_s", &v, echo, sizeof(echo)) == GW_RC_OK &&
+         st.presence_hold_s == 60u, "P1 键 presence_hold_s=60 → 0（落库不报错，P0 无 PIR 不生效）");
+
+    /* ⑩ report_interval_s：与 set_report_interval 命令共用一份值 */
+    memset(&v, 0, sizeof(v));
+    v.scalar = 30.0;
+    echo[0] = '\0';
+    t_ok(gw_threshold_apply(&st, "report_interval_s", &v, echo, sizeof(echo)) == GW_RC_OK &&
+         st.report_interval_s == 30u,
+         "report_interval_s=30 → 0 并落 settings（gw_main 据此改上报周期）");
+}
+
 int main(void)
 {
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
     test_crc_and_encode();
     test_contract_frames();          /* §3.7 六条样例帧：解析 + 重编 */
+    test_set_threshold();            /* §4.5 set_threshold：21 键校验 + 生效 + 0x11 payload */
     test_parser();
     test_crypto_auth();
     test_time();

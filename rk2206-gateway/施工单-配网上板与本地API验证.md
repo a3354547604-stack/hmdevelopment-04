@@ -8,12 +8,27 @@
 
 | # | 判据 | 怎么看出来 |
 |---|---|---|
-| J1 | 长按配对键 3 s 能进配网模式，SoftAP 出现 | 串口出现 `[gw] [PROV] 进入配网模式 ssid=ElderCare-XXXX remain=600`，手机 Wi-Fi 列表里能看到 `ElderCare-XXXX` |
+| J1 | 长按配对键 3 s 能进配网模式，SoftAP 出现 | 串口出现 `[PROV] enter AP mode ssid=ElderCare-XXXX psk=… remain=600 url=http://<AP地址>/`，且手机 Wi-Fi 列表里能看到 `ElderCare-XXXX` |
 | J2 | 本地 5 个 API 可调，网页能打开 | 手机浏览器打开 `http://<串口打印的 AP 地址>/` 能看到配网页；页面里能查到状态、能提交 Wi-Fi |
 | J3 | 窗口行为正确（600 s 超时 / 再长按 3 s 退出 / 提交 Wi-Fi 后 90 s 内 SoftAP 消失） | 串口出现对应 `[gw] [PROV] …` 日志，`remain_s` 在网页上倒数 |
 
 **扫描/绑定（网页上的"扫描节点"/"绑定"）需要汇聚板在线**。当前汇聚固件还没上板，
 页面会显示"汇聚离线"（HTTP `409` / `1605`）——那是**预期结果**，记录即可，不算本卡失败。
+
+## 0.1 我要从日志里读到什么（对照表）
+
+左边是"我这边的验收点"，右边是"你在串口/手机上要看到的那一行"。**读不到时先看最后一列**，不要自己猜。
+
+| 我要确认的事 | 从串口/手机里读这一行 | 读不到先看什么 |
+|---|---|---|
+| 板子跑的是**带配网的这一版**固件 | `[gw] ---- RK2206 网关 M0 启动 ELDERCARE-GW-M0-v1.2 (契约 v1.2) ----` 紧跟 `[PROV] ready: sn=… ap_ssid=… bound=0 keepalive=600s` | 只有横幅没有 `[PROV] ready` → 刷的是旧固件，见 §6 第 2 行 |
+| **AP 地址**（现场实际值；**待上板实测确认：地址由板级驱动决定，占位 `192.168.4.1`**） | `[PROV] enter AP mode … url=http://<ip>/` 或 `[gw] [PROV] 本地配网服务就绪 http://<ip>/` | 若看到 `⚠ 取不到 AP 口地址，HTTP 已绑 0.0.0.0`：用手机 Wi-Fi 详情里的**网关**地址 |
+| DHCP 给手机发号正常 | 驱动日志 `[wifi_dhcp:D]lann_ipaddr:…`（**可能不打印**，取决于驱动日志级别，读不到不算失败）；**判据以手机为准** | 手机 Wi-Fi 详情里 IP 是 `192.168.x.y`（不是 `169.254.x.y`）且网关 `192.168.x.1` → 正常 |
+| H5 首页能打开 | `[HTTP] 连接来自 <手机IP>:<端口>` 紧跟 `[HTTP] GET / -> 200 (9219 B)` | 没有这两行 → 地址错（§6 第 5 行）或 AP 没起来（第 4 行） |
+| 五个接口各调通一次 | 五条 `[HTTP] GET/POST /api/… -> 200 (N B)`，响应 JSON 见 §4 末尾对照 | 409/1600 → 窗口关了；409/1605 → 汇聚不在线（**本次预期**） |
+| 长按进/退配网 | `[PROV] enter AP mode …` / `[PROV] exit AP mode（mode=ap bound=0）` | 一条都没有 → 按键没接到 `EX_GPIO_A3`（§6 第 3 行） |
+
+字面量的**逐字**出处（源码行号）在 §9，复核按 §9 核。
 
 ## 1. 你需要准备的东西（3 步，动手前先看完）
 
@@ -79,13 +94,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 它可能比 enter 行早或晚出现（HTTP 任务与 tick 任务是并行的）。
 同时板上 LED 双闪 2 次（不响）。
 
-## 4. 用手机调本地 API（4 步）
+## 4. 用手机调本地 API（3 步）
 
 1. 手机连 SoftAP：Wi-Fi 列表找 `ElderCare-XXXX`，口令 `echub8888`（占位值，见 §5 CAL-16）。
    连上后手机会提示"已连接，无法访问互联网"——**正常，别点断开**。
-2. 浏览器打开 `http://<第 3 步串口打印的 IP>/`（**不是** `192.168.4.1`，除非你的板子恰好就是那个地址）。
+   然后浏览器打开 `http://<第 3 步串口打印的 IP>/`。
+   **地址口径：待上板实测确认（地址由板级驱动决定，占位 `192.168.4.1`）**——别照抄 `192.168.4.1`。
    应看到"配网 · 网关 M0"页面：状态卡（模式 / 剩余时间 / 汇聚在线 / 已绑定 / 剩余槽位）+ 三步操作区。
-3. 在"家庭 Wi-Fi"里填现场 2.4 G 的 SSID 与口令 → 点提交。
+2. 在"家庭 Wi-Fi"里填现场 2.4 G 的 SSID 与口令 → 点提交。
    期望页面提示"已保存，正在连接"；串口出现（**只有 SSID，没有口令**）：
 
    ```
@@ -98,7 +114,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
    [PROV] Wi-Fi 已连接 ssid=<你的SSID>，90s 后关闭 SoftAP（App 掉线是预期）
    [PROV] SoftAP 已关闭，网关进入 STA 模式（mode=sta）
    ```
-4. 点"扫描节点"。若汇聚板不在线，页面显示"汇聚离线（1605）"——**预期**，记录即可。
+3. 点"扫描节点"。若汇聚板不在线，页面显示"汇聚离线（1605）"——**预期**，记录即可。
    汇聚在线时串口会打印：
 
    ```
@@ -115,6 +131,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 > curl.exe -s http://<AP地址>/api/pair/nodes
 > curl.exe -s -X POST -H "Content-Type: application/json" -d "{\"op\":\"list\"}" http://<AP地址>/api/pair/bind
 > ```
+>
+> **期望输出（下面五条取自主机模拟器实跑输出 `rk2206-gateway/out/prov-sim.log`，`<...>` 处是现场值）**：
+>
+> ```
+> 1) status      {"code":0,"message":"ok","data":{"mode":"ap","ssid":"ElderCare-1A2B","device_sn":"M0-3F1A2B","firmware":"0.1.0","remain_s":600,"hub_online":false,"bound_count":0,"slots_free":8},"ts":1792243200000}
+> 2) wifi        {"code":0,"message":"ok","data":{"saved":true,"connecting":true,"ssid":"HOME-2.4G","settle_s":90,"precheck":{"ap_found":false,"rssi":0,"ch":0}},"ts":1792243200000}
+> 3) scan        {"code":0,"message":"ok","data":{"started":true,"id":1,"duration_s":10,"estimate_s":13},"ts":1792243200000}
+> 4) nodes       {"code":0,"message":"ok","data":{"id":1,"scan_state":"done","scanned_at":1792243199800,"truncated":false,"bound":[],"slots_free":8,"nodes":[{"sn":"M1","mac":"11:22:33:44:55:01","rssi":-40,"bind":false,"role":1},{"sn":"?","mac":"11:22:33:44:55:02","rssi":-47,"bind":false,"role":1}]},"ts":1792243200000}
+> 5) bind list   {"code":0,"message":"ok","data":{"op":"list","bound":[],"slots_free":8,"connected":false},"ts":1792243200000}
+> ```
+>
+> 说明：`2)` 的 `precheck.ap_found=false` 是**允许**的（AP 模式下驱动可能不放行并发扫描，实现选择"放行不堵用户"）；
+> `3)`/`4)` 在汇聚板不在线时会是 `{"code":1605,"message":"hub_offline","data":{},"ts":…}`——**预期结果，记录即可**（汇聚固件还没上板）。
 
 ## 5. 退出与收尾（2 步）
 
@@ -155,7 +184,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 - **现场 2.4 G Wi-Fi 的 SSID 与口令要提前定好**：网关"平时联网"走的是 SDK 编译期配置
   （`config_network.h`），配网接口把 SSID/口令写进板子的 Vendor Flash，**切换由后续任务（t34 凭证工具）决定**。
   本卡验的是"能写进去、能连上"，不是"重启后自动用新口令联网"。
-- **CAL-12（重要）**：契约 §12.3 写 `192.168.4.1/24`、DHCP `100–199`，但 RK2206 的 SoftAP 由预编译库实现，
+- **CAL-12（重要）**：**地址口径 = 待上板实测确认（地址由板级驱动决定，占位 `192.168.4.1`）**。契约 §12.3 写 `192.168.4.1/24`、DHCP `100–199`，但那个地址不是实现事实，但 RK2206 的 SoftAP 由预编译库实现，
   **地址与 DHCP 池由驱动决定**（官方样例实测是 `192.168.2.1`，客户端 `192.168.2.10`），改不了。
   所以：**手机浏览器用串口打印的那个 IP**；H5 页面用的是相对路径，不写死地址。
   另外"最多 1 个客户端"也无法硬性限制（SDK 的 `GetStationList()` 是空壳），现场请只连一台手机。

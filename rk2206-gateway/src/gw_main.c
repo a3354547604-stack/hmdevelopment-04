@@ -83,6 +83,19 @@ static uint16_t s_demo_gas_mv;
 
 static uint32_t s_report_interval_ms = GW_REPORT_INTERVAL_MS;
 
+/* 阈值下发（t33 / 契约 §4.5 set_threshold）：21 键的当前生效值。
+ * 默认值在 gw_settings_init() 里逐条对齐契约 §6.9 items——网关重启后即使没有任何下发，
+ * 本地规则也按契约默认值跑，不会出现"重启后阈值回退成代码里的老常量"。 */
+static gw_settings_t s_settings;
+
+/* 等 0x10 ACK 的记账：0x11 是"单向下行必答"（§3.6 500 ms ×3）。
+ * on_cmd 在 net_task 里同步等结果（最多 ~2.5 s），重发由 uart_task 的 gw_pending_tick 做，
+ * 所以这里只需要三个标量：发的是哪个 SEQ、ACK 到了没、ACK 里的 result。 */
+static volatile uint16_t s_th_seq;
+static volatile uint8_t  s_th_waiting;      /* 1=正在等这条 0x11 的 ACK */
+static volatile uint8_t  s_th_ack_done;
+static volatile int16_t  s_th_ack_result;
+
 /* 节点明细缓存（§4.6 messages/up）：环形保留最近 16 条，300 s 触发一次批量 */
 #define GW_SAMPLE_SLOTS 16
 static char     s_sample_slots[GW_SAMPLE_SLOTS][128];
@@ -630,8 +643,17 @@ static void handle_frame(const gw_frame_t *f, uint32_t now)
                     root = cJSON_Parse(buf);
                     if (root != NULL) {
                         cJSON *as = cJSON_GetObjectItem(root, "ack_seq");
+                        cJSON *rs = cJSON_GetObjectItem(root, "result");
                         if (as != NULL && cJSON_IsNumber(as)) {
-                            gw_pending_ack((uint16_t)as->valuedouble);
+                            uint16_t ack_seq = (uint16_t)as->valuedouble;
+                            gw_pending_ack(ack_seq);
+                            /* set_threshold 在等这条 ACK（t33）：记下 SEQ 与 result，
+                             * 由 on_cmd 侧同步等待后决定回给云的 result_code。 */
+                            if (s_th_waiting && ack_seq == s_th_seq) {
+                                s_th_ack_result = (rs != NULL && cJSON_IsNumber(rs))
+                                                  ? (int16_t)rs->valueint : -1;
+                                s_th_ack_done = 1;
+                            }
                         }
                         cJSON_Delete(root);
                     }
@@ -1216,6 +1238,121 @@ static void net_task(void *arg)
 }
 
 /* ============================== 命令处理 ============================== */
+/* cJSON 的 value → gw_th_value_t。类型判定只做这一件事：
+ * 数字=标量、数组=整型数组、其它类型（字符串/布尔/对象/null）=不合法。
+ * 契约 §3.4 的 value 允许 number/string/bool，但 §6.9 的 21 个键全是数值/数值数组，
+ * 所以非数值一律按 §4.5 归入"参数越界"=2，而不是猜着转。 */
+static int th_value_from_json(const cJSON *v, gw_th_value_t *out)
+{
+    const cJSON *it;
+    int n = 0;
+
+    if (v == NULL || out == NULL) { return -1; }
+    memset(out, 0, sizeof(*out));
+
+    if (cJSON_IsNumber(v)) {
+        out->is_array = 0u;
+        out->scalar = v->valuedouble;
+        return 0;
+    }
+    if (cJSON_IsArray(v)) {
+        for (it = v->child; it != NULL; it = it->next) {
+            if (!cJSON_IsNumber(it) || n >= (int)(sizeof(out->elems) / sizeof(out->elems[0]))) {
+                return -1;
+            }
+            out->elems[n++] = it->valuedouble;
+        }
+        if (n == 0) { return -1; }
+        out->is_array = 1u;
+        out->n = n;
+        return 0;
+    }
+    return -1;
+}
+
+/* §4.5 set_threshold：校验 → 落生效值 → 发 0x11 → 等 0x10 ACK → 回 result_code。
+ *
+ * 为什么在 net_task 里同步等 ACK：IoTDA 命令响应必须带一个结论（§4.5 的 result_code
+ * 集合里 12 就是"三次重发仍无 ACK"）。异步回包要另起一条"稍后补发响应"的通路，
+ * 而 20 s 的命令超时（§4.5 注解）容得下这最多 ~2.5 s 的等待；uart_task 照常跑，
+ * 重发与 ACK 都发生在它那边，不会因为这里等待而丢帧。 */
+static int handle_set_threshold(const cJSON *p, char *resp_paras, uint32_t cap, uint32_t now)
+{
+    const cJSON *jkey = (p != NULL) ? cJSON_GetObjectItem(p, "key") : NULL;
+    const cJSON *jval = (p != NULL) ? cJSON_GetObjectItem(p, "value") : NULL;
+    gw_th_value_t v;
+    char payload[160];
+    uint32_t plen;
+    uint32_t waited;
+    int rc;
+
+    if (jkey == NULL || !cJSON_IsString(jkey) || jkey->valuestring[0] == '\0') {
+        return GW_RC_UNSUPPORTED;       /* 没有 key 就无从判定：§4.5 归入"未知键或不支持"=1 */
+    }
+    if (th_value_from_json(jval, &v) != 0) {
+        return GW_RC_RANGE;             /* 缺 value / 类型不符：§4.5 =2 */
+    }
+
+    rc = gw_threshold_apply(&s_settings, jkey->valuestring, &v, resp_paras, cap);
+    if (rc != GW_RC_OK) {
+        printf("[%s] set_threshold %s 拒绝 result=%d（%s）\n",
+               GW_LOG_TAG, jkey->valuestring, rc,
+               (rc == GW_RC_UNSUPPORTED) ? "未知键/不支持" : "参数越界");
+        return rc;
+    }
+
+    /* 只在本地生效还不够：阈值最终要落到节点（§2.5），所以必须下发 0x11 并以 ACK 为准。 */
+    plen = gw_threshold_cmd_payload(jkey->valuestring, &v, payload, sizeof(payload));
+    if (plen == 0u) {
+        printf("[%s] set_threshold %s 拼帧失败\n", GW_LOG_TAG, jkey->valuestring);
+        return GW_RC_INTERNAL;          /* §4.5 =7 内部错误 */
+    }
+
+    /* SEQ 必须在发送**之前**定下来：uart_task 优先级比 net_task 高，
+     * ACK 完全可能在 gw_send_frame_expect_ack 返回前就被处理掉；
+     * 若那时 s_th_seq 还是上一条命令的值，这一条就会被误判成"无 ACK"（回 12）。
+     * gw_send_frame_expect_ack 用的正是 s_tx_seq 的当前值，所以这里先取它。 */
+    s_th_seq = s_tx_seq;
+    s_th_ack_done = 0;
+    s_th_ack_result = -1;
+    s_th_waiting = 1;
+    if (gw_send_frame_expect_ack(GW_T_GW_CMD, (const uint8_t *)payload, (uint16_t)plen, now) != 0) {
+        s_th_waiting = 0;
+        printf("[%s] set_threshold %s 发送失败（UART）\n", GW_LOG_TAG, jkey->valuestring);
+        return GW_RC_INTERNAL;
+    }
+
+    /* 预算 = 3 次重发各自一个超时窗 + 一个余量窗（§3.6：500 ms × 3）。
+     * 到点还没 ACK 就按 §4.5/§9.3 回 12（链路超时），而不是含糊地回 0。 */
+    for (waited = 0u; waited < GW_ACK_TIMEOUT_MS * (GW_ACK_MAX_RETRY + 2u); waited += 20u) {
+        if (s_th_ack_done) { break; }
+        LOS_Msleep(20);
+    }
+    s_th_waiting = 0;
+
+    if (!s_th_ack_done) {
+        printf("[%s] set_threshold %s 无 ACK（SEQ=%u，%ums）→ result=%d\n",
+               GW_LOG_TAG, jkey->valuestring, (unsigned)s_th_seq,
+               (unsigned)GW_ACK_TIMEOUT_MS * (GW_ACK_MAX_RETRY + 2u), GW_CMD_FAIL_CODE);
+        return GW_CMD_FAIL_CODE;
+    }
+    if (s_th_ack_result != 0) {
+        /* 汇聚/节点明确拒绝：把它的 code 原样透给云（节点侧 §2.5 的 1002/1003 也就在这里
+         * 浮现给 App），比压成 0 或 7 都更有用。 */
+        printf("[%s] set_threshold %s 被拒：0x10 result=%d\n",
+               GW_LOG_TAG, jkey->valuestring, (int)s_th_ack_result);
+        return (int)s_th_ack_result;
+    }
+
+    gw_settings_sync(&s_settings, &s_gas, &s_motion, &s_dedup);
+    if (strcmp(jkey->valuestring, "report_interval_s") == 0) {
+        s_report_interval_ms = s_settings.report_interval_s * 1000u;
+    }
+    printf("[%s] set_threshold %s 生效并已下发（SEQ=%u）：%s\n",
+           GW_LOG_TAG, jkey->valuestring, (unsigned)s_th_seq, payload);
+    return GW_RC_OK;
+}
+
 static void on_cmd(void *arg, const char *request_id, const char *command_name, const char *paras_json)
 {
     char resp[256];
@@ -1235,6 +1372,9 @@ static void on_cmd(void *arg, const char *request_id, const char *command_name, 
             result_code = GW_RC_RANGE;      /* 契约 §4.5：10..3600 */
         } else {
             s_report_interval_ms = (uint32_t)sec->valueint * 1000u;
+            /* 与 §4.5 的 set_threshold key=report_interval_s 同一份值：两条路都改
+             * s_report_interval_ms，同时把生效值记进 settings，避免"两个命令看到两个周期"。 */
+            s_settings.report_interval_s = (uint32_t)sec->valueint;
             snprintf(paras, sizeof(paras), "{\"seconds\":%d}", sec->valueint);
         }
     } else if (strcmp(command_name, "mute_alarm") == 0) {
@@ -1292,6 +1432,8 @@ static void on_cmd(void *arg, const char *request_id, const char *command_name, 
                                          (sn != NULL && cJSON_IsString(sn)) ? sn->valuestring : NULL,
                                          (mc != NULL && cJSON_IsString(mc)) ? mc->valuestring : NULL,
                                          paras, sizeof(paras));
+    } else if (strcmp(command_name, "set_threshold") == 0) {
+        result_code = handle_set_threshold(p, paras, sizeof(paras), gw_now_ms());
     } else {
         result_code = GW_RC_UNSUPPORTED;
     }
@@ -1380,6 +1522,11 @@ static void gw_main_entry(void)
     gw_fall_init(&s_fall);
     gw_motion_init(&s_motion, GW_NO_MOTION_MIN_DEF * 60000u, GW_AWAY_AFTER_OPEN_S * 1000u);
     gw_dedup_init(&s_dedup);
+    /* 阈值（t33）：先把 21 键装成契约 §6.9 的默认值，再推给状态机。
+     * 放在三个 init 之后是必须的——gw_settings_sync 是"覆盖式"写入，
+     * 早于 init 调用会被 init 里的默认值盖回去。 */
+    gw_settings_init(&s_settings);
+    gw_settings_sync(&s_settings, &s_gas, &s_motion, &s_dedup);
     {
         uint32_t i;
         for (i = 0; i < sizeof(s_slots) / sizeof(s_slots[0]); i++) {
