@@ -23,7 +23,7 @@ import {
 } from '../ets/model/Types';
 import { SettingsItems, TrendCompare } from '../ets/model/Types';
 import { DEMO_EVENTS, SETTING_SPECS } from '../ets/common/SettingsSchema';
-import { HttpRequest, HttpResponse } from '../ets/service/HttpClient';
+import { HttpPort, HttpRequest, HttpResponse } from '../ets/service/HttpClient';
 import { Formatter } from '../ets/common/Formatter';
 
 /**
@@ -61,6 +61,31 @@ g['PersistentStorage'] = {
     memStore.setOrCreate<Object>(key, value);
   }
 } as Object;
+
+/**
+ * 真服务器形态的错误响应桩（t65 自检专用）。
+ *
+ * 只替换传输层（`HttpPort`），URL 拼接 / 鉴权头 / 信封解析仍然走**真实**
+ * `HttpApiService` —— 与 MockTransport 的唯一差别是：**明细放在响应体 `data` 里，
+ * 而不是塞进 `message`**（真服务器 `server/app/errors.py:33-40,60-66` 就是这个形态）。
+ * 不换成这个形态，t62 期间发现的「用户只看到裸表文案」在自检里永远看不见。
+ * `lastUrl` 记下最近一次请求 URL，用来断言「确实走了真实服务的请求路径」。
+ */
+class ServerErrorTransport implements HttpPort {
+  private status: number;
+  private body: string;
+  lastUrl: string = '';
+
+  constructor(status: number, body: string) {
+    this.status = status;
+    this.body = body;
+  }
+
+  request(req: HttpRequest): Promise<HttpResponse> {
+    this.lastUrl = req.url;
+    return Promise.resolve(new HttpResponse(this.status, this.body, ''));
+  }
+}
 
 interface Case {
   seq: number;
@@ -341,6 +366,88 @@ class Runner {
       code: badCode, httpStatus: badResp.status,
       detail: `原始体含 gas_l1_to_l2_s → code=${badCode} msg='${badMsg}'；全字段补丁 ok=${sent.ok}`
         + ` 服务器键集=${storedKeys.length} 键`
+    });
+
+    // ---- t65：错误提示必须带出**真服务器**的结构化明细（data.field/allowed/missing/note）。
+    // 契约 §9 把机器可读明细放在 `data`，`message` 只是裸表文案；旧实现只拼 message，
+    // 于是联调时用户看到「参数超出允许范围（服务器：参数超出允许范围）」，键名与范围全丢。
+    // 下面四条都用 ServerErrorTransport（真服务器形态的响应体）驱动真实 HttpApiService。
+    const errPort: ServerErrorTransport = new ServerErrorTransport(400,
+      '{"code":1002,"message":"参数超出允许范围",'
+        + '"data":{"field":"gas_t2_mv","allowed":[2001,5000],"note":"必须大于 gas_t1_mv"},"ts":1}');
+    const errApi: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', errPort);
+    const e1002: ApiResult<DeviceSettings> = await errApi.putSettings(1, { no_motion_min: 30 });
+    const e1002Text: string = e1002.message;
+    this.cases.push({
+      seq: 31, name: '§9.2 真服务器明细 data.field/allowed', contract: '§9.2',
+      ok: !e1002.ok && e1002.code === 1002 && e1002.httpStatus === 400
+        && e1002Text.indexOf('参数超出允许范围') >= 0
+        && e1002Text.indexOf('field=gas_t2_mv') >= 0
+        && e1002Text.indexOf('allowed=[2001,5000]') >= 0
+        && e1002Text.indexOf('note=必须大于 gas_t1_mv') >= 0
+        && e1002Text.indexOf('（服务器：参数超出允许范围；') >= 0
+        && errPort.lastUrl.indexOf('/devices/1/settings') >= 0,
+      code: e1002.code, httpStatus: e1002.httpStatus,
+      detail: `${e1002Text} ｜ url=${errPort.lastUrl}`
+    });
+
+    // 保留既有行为：没有明细时**不得**多出括号或空尾巴。两种形态都试：
+    // ① 响应体没有 data 键；② data 是空对象且 message 为空。
+    const barePort: ServerErrorTransport = new ServerErrorTransport(400,
+      '{"code":1102,"message":"账号或密码错误","ts":1}');
+    const bareApi: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', barePort);
+    const e1102: ApiResult<DeviceSettings> = await bareApi.putSettings(1, { no_motion_min: 30 });
+    const emptyPort: ServerErrorTransport = new ServerErrorTransport(400,
+      '{"code":1000,"message":"","data":{},"ts":1}');
+    const emptyApi: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', emptyPort);
+    const e1000: ApiResult<DeviceSettings> = await emptyApi.putSettings(1, { no_motion_min: 30 });
+    this.cases.push({
+      seq: 32, name: '§9.2 无明细不多加括号', contract: '§9.2',
+      ok: e1102.message === '账号或密码错误（服务器：账号或密码错误）'
+        && e1000.message === '缺少必填参数',
+      code: e1102.code, httpStatus: e1102.httpStatus,
+      detail: `无 data → '${e1102.message}'；空 data+空 message → '${e1000.message}'`
+    });
+
+    // 明细按**存在性**拼接：missing（1000 缺键）与 key 都要带出；
+    // allowed 给「全部合法键名」（1003 是 21 项）时必须截断——否则一行提示几百字符。
+    const manyKeys: string[] = [];
+    for (const sp of SETTING_SPECS) {
+      manyKeys.push(sp.key);
+    }
+    const unknownPort: ServerErrorTransport = new ServerErrorTransport(400,
+      '{"code":1003,"message":"存在无法识别的参数名","data":{"field":"gas_l1_to_l2_s",'
+        + '"key":"no_motion_min","allowed":' + JSON.stringify(manyKeys) + '},"ts":1}');
+    const unknownApi: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', unknownPort);
+    const e1003: ApiResult<DeviceSettings> = await unknownApi.putSettings(1, { no_motion_min: 30 });
+    const e1003Text: string = e1003.message;
+    const missPort: ServerErrorTransport = new ServerErrorTransport(400,
+      '{"code":1000,"message":"缺少必填参数","data":{"missing":["items"]},"ts":1}');
+    const missApi: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', missPort);
+    const e1000b: ApiResult<DeviceSettings> = await missApi.putSettings(1, { no_motion_min: 30 });
+    this.cases.push({
+      seq: 33, name: '§9.2 missing/key 明细 + 长 allowed 截断', contract: '§9.2',
+      ok: e1003.code === 1003 && e1003Text.indexOf('field=gas_l1_to_l2_s') >= 0
+        && e1003Text.indexOf('key=no_motion_min') >= 0
+        && e1003Text.indexOf(`… 共 ${manyKeys.length} 项`) >= 0
+        && e1003Text.length < 200
+        && e1000b.message.indexOf('missing=[items]') >= 0,
+      code: e1003.code, httpStatus: e1003.httpStatus,
+      detail: `${e1003Text} ｜ missing 形态：'${e1000b.message}'`
+    });
+
+    // t65 只加了明细拼接，不得动既有行为：1101/401 收到即清本地令牌（页面据此跳登录）。
+    SessionStore.saveLogin('t65-selfcheck-token', 7, 't65-selfcheck');
+    const expiredPort: ServerErrorTransport = new ServerErrorTransport(401,
+      '{"code":1101,"message":"登录已过期","ts":1}');
+    const expiredApi: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', expiredPort);
+    const hadToken: boolean = SessionStore.hasToken();
+    const e1101: ApiResult<DeviceSettings> = await expiredApi.putSettings(1, { no_motion_min: 30 });
+    this.cases.push({
+      seq: 34, name: '§9.2 1101 仍清令牌（t65 回归）', contract: '§9.2',
+      ok: hadToken && e1101.code === 1101 && !SessionStore.hasToken(),
+      code: e1101.code, httpStatus: e1101.httpStatus,
+      detail: `前置 hasToken=${hadToken} → 之后 hasToken=${SessionStore.hasToken()}；'${e1101.message}'`
     });
   }
 

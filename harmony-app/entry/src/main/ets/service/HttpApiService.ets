@@ -71,9 +71,10 @@ export class HttpApiService implements ApiPort {
       SessionStore.clearAuth();
     }
     if (!(res.status >= 200 && res.status < 300 && env.code === 0)) {
-      // 失败分支不解析 data（错误响应通常没有 data），直接按「HTTP 类别 + 业务码」翻译
+      // 失败分支**不把** data 解析成模型（错误响应里没有业务数据），但要把原始 `data`
+      // 透传给 describe：真服务器的 field/allowed/missing 明细就放在这里（t65）。
       return fail<T>(kindOfStatus(res.status), env.code,
-        describe(res.status, env.code, env.message), res.status);
+        describe(res.status, env.code, env.message, env.data), res.status);
     }
     try {
       return ok<T>(parser(env.data), res.status, env.code, env.message);

@@ -10,7 +10,7 @@
  *  （网络错误该提示重试，401 该跳登录，1002 该高亮那个字段）。
  */
 
-import { JsonObject, asObject, num, optStr } from '../common/JsonUtil';
+import { JsonArray, JsonObject, asObject, num, optNum, optStr } from '../common/JsonUtil';
 
 /** 错误类别：页面按类别决定交互（重试 / 跳登录 / 高亮字段）。 */
 export type ErrorKind =
@@ -246,20 +246,117 @@ export function toResult<T>(status: number, env: Envelope, parsed: T): ApiResult
   if (status >= 200 && status < 300 && env.code === 0) {
     return ok<T>(parsed, status, env.code, env.message);
   }
-  return fail<T>(kindOfStatus(status), env.code, describe(status, env.code, env.message), status);
+  // 失败分支也要把 `data` 交给 describe：真服务器的机器可读明细（field/allowed/missing）
+  // 就在这里，丢了它用户只能看到裸表文案（t65）。
+  return fail<T>(kindOfStatus(status), env.code, describe(status, env.code, env.message, env.data),
+    status);
 }
 
 /**
- * 生成面向用户的一句话：**中文直译 + 服务器原文**。
+ * 明细数组的显示上限。
  *
- * 为什么必须带上服务器 message（t15 复核 F-03）：
- *  契约 §9.2 把细节放在 message 里——1002 带 `field`/`allowed`（哪个键、允许多少）、
+ * 为什么截断：真服务器对 1003（未知键）会把**全部合法键名**放进 `allowed`
+ * （`server/app/settings_keys.py:132` 的 `sorted(SETTINGS_SPEC)`，21 项），
+ * 全展开会把一行提示撑到几百字符、在手机上没法看；保留前 6 项 + 总数已足够定位。
+ */
+const DETAIL_LIST_MAX: number = 6;
+
+/** 明细里的标量渲染：字符串原样、其它交给模板串（`true` / `12.5`）。 */
+function scalarText(v: Object): string {
+  return typeof v === 'string' ? v : `${v}`;
+}
+
+/**
+ * 取 `data` 里某个明细键的短文本（数组 → `[a,b]`，超长截断）。
+ * 键不存在 / 为 null 时返回 undefined —— 调用方据此**不拼**这一段。
+ */
+function detailValueText(data: JsonObject, key: string): string | undefined {
+  const raw: Object | undefined = data[key];
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+  // 刻意**不用** JsonUtil.optArray：它遇到「键存在但不是数组」会抛错，而这里只是
+  // 想把错误明细拼成一句话 —— 服务器给什么形态都该显示，不该让提示本身把页面打崩。
+  if (Array.isArray(raw)) {
+    const arr: JsonArray = raw;
+    const shown: string[] = [];
+    let i: number = 0;
+    while (i < arr.length && i < DETAIL_LIST_MAX) {
+      shown.push(scalarText(arr[i]));
+      i = i + 1;
+    }
+    const more: string = arr.length > DETAIL_LIST_MAX ? `… 共 ${arr.length} 项` : '';
+    return `[${shown.join(',')}${more}]`;
+  }
+  const s: string | undefined = optStr(data, key);
+  if (s !== undefined) {
+    return s;
+  }
+  const n: number | undefined = optNum(data, key);
+  return n === undefined ? undefined : `${n}`;
+}
+
+/**
+ * 从错误信封的 `data` 里抽出**机器可读明细**（t65）。
+ *
+ * 为什么必须解析 `data`（t62 期间发现的跨模块缺口）：
+ *  契约 §9 把「哪个键 / 允许什么 / 缺了什么」放在响应体的 `data` 里
+ *  （真服务器 `server/app/errors.py:33-40,60-66` 的 `field`/`allowed`/`missing`/`note`，
+ *  例：1002 越界 → `{"field":"gas_t2_mv","allowed":[2001,5000],"note":"必须大于 gas_t1_mv"}`），
+ *  而 `message` 只是**裸表文案**（「参数超出允许范围」）。
+ *  旧实现只拼 `message`，于是连真实服务器时用户只看到
+ *  「参数超出允许范围（服务器：参数超出允许范围）」——键名与范围全丢；
+ *  mock 恰好把明细塞进了 message（见 MockTransport），把这个差异一直掩盖到联调。
+ *
+ * 只拼**存在**的键（契约 §0.4 同一口径）：缺省不显示空括号、不显示 `undefined`。
+ */
+export function errorDetailText(data: JsonObject | undefined): string {
+  if (data === undefined) {
+    return '';
+  }
+  const parts: string[] = [];
+  const field: string | undefined = optStr(data, 'field');
+  if (field !== undefined && field.length > 0) {
+    parts.push(`field=${field}`);
+  }
+  const allowed: string | undefined = detailValueText(data, 'allowed');
+  if (allowed !== undefined) {
+    parts.push(`allowed=${allowed}`);
+  }
+  const missing: string | undefined = detailValueText(data, 'missing');
+  if (missing !== undefined) {
+    parts.push(`missing=${missing}`);
+  }
+  const key: string | undefined = optStr(data, 'key');
+  if (key !== undefined && key.length > 0) {
+    parts.push(`key=${key}`);
+  }
+  // `note` 是服务器给的人类可读原因（devices.py:109 的绑定码说明、settings_keys.py:140
+  // 的跨字段约束），比裸表文案有用，故一并带出。
+  const note: string | undefined = optStr(data, 'note');
+  if (note !== undefined && note.length > 0) {
+    parts.push(`note=${note}`);
+  }
+  return parts.join(' ');
+}
+
+/**
+ * 生成面向用户的一句话：**中文直译 + 服务器原文 + 结构化明细**。
+ *
+ * 为什么必须带上服务器信息（t15 复核 F-03、t65）：
+ *  契约 §9.2 把细节放在 message **与 data** 里——1002 带 `field`/`allowed`（哪个键、允许多少）、
  *  1000 带 `missing`（缺哪个参数）、1302 带合法 action 列表。只回中文直译的话，
  *  用户看到「参数超出允许范围」却不知道该改哪一项；开发排障也没有线索。
- *  原文统一加「（服务器：…）」前缀，避免与直译混淆；message 为空时不加尾巴。
+ *  原文统一加「（服务器：…）」前缀，避免与直译混淆；message 与明细都为空时不加尾巴。
  */
-export function describe(status: number, code: number, serverMessage: string): string {
-  const detail: string = serverMessage.length > 0 ? '（服务器：' + serverMessage + '）' : '';
+export function describe(status: number, code: number, serverMessage: string,
+  data?: JsonObject): string {
+  // 「（服务器：…）」尾巴 = 服务器 message 与 data 里的结构化明细合并；
+  // 两者都空则整段省略（不留空括号）。明细按**存在性**拼接，缺省不显示。
+  const fields: string = errorDetailText(data);
+  const detail: string = serverMessage.length > 0
+    ? '（服务器：' + serverMessage + (fields.length > 0 ? '；' + fields : '') + '）'
+    : (fields.length > 0 ? '（服务器：' + fields + '）' : '');
   if (code !== 0) {
     return codeText(code) + detail;
   }

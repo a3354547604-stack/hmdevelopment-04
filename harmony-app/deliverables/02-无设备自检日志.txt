@@ -1,5 +1,5 @@
 HMProgram 应用端（harmony-app）无设备自检日志
-生成时间（UTC+8）：2026-10-18 09:40:50
+生成时间（UTC+8）：2026-10-18 09:50:42
 Node：v22.22.1　esbuild：0.28.2
 被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,MockTransport,SessionStore}.ets
 ----------------------------------------------------------------------
@@ -10,8 +10,8 @@ PASS  #04  POST /devices/bind                     §6.6    code=   0 http=201  d
 PASS  #05  GET /devices/{id}/status               §6.7    code=   0 http=200  online=true alarm_state=2 nodes=3 pending=3 props=[presence,last_motion_ts,door,window,temp,humi,smoke,lpg,co,nodes_online,battery,alarm_state,bound_nodes,pair_state]
 PASS  #06  GET /devices/{id}/readings             §6.8    code=   0 http=200  total=12 first_payload_keys=smoke+temp+humi+adc_mv+warmup
 PASS  #07  GET /devices/{id}/settings             §6.9    code=   0 http=200  source=local keys=21
-PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792287651250
-PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792287651371-7 accepted=no_motion_min timeout_s=10
+PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792288243267
+PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792288243388-7 accepted=no_motion_min timeout_s=10
 PASS  #10  POST /devices/{id}/demo                §6.12   code=   0 http=200  event=gas accepted=demo_trigger
 PASS  #11  GET /alerts                            §6.13   code=   0 http=200  total=4 first=#101/gas/lv2
 PASS  #12  GET /alerts/{id}                       §6.14   code=   0 http=200  alert=#101/confirmed dispositions=0 before=5 after=5
@@ -33,10 +33,15 @@ PASS  #27  §6.12 演示事件按类型渲染（D8）                    §6.12 
 PASS  #28  §6.12 契约外事件被拒且不冒充（D8）                  §6.12   code=1206 http=400  door:code=1206 presence:code=1206 告警条数 8→8
 PASS  #29  §6.17 无昨日基线可解析（t62 夹具1）                §6.17   code=   0 http=200  title=今日活动频次 today=128 yesterday=undefined delta_pct=undefined text=undefined
 PASS  #30  §6.10 契约外键被拒 + 键集 21（t62 夹具2）          §6.10   code=1003 http=400  原始体含 gas_l1_to_l2_s → code=1003 msg='field=gas_l1_to_l2_s（未知键名）'；全字段补丁 ok=true 服务器键集=21 键
+PASS  #31  §9.2 真服务器明细 data.field/allowed         §9.2    code=1002 http=400  参数超出允许范围（服务器：参数超出允许范围；field=gas_t2_mv allowed=[2001,5000] note=必须大于 gas_t1_mv） ｜ url=http://127.0.0.1:80/api/devices/1/settings
+PASS  #32  §9.2 无明细不多加括号                          §9.2    code=1102 http=400  无 data → '账号或密码错误（服务器：账号或密码错误）'；空 data+空 message → '缺少必填参数'
+PASS  #33  §9.2 missing/key 明细 + 长 allowed 截断     §9.2    code=1003 http=400  存在无法识别的参数名（服务器：存在无法识别的参数名；field=gas_l1_to_l2_s allowed=[no_motion_min,away_after_open_s,presence_hold_s,gas_t1_mv,gas_t2_mv,gas_l1_hold_s… 共 20 项] key=no_motion_min） ｜ missing 形态：'缺少必填参数（服务器：缺少必填参数；missing=[items]）'
+PASS  #34  §9.2 1101 仍清令牌（t65 回归）                 §9.2    code=1101 http=401  前置 hasToken=true → 之后 hasToken=false；'登录已过期，请重新登录（服务器：登录已过期）'
 
-合计 30 项，通过 30 项，失败 0 项
+合计 34 项，通过 34 项，失败 0 项
 说明：本自检跑的是「真实 HttpApiService + Mock 传输层」，证明 URL 拼接/鉴权头/错误码翻译/契约字段解析可跑通；不代表真实服务器可用。
 ----------------------------------------------------------------------
 结论：以上为「真实 HttpApiService + Mock 传输层」的运行结果。
       它证明 URL 拼接 / Authorization 头 / 错误码翻译 / 契约字段解析在无服务器时可用；
       不代表 server/ 真实接口可用（需 server 就绪后按 README 复跑）。
+自检退出码：0（0 = 全部通过；非 0 = 有失败项，此时本脚本也以该码退出）
