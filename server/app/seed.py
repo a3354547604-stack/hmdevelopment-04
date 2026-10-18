@@ -448,7 +448,10 @@ def seed_demo_online(device_id: int) -> None:
 
 
 def seed_demo_alerts(device_id: int, user_id: int) -> dict[str, int]:
-    """10 条告警覆盖契约 §6.13 的全部类型与三种状态，含 5 条已处置（§6.18 误报统计有数）。"""
+    """10 条告警覆盖演示所需的 7 类与三种状态，含 5 条已处置（§6.18 误报统计有数）。
+
+    第 8 类 `env`（§6.13）属 P1、P0 网关不产生，这里**刻意不造**：造了就等于替网关断言
+    「它会上报室内温湿度异常」，而 `rk2206-gateway/` 里没有任何 `env` 产生路径（t89 F-01）。"""
     today = ms_to_cst_date(now_ms())
     yesterday = today - timedelta(days=1)
     now = now_ms()
