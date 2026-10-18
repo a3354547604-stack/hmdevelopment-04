@@ -138,11 +138,60 @@
 #define HUB_SUB_CONFIRM_MS       1500u   /* 写完 CCCD 后等"首帧"的窗口 */
 #define HUB_SUB_RETRY_MAX        3u      /* CCCD 写次数上限（含首发） */
 
-/* hub_sub_decide() 的返回值 */
+/* hub_sub_decide() 的返回值（**动作**：一拍一次的决定） */
 #define HUB_SUB_WAIT       0             /* 继续等（首帧或到期），本拍什么都不做 */
 #define HUB_SUB_RETRY      1             /* 再写一次 CCCD */
 #define HUB_SUB_CONFIRMED  2             /* 首帧到了 → 订阅确认，进 READY */
 #define HUB_SUB_FORCE      3             /* 重试用尽仍未确认 → 仍然进 READY（打 WARN） */
+
+/* ------------------------------------------------------------------ *
+ * t85：订阅的**状态**（与上面的"动作"分开 —— t60 F-02）
+ *
+ * t59 把 FORCE 与 CONFIRMED 当成了二选一的"结论"，于是 FORCE 一旦置了 DONE，
+ * hub_sub_confirm_on_frame() 里 `stage == DONE` 的早退就把后续真到来的首帧全吃掉：
+ * **FORCE 覆盖 CONFIRMED**，"以首帧为准"永远是假（全仓该日志 0 条）。
+ *
+ * 现在两者是两个互不覆盖的维度：
+ *   FORCED    = 放行（"不再卡着"的理由），让轮询跑起来；
+ *   CONFIRMED = 该节点的数据真的到了（订阅生效的**唯一**可信证据）。
+ * 状态单调不回退，且允许 FORCED → CONFIRMED 的**追认**。
+ *
+ * 为什么必须有"追认"（一手证据，t76 台架 200 s 日志
+ * ws63-firmware/spike/logs/f70-hub-COM15.log）：节点只在被轮询时才说话
+ * （每帧都带 req_id），而轮询只在 READY 之后才开始 →
+ *   :81  force READY                    1792325962964
+ *   :83  第一条 0x01 seq=1 req_id=1     1792325963526   ← 晚 562 ms
+ * 所以"写完 CCCD 后 1500 ms 内看到首帧"在正常路径上**结构性不可达**（t60 F-02）。
+ * 可达且有意义的判据 = 该节点**首个 0x01 上行帧**（轮询应答或节点主动上报都算）
+ * 触发 CONFIRMED。late（追认发生在 FORCE 之后）本身是"窗口太紧"的度量；
+ * 而 FORCED 后始终不追认则是"订阅未生效/节点根本不发" —— 两者在 STAT 里分得开。
+ * ------------------------------------------------------------------ */
+#define HUB_SUBSTATE_PENDING   0         /* 还没确认、也还没强制放行 */
+#define HUB_SUBSTATE_FORCED    1         /* 到期强制放行；此后仍可被追认为 CONFIRMED */
+#define HUB_SUBSTATE_CONFIRMED 2         /* 真收到过该节点的数据帧 */
+
+/**
+ * 订阅状态迁移（t85，纯函数，与 hub_sub_decide() 同放此处以便主机用例表覆盖）。
+ *   cur         当前状态（HUB_SUBSTATE_*）
+ *   got_frame   本拍是否收到该节点的数据帧
+ *   forced_now  本拍是否到了"重试用尽、强制放行"
+ * 三条性质：① 单调——CONFIRMED 不会被 forced 或任何后续输入降级；
+ *           ② 可追认——FORCED + got_frame → CONFIRMED；
+ *           ③ 无副作用——不碰全局，可重复调用（主机用例表逐条覆盖）。
+ */
+static inline int hub_sub_state_next(int cur, int got_frame, int forced_now)
+{
+    if (got_frame) {
+        return HUB_SUBSTATE_CONFIRMED;          /* 真证据优先，且允许从 FORCED 追认 */
+    }
+    if (cur == HUB_SUBSTATE_CONFIRMED) {
+        return HUB_SUBSTATE_CONFIRMED;          /* 单调：不回退 */
+    }
+    if (forced_now) {
+        return HUB_SUBSTATE_FORCED;
+    }
+    return cur;
+}
 
 /**
  * 订阅状态机的**判定部分**（t59）。

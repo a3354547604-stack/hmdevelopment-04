@@ -498,3 +498,100 @@ int32_t uapi_uart_write(uart_bus_t bus, const uint8_t *buffer, uint32_t length, 
 - 生产镜像与钩子镜像的差异只有 `HUB_TEST_PREBIND_ON/SN` 两个宏；**交付镜像钩子为 OFF**。
 - 收工已恢复：板 A ← `ws63-firmware/output/ws63-liteos-app_all.fwpkg`（生产汇聚）、
   板 B ← `ws63-firmware/output/WS63-XF_AT-2.0.1-alpha.fwpkg`（厂家 xfat-rescue），释放 COM14/COM15。
+
+## 13 t85：订阅确认改成真可达 + FORCE / CONFIRMED 分状态（修 t60 F-02）
+
+### 13.1 缺陷：t59 的「以首帧为准」在正常固件里走不到（t60 F-02）
+
+t59 把 `HUB_SUB_FORCE`（到期强制放行）与 `HUB_SUB_CONFIRMED`（真收到首帧）当成了
+二选一的"结论"，于是：
+
+1. `hub_poll_schedule()`（`hub_agg.c:534`）只对 `HUB_SLOT_READY` 发 poll；
+2. READY 只有两种到法：**首帧确认**，或**写满次数强制放行**；
+3. 而节点只在被轮询时才说话 → 首帧的来源只有 poll → **闭环依赖**；
+4. FORCE 一置 `stage = HUB_STAGE_DONE`，`hub_sub_confirm_on_frame()` 里
+   `if (… || c->stage == HUB_STAGE_DONE) return;` 就把之后到来的首帧全吃掉。
+
+结果：`grep -r "sub-confirmed by first frame"` 全仓 **0 条**（t60 复核证据），
+FORCE 覆盖 CONFIRMED —— 唯一可信证据永远取不到。
+
+**一手时间线**（`ws63-firmware/spike/logs/f70-hub-COM15.log`，t76 台架 200 s，钩子 ON=M1）：
+
+```
+:81  1792325962964  WARN: CCCD unconfirmed after 3 writes (cfm=0x7) -> force READY
+:83  1792325963526  [GLINK] -> 0x01 sn=M1 seq=1 len=161 body={…,"req_id":1,…}   ← 晚 562 ms
+```
+
+首帧确实存在，但**必定晚于 FORCE**：它是第一条 poll 的应答（`req_id` 可证）。
+
+### 13.2 结论与判据改造（为什么不是"把窗口调大"）
+
+"写完 CCCD 后 1500 ms 内看到首帧"在**任何**台架/现场配置下都不可达 —— 节点没有
+主动上报前的握手，汇聚不轮询它就不说话（`spike/logs/f70-hub-COM15.log` 里每条 0x01
+都带 `req_id`）。把窗口调大只是把 FORCE 推后，判据依然不可达。因此按任务卡给的
+第二选项改造判据，**改成可达且有意义的这条**：
+
+> 订阅生效 = 该节点**首个 0x01 上行帧**到达（轮询应答或节点主动上报都算），
+> 且允许它在 FORCE **之后**追认（FORCED → CONFIRMED）。
+
+理由：0x01 是"这个节点的数据真的到了"的唯一硬证据（t59 已确立），而它可观测、可复现；
+"晚到"本身还携带信息（见 13.6）。
+
+### 13.3 改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `src/hub_cfg.h` | 新增状态维 `HUB_SUBSTATE_{PENDING,FORCED,CONFIRMED}` 与纯函数 `hub_sub_state_next(cur, got_frame, forced_now)`（单调、可追认、无副作用）；注释含上面的一手时间线 |
+| `src/hub_client.c` | `hub_cli_t.sub_state` + `sub_written_ms`；`hub_sub_confirm_on_frame()` **删掉 `stage==DONE` 早退**、走纯状态机、只在状态翻转时打 `sub-state … -> CONFIRMED (… after first CCCD[, confirmed AFTER force-release])`；CCCD 分支的 `hub_sub_decide()` 改传**真实** `got_frame`（原来硬编码 0 → CONFIRMED 分支永不执行）并处理 `HUB_SUB_CONFIRMED`；FORCE 只置 `FORCED` + 计数；新增 `sn_of_cli()`（**不能拿 g_cli 下标索引 g_agg.node[]**）与 `cli_substate_count()`；STAT 增 `sub(conf= forced= late= pend= unconf=)` |
+| `tools/hub-selftest.py` | 删掉对「首帧确认」的**源码文本断言**（`sub-confirmed by first frame` 在不在），改为：① 行为断言 `check_sub_state()` —— 编**真** `hub_cfg.h` 跑状态机用例表（含 FORCED+首帧→CONFIRMED、放行不得覆盖确认、单调性穷举）；② 只保留**接线**级文本断言（确认必须走纯函数、FORCE 必须写状态、`got_frame` 必须来自真实状态） |
+
+`hub_agg.c` 在 inScope 内但**未改**：t70 的 poll 记账刚被独立复核过，本轮不动它。
+
+### 13.4 无板验证（可复现）
+
+- `python3 tools/hub-selftest.py` → PASS（C 断言 192/0、Python 级 16 项、样例帧 11/11），
+  新增 `hub_sub_state_next 用例表：OK（fails=0）`。
+- `python3 tools/node-compile-check.py hub hubmock` → 16 个目标×文件、失败 0。
+- **变异检验 5/5 变红**（脚本 `/tmp/t85mut.py`，逐字节还原后 sha256 相同、
+  `MUTATION_BAD=0`）：A 首帧不再确认（回到 t60 F-02 的"确认不可达"）／B 放行冒充确认
+  （回到 t59 的"FORCE 覆盖 CONFIRMED"）／C 确认不再走纯状态机（接线断）／
+  D `got_frame` 又硬编码 0（确认分支永不执行）／E `hub_sub_confirm_on_frame()` 里
+  加回 `if (c->stage == HUB_STAGE_DONE) return;` —— **这一条是 t60 F-02 的原样复现**，
+  被"源码里不得再出现 `== HUB_STAGE_DONE`"这条断言抓住。
+
+### 13.5 上板记录的**镜像来源**口径（修 t60 F-01）
+
+t60 的 F-01 教训：验收③用过一条"板 B 是 t23 旧镜像"的日志。**本卡起，凡引用上板日志，
+必须同时给出每块板的（体积 + sha256 + 代码提交号 + 台架开关状态）**——sha256 只作当次
+变化检测（`.fwpkg` 可复现，但基线随源码变），提交号才是可追溯的口径：
+
+| 板 | 端口 | 镜像 | 体积 | sha256(当次) | 源码提交号 | 台架开关 |
+|---|---|---|---|---|---|---|
+| A 汇聚 | COM15 | `/tmp/t85-hub-prebind.fwpkg` | 见 §13.7 | 见 §13.7 | `8e9719b` + 本卡工作树 | `HUB_TEST_PREBIND_ON=1, SN="M1"` |
+| B 节点 | COM14 | `ws63-firmware/out/NODE_M1.fwpkg` | 见 §13.7 | 见 §13.7 | `8e9719b` | 无 |
+
+交付镜像必须钩子 **OFF**（`ws63-firmware/out/HUB_HUB.fwpkg`，见 §13.7）——两镜像只差
+`HUB_TEST_PREBIND_ON/SN` 两个宏。
+
+### 13.6 STAT 怎么读（不许再有看不见的绿灯）
+
+```
+sub(conf=12 forced=3 late=2 pend=0 unconf=1)
+```
+
+- `conf` 累计真确认过的连接数；`forced` 累计强制放行过的连接数；`pend`/`unconf` 是**当前**还处于
+  PENDING / FORCED 的连接数。
+- **`late>0`** ⇒ 订阅其实生效了，只是第一条数据比窗口晚 → 「窗口太紧」（HUB_SUB_CONFIRM_MS 可调）。
+- **`unconf>0` 且 `late==0`** ⇒ 放行了却始终没有任何该节点数据 → 「订阅未生效 / 节点根本不发」。
+- 两者判据不同、处置不同 —— 这正是 t85 要消除的"看不出订阅到底生效没有"。
+- 逐连接还有一行 `sub-state sn=X -> CONFIRMED (…ms after first CCCD[, confirmed AFTER force-release])`。
+
+### 13.7 上板实测（板 A COM15 汇聚 + 板 B COM14 节点）
+
+（本节由串口复跑结果填写；串口由 architect-op 的 t86 占用中，**释放后补**。
+补齐前的判定：以 §13.4 的无板验证 + §13.1 的一手时间线为准，**上板行标「待复跑」**。）
+
+### 13.8 验证命令（本卡口径）
+
+- `python3 tools/hub-selftest.py`
+- `python3 tools/node-compile-check.py hub hubmock`

@@ -115,6 +115,8 @@ typedef struct {
     uint8_t  sub_tries;
     int16_t  last_cfm_status;       /* t59：最近一次 write cfm 的 status，-1 = 还没有 */
     int64_t  sub_deadline_ms;       /* t59：本次等"首帧"的截止时刻 */
+    uint8_t  sub_state;             /* t85：HUB_SUBSTATE_*（与"放行"分开，单调不回退） */
+    int64_t  sub_written_ms;        /* t85：首次写 CCCD 的时刻（算 CONFIRMED 的时延用） */
     int64_t  next_sub_ms;
     int64_t  conn_at_ms;
     int64_t  next_connect_ms;
@@ -255,24 +257,72 @@ static hub_cli_t *cli_of_sn(const char *sn)
     return cli_of_mac(g_agg.node[slot].mac);
 }
 
-/* t59：订阅生效的确认 = **这个节点的数据真的到了**。
+/* t85：反向一步 —— 客户端状态 → SN（白名单里逐个比 MAC）。
+ * 为什么不让调用方写 g_agg.node[i]：g_cli 的下标是"第一个空槽"，
+ * 白名单下标是按绑定顺序排的，**两者不是一回事**（0x22 的 del 会让白名单前移）。
+ * 拿 g_cli 的下标去索引 g_agg.node[] 会张冠李戴地把别人 SN 写进日志。 */
+static const char *sn_of_cli(const hub_cli_t *c)
+{
+    uint8_t i;
+
+    if (c == NULL) {
+        return "?";
+    }
+    for (i = 0; i < HUB_MAX_SLOTS; i++) {
+        if (hub_mac_eq(g_agg.node[i].mac, c->mac) != 0) {
+            return g_agg.node[i].sn;
+        }
+    }
+    return "?";
+}
+
+/* t85：订阅状态的两个**互不覆盖**的计数（t60 F-02）。
+ * forced = 到期强制放行过几次（"不再卡着"），confirmed = 真收到过首帧（"订阅真生效"）。
+ * late = 放行之后才追认的次数 —— 这个数 >0 就说明 HUB_SUB_CONFIRM_MS 这个窗口
+ * 比"节点第一条数据到达"还紧（台架实测 562 ms，见 hub_cfg.h 的一手日志引用）；
+ * 而 forced>0 且 confirmed==0 才是"订阅没生效/节点根本不发"。
+ * 放在这里（而不是 UART 统计那一段）：hub_sub_confirm_on_frame() 在上面就要用它。 */
+static volatile uint32_t g_sub_forced;
+static volatile uint32_t g_sub_confirmed;
+static volatile uint32_t g_sub_late;
+
+/* t59/t85：订阅生效的确认 = **这个节点的数据真的到了**。
  * 不依赖 write cfm（本 SDK 那笔 cfm 恒非 0，见 hub_cfg.h 的注释），
  * 也不依赖节点在帧里额外带订阅标志（生产节点根本不看订阅状态）。
- * 一旦确认就把槽位置成 READY，轮询随即开始。 */
+ *
+ * t85 修掉 t60 F-02：这里**不再因为 stage==DONE 就早退**。FORCE 会把 stage 置成
+ * DONE 让轮询先跑起来，而节点的第一条数据恰恰是轮询应答（带 req_id）——
+ * 早退等于把唯一可信证据全丢掉（FORCE 覆盖 CONFIRMED）。现在 CONFIRMED 可以
+ * 在 FORCED 之后**追认**，而 late 的时延正是"窗口太紧 vs 订阅没生效"的分界线。 */
 static void hub_sub_confirm_on_frame(const char *sn)
 {
     hub_cli_t *c = cli_of_sn(sn);
+    int prev;
+    int now_state;
+    int64_t now;
 
-    if (c == NULL || c->stage == HUB_STAGE_DONE || c->stage == HUB_STAGE_IDLE) {
+    if (c == NULL || c->used == 0u || c->stage == HUB_STAGE_IDLE) {
         return;
     }
-    if (c->stage != HUB_STAGE_CCCD && c->stage != HUB_STAGE_PROP) {
-        return;
+    prev = (int)c->sub_state;
+    now_state = hub_sub_state_next(prev, 1, 0);
+    if (now_state == prev) {
+        return;                     /* 已经确认过：只记一次，避免日志刷屏 */
     }
-    c->stage = HUB_STAGE_DONE;
-    hub_agg_set_proc(&g_agg, c->conn_id, HUB_PROC_DONE, c->prop_handle);
-    HUB_LOG("sub-confirmed by first frame sn=%s conn=0x%x handle=0x%x (cfm=0x%x ignored)",
-            sn, (unsigned)c->conn_id, (unsigned)c->prop_handle, (unsigned)c->last_cfm_status);
+    c->sub_state = (uint8_t)now_state;
+    now = hub_now();
+    g_sub_confirmed++;
+    if (prev == HUB_SUBSTATE_FORCED) {
+        g_sub_late++;
+    }
+    /* 这一行是 t85 的核心可观测点：CONFIRMED 与 FORCED 分开记，且带时延 */
+    HUB_LOG("sub-state sn=%s -> CONFIRMED (first 0x01 uplink; %ums after first CCCD%s)",
+            sn, (unsigned)((now - c->sub_written_ms) < 0 ? 0 : (now - c->sub_written_ms)),
+            (prev == HUB_SUBSTATE_FORCED) ? ", confirmed AFTER force-release (window too tight)" : "");
+    if (c->stage != HUB_STAGE_DONE) {
+        c->stage = HUB_STAGE_DONE;  /* 确认即放行：不必再等窗口 */
+        hub_agg_set_proc(&g_agg, c->conn_id, HUB_PROC_DONE, c->prop_handle);
+    }
 }
 
 /* 当前已建立的连接数（§3.4：SLE 官方 8 路，白名单上限也是 8） */
@@ -283,6 +333,25 @@ static int cli_conn_count(void)
 
     for (i = 0; i < HUB_MAX_SLOTS; i++) {
         if (g_cli[i].used != 0u && g_cli[i].stage != HUB_STAGE_IDLE) {
+            n++;
+        }
+    }
+    return n;
+}
+
+/* t85：按状态数当前的连接（STAT 用）。
+ * 关键是 unconf = FORCED 且**始终没被追认**的连接数：它和 late 一起把
+ * 「订阅没生效」与「等首帧的窗口太紧」这两种完全不同的故障分开 ——
+ * late>0 说明订阅其实生效了（只是第一条数据来得比窗口晚），
+ * unconf>0 且 late==0 才是真的没生效。 */
+static int cli_substate_count(uint8_t want)
+{
+    int n = 0;
+    uint8_t i;
+
+    for (i = 0; i < HUB_MAX_SLOTS; i++) {
+        if (g_cli[i].used != 0u && g_cli[i].stage != HUB_STAGE_IDLE &&
+            g_cli[i].sub_state == want) {
             n++;
         }
     }
@@ -469,6 +538,8 @@ static void cli_start_discover(hub_cli_t *c)
     c->prop_started = 0u;
     c->prop_handle = 0u;
     c->sub_tries = 0u;
+    c->sub_state = HUB_SUBSTATE_PENDING;    /* t85：新的一轮订阅，状态重来 */
+    c->sub_written_ms = 0;
     c->next_sub_ms = 0;
     HUB_LOG("conn=0x%x exchange MTU(req=%u) -> discover svc 0x%04x",
             c->conn_id, (unsigned)HUB_MTU_SIZE, (unsigned)HUB_SVC_UUID);
@@ -523,6 +594,9 @@ static void cli_subscribe(hub_cli_t *c)
         return;
     }
     c->sub_tries++;
+    if (c->sub_tries == 1u) {
+        c->sub_written_ms = hub_now();   /* t85：CONFIRMED 的时延基准 = 第一次写 CCCD */
+    }
     c->stage = HUB_STAGE_CCCD;
     c->last_cfm_status = -1;                            /* 这一次写还没有 cfm */
     c->sub_deadline_ms = hub_now() + (int64_t)HUB_SUB_CONFIRM_MS;
@@ -1251,10 +1325,17 @@ static void hub_discovery_manage(int64_t now)
         if (c->stage == HUB_STAGE_CCCD) {
             /* t59：CCCD 之后**等首帧**，不等 cfm；判定全在纯函数里（可主机单测）。
              * 旧实现拿 cfm 当判据 + 失败回 PROP 再整轮重发现 = 死循环，
-             * 永远到不了 READY，而 hub_poll_schedule() 只对 READY 发 poll。 */
-            int action = hub_sub_decide(c->sub_tries, (int)c->last_cfm_status, 0,
+             * 永远到不了 READY，而 hub_poll_schedule() 只对 READY 发 poll。
+             * t85：got_frame 传**真实状态**（原来硬编码 0，于是 CONFIRMED 这条分支
+             * 在真代码里从来没有被走到过 —— t60 F-02 的一半）。 */
+            int got_frame = (c->sub_state == HUB_SUBSTATE_CONFIRMED) ? 1 : 0;
+            int action = hub_sub_decide(c->sub_tries, (int)c->last_cfm_status, got_frame,
                                         (now >= c->sub_deadline_ms) ? 1 : 0);
-            if (action == HUB_SUB_RETRY) {
+            if (action == HUB_SUB_CONFIRMED) {
+                /* 首帧先到（正常路径下罕见：节点只在被轮询时才说话，见 hub_cfg.h），
+                 * 确认与放行都在 hub_sub_confirm_on_frame() 里做。 */
+                hub_sub_confirm_on_frame(sn_of_cli(c));
+            } else if (action == HUB_SUB_RETRY) {
                 HUB_LOG("CCCD not confirmed in %ums (cfm=0x%x) -> rewrite CCCD (%u/%u)",
                         (unsigned)HUB_SUB_CONFIRM_MS, (unsigned)c->last_cfm_status,
                         (unsigned)c->sub_tries, (unsigned)HUB_SUB_RETRY_MAX);
@@ -1262,9 +1343,17 @@ static void hub_discovery_manage(int64_t now)
             } else if (action == HUB_SUB_FORCE) {
                 /* 写了 HUB_SUB_RETRY_MAX 次还没有首帧：**不能继续卡在这里**。
                  * 节点侧本来就是"连上就发"（§2.7），订阅与否不影响它发通知；
-                 * 强制进 READY 让轮询跑起来，真有问题会在 poll 上暴露出来。 */
-                HUB_LOG("WARN: CCCD unconfirmed after %u writes (cfm=0x%x) -> force READY, start polling",
-                        (unsigned)c->sub_tries, (unsigned)c->last_cfm_status);
+                 * 强制进 READY 让轮询跑起来，真有问题会在 poll 上暴露出来。
+                 * t85：这里只置 sub_state=FORCED（**放行**），不再冒充"确认"；
+                 * 随后第一条 0x01 上行会把它追认成 CONFIRMED（见 hub_cfg.h）。 */
+                int st = hub_sub_state_next((int)c->sub_state, 0, 1);
+                if (st != (int)c->sub_state) {
+                    c->sub_state = (uint8_t)st;
+                    g_sub_forced++;
+                }
+                HUB_LOG("WARN: CCCD unconfirmed after %u writes (cfm=0x%x) -> sub-state sn=%s = FORCED, "
+                        "start polling (a later first frame can still upgrade to CONFIRMED)",
+                        (unsigned)c->sub_tries, (unsigned)c->last_cfm_status, sn_of_cli(c));
                 c->stage = HUB_STAGE_DONE;
                 hub_agg_set_proc(&g_agg, c->conn_id, HUB_PROC_DONE, c->prop_handle);
             }
@@ -1391,7 +1480,8 @@ static void hub_stat(void)
      * 「rx 在涨而 poll_ok 不动」看出来的，rtt 则是量真实应答时延的唯一现场数字。 */
     HUB_LOG("STAT up=%us rx=%u poll_ok=%u poll_miss=%u late=%u rtt=%u@%u ev_on=%u ev_off=%u ev_fall=%u "
             "disc=%u unknown=%u up_sent=%u retrans=%u gw_miss=%u drop(ev=%u up=%u uart=%u) conns=%d wl=%d "
-            "tx(ok=%u err=%u short=%u param=%u)",
+            "tx(ok=%u err=%u short=%u param=%u) "
+            "sub(conf=%u forced=%u late=%u pend=%d unconf=%d)",
             (unsigned)g_agg.uptime_s, (unsigned)g_agg.rx_frames, (unsigned)g_agg.poll_ok,
             (unsigned)g_agg.poll_miss, (unsigned)g_agg.ev_online, (unsigned)g_agg.ev_offline,
             (unsigned)g_agg.poll_late, (unsigned)g_agg.last_rtt_ms,
@@ -1402,7 +1492,10 @@ static void hub_stat(void)
             (unsigned)g_glink.up_drop, (unsigned)g_uart_err, cli_conn_count(),
             (int)g_agg.wl_count,
             (unsigned)g_uart_tx_ok, (unsigned)g_uart_tx_err,
-            (unsigned)g_uart_tx_short, (unsigned)g_uart_tx_param);
+            (unsigned)g_uart_tx_short, (unsigned)g_uart_tx_param,
+            /* t85：订阅状态一眼分开 —— conf/forced/late 是累计，pend/unconf 是当前 */
+            (unsigned)g_sub_confirmed, (unsigned)g_sub_forced, (unsigned)g_sub_late,
+            cli_substate_count(HUB_SUBSTATE_PENDING), cli_substate_count(HUB_SUBSTATE_FORCED));
 }
 
 #if HUB_MOCK

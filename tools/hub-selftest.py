@@ -295,6 +295,82 @@ int main(void)
 """
 
 
+SUBSTATE_SRC = r"""
+/* t85 断言用台架：直接编真实 hub_cfg.h 的 hub_sub_state_next()（不复制被测逻辑）。
+ * 覆盖 t60 F-02 的核心：FORCE（放行）与 CONFIRMED（真收到数据）必须互不覆盖。
+ * 状态取值按 PENDING(0) < FORCED(1) < CONFIRMED(2) 排列，"不回退"= 结果 >= 当前。 */
+#include <stdio.h>
+#include "hub_cfg.h"
+
+static int g_fails;
+
+static void ck(const char *what, int got, int want)
+{
+    if (got != want) {
+        g_fails++;
+        printf("  FAIL %s: got=%d want=%d\n", what, got, want);
+    }
+}
+
+int main(void)
+{
+    /* 1. 没有事件：状态不动 */
+    ck("pending/idle", hub_sub_state_next(HUB_SUBSTATE_PENDING, 0, 0), HUB_SUBSTATE_PENDING);
+    ck("forced/idle", hub_sub_state_next(HUB_SUBSTATE_FORCED, 0, 0), HUB_SUBSTATE_FORCED);
+    ck("confirmed/idle", hub_sub_state_next(HUB_SUBSTATE_CONFIRMED, 0, 0), HUB_SUBSTATE_CONFIRMED);
+
+    /* 2. 首帧是唯一可信证据：从任何状态都要收敛到 CONFIRMED */
+    ck("frame/from-pending", hub_sub_state_next(HUB_SUBSTATE_PENDING, 1, 0), HUB_SUBSTATE_CONFIRMED);
+    ck("frame/from-forced", hub_sub_state_next(HUB_SUBSTATE_FORCED, 1, 0), HUB_SUBSTATE_CONFIRMED);
+    ck("frame/from-confirmed", hub_sub_state_next(HUB_SUBSTATE_CONFIRMED, 1, 0), HUB_SUBSTATE_CONFIRMED);
+
+    /* 3. t60 F-02 的回归点：放行 ≠ 确认，放行也绝不能覆盖确认。
+     *    一手证据（spike/logs/f70-hub-COM15.log:81/83）：force READY 之后 562 ms
+     *    才来第一条 0x01，"FORCED + 首帧 → CONFIRMED" 就是"订阅真生效"的取证迁移。 */
+    ck("force/does-not-confirm", hub_sub_state_next(HUB_SUBSTATE_PENDING, 0, 1), HUB_SUBSTATE_FORCED);
+    ck("force/keeps-forced", hub_sub_state_next(HUB_SUBSTATE_FORCED, 0, 1), HUB_SUBSTATE_FORCED);
+    ck("force/cannot-downgrade-confirmed",
+       hub_sub_state_next(HUB_SUBSTATE_CONFIRMED, 0, 1), HUB_SUBSTATE_CONFIRMED);
+    ck("late-confirm/after-force", hub_sub_state_next(HUB_SUBSTATE_FORCED, 1, 1), HUB_SUBSTATE_CONFIRMED);
+
+    /* 4. 三条性质穷举（这是"行为断言"的本体，不是文本匹配） */
+    {
+        int cur, frame, forced;
+
+        for (cur = 0; cur <= (int)HUB_SUBSTATE_CONFIRMED; cur++) {
+            for (frame = 0; frame <= 1; frame++) {
+                for (forced = 0; forced <= 1; forced++) {
+                    int r = hub_sub_state_next(cur, frame, forced);
+
+                    if (r < cur) {
+                        g_fails++;
+                        printf("  FAIL 单调性: cur=%d frame=%d forced=%d -> %d（回退了）\n",
+                               cur, frame, forced, r);
+                    }
+                    if (frame != 0 && r != (int)HUB_SUBSTATE_CONFIRMED) {
+                        g_fails++;
+                        printf("  FAIL 首帧必须确认: cur=%d forced=%d -> %d\n", cur, forced, r);
+                    }
+                    if (cur == (int)HUB_SUBSTATE_CONFIRMED && r != (int)HUB_SUBSTATE_CONFIRMED) {
+                        g_fails++;
+                        printf("  FAIL CONFIRMED 是吸收态: forced=%d frame=%d -> %d\n", forced, frame, r);
+                    }
+                    if (frame == 0 && forced == 0 && r != cur) {
+                        g_fails++;
+                        printf("  FAIL 无事件不得改状态: cur=%d -> %d\n", cur, r);
+                    }
+                }
+            }
+        }
+    }
+
+    printf("  %s  hub_sub_state_next 用例表：%s（fails=%d）\n",
+           g_fails ? "FAIL" : "PASS", g_fails ? "FAIL" : "OK", g_fails);
+    return g_fails ? 1 : 0;
+}
+"""
+
+
 def _strip_comments(text):
     """去掉 C 注释（保留字符串字面量）。
 
@@ -393,14 +469,68 @@ def check_cccd_handle():
     if not re.search(r"hub_sub_confirm_on_frame\s*\(", text):
         print("  FAIL  没有 hub_sub_confirm_on_frame()（订阅生效只能由节点首帧确认）")
         fails += 1
-    if "sub-confirmed by first frame" not in text:
-        print("  FAIL  没有 `sub-confirmed by first frame` 日志 —— 上板时无法确认订阅何时生效")
+    # t85：这里**不再**断言日志文本（t60 F-02 的教训：文本断言抓不住"这条路径其实
+    # 走不到"）。判据本身的行为由 check_sub_state() 编真源码跑用例表覆盖；
+    # 这里只断言"接线"——确认必须走那个纯函数、FORCE 必须写状态而不是冒充确认、
+    # got_frame 必须来自真实状态（t59 曾把它硬编码成 0，于是 CONFIRMED 分支永不执行）。
+    confirm_body = _func_body(text, "hub_sub_confirm_on_frame(")
+    if confirm_body is None:
+        print("  FAIL  找不到 hub_sub_confirm_on_frame()")
         fails += 1
+    else:
+        if "hub_sub_state_next(" not in confirm_body:
+            print("  FAIL  hub_sub_confirm_on_frame() 没有走 hub_sub_state_next()"
+                  "（状态迁移必须集中在可主机单测的纯函数里）")
+            fails += 1
+        if "== HUB_STAGE_DONE" in confirm_body:
+            print("  FAIL  hub_sub_confirm_on_frame() 里又有 `== HUB_STAGE_DONE` 的判断"
+                  "（t60 F-02：FORCE 置 DONE 之后到来的首帧会被早退吃掉 → 确认永远取不到）")
+            fails += 1
+    disc_body = _func_body(text, "hub_discovery_manage(")
+    if disc_body is None:
+        print("  FAIL  找不到 hub_discovery_manage()")
+        fails += 1
+    else:
+        if "hub_sub_state_next(" not in disc_body:
+            print("  FAIL  FORCE 分支没有写 sub_state（只置 DONE = 又变成"
+                  "「放行冒充确认」，t60 F-02）")
+            fails += 1
+        if "HUB_SUBSTATE_CONFIRMED" not in disc_body:
+            print("  FAIL  hub_sub_decide() 的 got_frame 不是从真实状态取的"
+                  "（t59 硬编码 0 → CONFIRMED 分支永不执行）")
+            fails += 1
 
     if fails == 0:
         print("  PASS  handle=c->prop_handle / type=SSAP_DESCRIPTOR_CLIENT_CONFIGURATION(0x02)"
-              " / 判据不看 cfm / 判定集中且强制 READY / 首帧确认")
+              " / 判据不看 cfm / 判定集中且强制 READY / 确认走纯状态机（行为断言见"
+              " check_sub_state）")
     return fails
+
+
+def check_sub_state(cc):
+    """t85 行为断言：编**真源码**的 hub_sub_state_next()（hub_cfg.h）跑状态机用例表。
+
+    为什么必须行为化：t59 对"以首帧为准"只有一句源码文本断言（日志字符串在不在），
+    而 t60 复核证明那条路径在正常固件里根本走不到（FORCE 置 DONE → 早退）——
+    文本在、行为假，是典型的假绿灯。这里改成喂状态迁移并检查结果。
+    """
+    with tempfile.TemporaryDirectory() as td:
+        csrc = os.path.join(td, "substate.c")
+        exe = os.path.join(td, "substate")
+        with open(csrc, "w", encoding="utf-8") as f:
+            f.write(SUBSTATE_SRC)
+        cmd = [cc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-O1", "-I", SRC, "-o", exe, csrc]
+        cp = subprocess.run(cmd, capture_output=True, text=True)
+        if cp.returncode != 0:
+            print("  FAIL  订阅状态机用例表编译失败")
+            print(cp.stdout)
+            print(cp.stderr, file=sys.stderr)
+            return 1
+        rp = subprocess.run([exe], capture_output=True, text=True)
+    print(rp.stdout, end="")
+    if rp.stderr.strip():
+        print(rp.stderr, file=sys.stderr)
+    return 1 if rp.returncode != 0 else 0
 
 
 def check_sub_decide(cc):
@@ -746,11 +876,12 @@ def main():
     fwfail = check_fw_version_consistency()
     hfail = check_cccd_handle()
     sfail = check_sub_decide(cc)
+    ssfail = check_sub_state(cc)
     pafail = check_poll_accounting(cc)
     upfail = check_uplink_forward(cc)
     pffail = check_pump_forwards()
     txfail = check_uart_tx_path()
-    total_bad = ((1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail
+    total_bad = ((1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail + ssfail
                  + pafail + upfail + pffail + txfail)
     print("\n==== hub-selftest 总判定：%s ====" % ("PASS" if total_bad == 0 else "FAIL"))
     print("日志：ws63-firmware/out/hub-selftest.log；mock 聚合证据：ws63-firmware/out/hub-mock-agg.log")
