@@ -7,6 +7,16 @@
 用法（栈已起 + 已跑过 `seed --demo`）：
     docker compose exec api python -m app.demo_check        # 或 server/tools/demo-check.sh
 退出码：全绿 0；任一失败 1（输出可直接贴进证据报告）。
+反向（没灌数据）一定是红（rc=1），条数取决于库里还剩什么，别把它当固定值：
+  · 整库 TRUNCATE（连演示账号一起没了）→ 登录失败，整体退出，计 **0/7**；
+  · 只清业务数据、账号与设备仍在 → 逐条跑，7 项全红，计 **0/7**；
+  · 只删读数与活动、告警还在 → D1/D4 仍绿，计 **2/7**。
+
+两条硬约束（t61 F-01/F-03 的教训）：
+1. **所有读详情处一律写回**：§6.13 规定「打开 pending 详情即翻 confirmed 并清空 next_push_at」，
+   自检不得改变被检对象，所以每一次 `GET /api/alerts/{id}` 都必须走 `_read_detail()`（读后按原值写回并自校验）。
+2. **判据不得依赖运行钟点**：凡是「补传」这类判断，一律按数据内标记/关系自证（如 payload.origin=backfill、
+   created_at 与 ts 的差值），不许拿「当前时间是否已过某钟点」当条件——否则同一份数据上午绿、晚上红。
 
 判据来源：任务卡 t49 的 D1–D7 + 契约 §6.13（告警字段/文案）、§6.8（读数类型）、§6.16–§6.18（报表口径）、
 §8.2（燃气二级阈值 2500 mV）、§8.6（门久开 180 s）、§8.7（网关离线→恢复）。
@@ -20,6 +30,9 @@ from typing import Any, Callable
 from . import db
 from .seed import (
     DEMO_ACTIVITY_DAYS,
+    DEMO_BACKFILL_COUNT,
+    DEMO_BACKFILL_DELAY_MIN,
+    DEMO_BACKFILL_MARK,
     DEMO_OFFLINE_HOUR,
     DEMO_OFFLINE_MINUTES,
     DEMO_PASSWORD,
@@ -112,17 +125,21 @@ def _readings(api: Api, device_id: int, **params: Any) -> dict:
 # --------------------------------------------------------------------------- D1–D7
 
 def _read_detail(api: Api, alert_id: int) -> dict:
-    """读告警详情，但**不改变被检对象**。
+    """读告警详情，但**不改变被检对象**——所有读详情处一律走这里（D1/D2/D3/D4）。
 
     为什么需要它：§6.13 规定「打开 pending 详情即翻成 confirmed 并清空 next_push_at」，
-    而演示正要用那条待处置燃气报警演「处置」。自检不得把它检查的状态吃掉，
-    所以读完按原值写回（这是自检脚本的特权，产品代码里没有这个反向操作）。
+    而演示正要用那些待处置告警演「处置」。自检不得把它检查的状态吃掉，
+    所以读完按原值写回（这是自检脚本的特权，产品代码里没有这个反向操作），
+    并在返回前**自校验**写回确实成功——写回失败会静默污染演示态，必须当场炸出来（t61 F-01）。
     """
     before = db.fetch_one("SELECT status, next_push_at FROM alerts WHERE id = :i", {"i": alert_id})
     detail = api.get(f"/api/alerts/{alert_id}")
     if before and before["status"] == "pending":
         db.execute("UPDATE alerts SET status = 'pending', next_push_at = :np WHERE id = :i",
                    {"i": alert_id, "np": before["next_push_at"]})
+    after = db.fetch_one("SELECT status, next_push_at FROM alerts WHERE id = :i", {"i": alert_id})
+    if before is not None and after is not None:
+        assert dict(before) == dict(after), f"读详情改变了被检行 id={alert_id}：{dict(before)} → {dict(after)}"
     return detail
 
 
@@ -172,7 +189,7 @@ def check_d3(api: Api, device_id: int) -> str:
     assert no_motion[0]["summary"] == EXPECT_SUMMARY[("no_motion", 1)], f"summary={no_motion[0]['summary']!r}"
     assert door_left, "door_left 告警一条都没有"
     assert door_left[0]["summary"] == EXPECT_SUMMARY[("door_left", 1)], f"summary={door_left[0]['summary']!r}"
-    snapshot = (api.get(f"/api/alerts/{door_left[0]['id']}").get("snapshot") or {})
+    snapshot = (_read_detail(api, door_left[0]["id"]).get("snapshot") or {})
     assert int(snapshot.get("open_s", 0)) >= DOOR_LEFT_S, f"door_left snapshot={snapshot} 未达 §8.6 的 {DOOR_LEFT_S} s"
 
     today = ms_to_cst_date(now_ms())
@@ -186,16 +203,23 @@ def check_d3(api: Api, device_id: int) -> str:
 
 
 def check_d4(api: Api, device_id: int) -> str:
-    """D4：SOS 有来源区分（button=物理按键 / app=App 触发），两条都在。"""
+    """D4：SOS 有来源区分（button=物理按键 / app=App 触发），两条都在。
+
+    读详情走 `_read_detail()`：其中一条 SOS 是待处置的，直接读会把演示要用的状态吃掉（t61 F-01）。
+    """
     items = api.get("/api/alerts", device_id=device_id, type="sos", limit=200)["items"]
     assert items, "sos 告警一条都没有"
     sources = []
     for item in items:
-        snapshot = (api.get(f"/api/alerts/{item['id']}").get("snapshot") or {})
+        snapshot = (_read_detail(api, item["id"]).get("snapshot") or {})
         sources.append(str(snapshot.get("source") or "?"))
     assert "button" in sources, f"SOS 缺少 source=button（现有 {sources}）"
     assert "app" in sources, f"SOS 缺少 source=app（现有 {sources}）"
-    return f"sos {len(items)} 条，来源={sources}（button 与 app 都在）"
+    pending = [i["id"] for i in items if i["status"] == "pending"]
+    for alert_id in pending:                       # 写回是否成功由 _read_detail 自校验，这里再点一次名
+        row = db.fetch_one("SELECT status FROM alerts WHERE id = :i", {"i": alert_id})
+        assert row and row["status"] == "pending", f"自检把待处置 SOS id={alert_id} 改成了 {row and row['status']}"
+    return f"sos {len(items)} 条，来源={sources}（button 与 app 都在），待处置 {pending} 读后仍为 pending"
 
 
 def check_d5(api: Api, device_id: int) -> str:
@@ -229,12 +253,22 @@ def check_d5(api: Api, device_id: int) -> str:
 
 
 def check_d6(api: Api, device_id: int) -> str:
-    """D6：网关离线→恢复，且断网窗口的证据在库里查得到（跳变 + 补传 + 恢复告警）。"""
+    """D6：网关离线→恢复，且断网窗口的证据在库里查得到（跳变 + 补传 + 恢复告警）。
+
+    判据为什么按「标记」而不是按入库时刻：补传样本由 seed 打上 `payload.origin=backfill`，
+    窗口里也刻意不写任何实时读数，所以「窗口内读数 = 补传样本」在任何钟点都成立。
+    旧判据用「created_at 晚于窗口结束」认补传：13:00 CST 之后实时写入的行也满足该条件，
+    同一份数据在晚上会数出 14 条（设计 11 条）——判据随墙钟退化（t61 F-03）。
+
+    在线瞬时值同样不作判据：seed 写的是真实心跳，灌数 180 s 后调度器会按 §8.7 合法地判离线，
+    那时「离线→恢复」的证据（device_offline 带 recovered_at）仍在。证据行如实打印当前 online（t61 F-02）。
+    """
     today = ms_to_cst_date(now_ms())
     day_from, _ = cst_day_bounds_ms(today)
     off_start = day_from + DEMO_OFFLINE_HOUR * 3600 * 1000
     off_end = off_start + DEMO_OFFLINE_MINUTES * 60 * 1000
     off_last = off_end - 1              # 闭区间：[12:00, 13:00)，13:00 整点那条不算窗口内
+    backfill_created = off_end + DEMO_BACKFILL_DELAY_MIN * 60 * 1000
 
     inside = _readings(api, device_id, type="gateway", **{"from": off_start, "to": off_last})["items"]
     assert not inside, f"断网窗口内不该有网关属性上报，实际 {len(inside)} 条"
@@ -245,29 +279,40 @@ def check_d6(api: Api, device_id: int) -> str:
     gap = max((b - a for a, b in zip(stamps, stamps[1:])), default=0)
     assert gap >= OFFLINE_GAP_MIN * 60 * 1000, f"网关属性时间戳最大跳变只有 {gap / 60000:.0f} 分钟"
 
-    # 窗口内的读数分两类：断网期间采集、恢复之后才入库的才算「补传」证据；
-    # 实时写入的行（例如整点背景值）不能算。判据 = created_at 晚于窗口结束。
+    # 补传证据 = 窗口内带 origin=backfill 标记的行；再自证「采集在断网期、入库在恢复后」：
+    # 全部样本共享同一个入库时刻（窗口结束后 3 分钟）且都晚于自己的采集时刻。两条都与运行钟点无关。
     window_rows = _readings(api, device_id, **{"from": off_start, "to": off_last})["items"]
-    backfill = db.fetch_all(
-        "SELECT node_sn, type, ts_ms, UNIX_TIMESTAMP(created_at) * 1000 AS created_ms FROM sensor_readings "
-        "WHERE device_id = :d AND ts_ms BETWEEN :f AND :t AND created_at > FROM_UNIXTIME(:end / 1000) "
-        "ORDER BY ts_ms", {"d": device_id, "f": off_start, "t": off_last, "end": off_end})
-    assert len(backfill) >= 3, f"断网窗口内的补传读数只有 {len(backfill)} 条（窗口内共 {len(window_rows)} 条）"
-    kinds = sorted({r["type"] for r in backfill})
-    created_ms = min(int(r["created_ms"]) for r in backfill)
-    assert created_ms > off_end, (f"补传读数的最早入库时刻 created_at={created_ms} 不晚于窗口结束 {off_end}，"
-                                  "说明不是「恢复后补传」而是实时写入")
+    rows = db.fetch_all(
+        "SELECT node_sn, type, ts_ms, payload_json->>'$.origin' AS origin, "
+        "UNIX_TIMESTAMP(created_at) * 1000 AS created_ms FROM sensor_readings "
+        "WHERE device_id = :d AND ts_ms BETWEEN :f AND :t ORDER BY ts_ms",
+        {"d": device_id, "f": off_start, "t": off_last})
+    marked = [r for r in rows if (r.get("origin") or "") == DEMO_BACKFILL_MARK]
+    unmarked = [r for r in rows if (r.get("origin") or "") != DEMO_BACKFILL_MARK]
+    assert len(rows) == len(window_rows), f"窗口内读数条数不一致：库 {len(rows)} 条 vs REST {len(window_rows)} 条"
+    assert not unmarked, ("断网窗口内出现了非补传读数（实时写入），演示口径「窗口内只有补传样本」不成立："
+                          f"{[(r['node_sn'], r['type'], int(r['ts_ms'])) for r in unmarked]}")
+    assert len(marked) == DEMO_BACKFILL_COUNT, (
+        f"窗口内带 origin={DEMO_BACKFILL_MARK} 的补传样本 {len(marked)} 条，设计值 {DEMO_BACKFILL_COUNT} 条")
+    kinds = sorted({r["type"] for r in marked})
+    created_values = sorted({int(r["created_ms"]) for r in marked})
+    assert created_values == [backfill_created], (
+        f"补传样本的入库时刻应为窗口结束后 {DEMO_BACKFILL_DELAY_MIN} 分钟（{backfill_created}），实际 {created_values}")
+    early = [r for r in marked if int(r["created_ms"]) <= int(r["ts_ms"])]
+    assert not early, f"补传样本必须「入库晚于采集」，这些行不满足：{[(r['node_sn'], int(r['ts_ms'])) for r in early]}"
 
     offline = api.get("/api/alerts", device_id=device_id, type="device_offline", limit=200)["items"]
     assert offline, "没有 device_offline 告警"
     recovered = [a for a in offline if a.get("recovered_at")]
     assert recovered, f"device_offline 告警没有 recovered_at：{offline}"
     status = api.get(f"/api/devices/{device_id}/status")
-    assert status.get("online") is True, "/status 显示网关仍离线"
+    online = status.get("online")
     return (f"窗口 {off_start}–{off_end} 内网关上报 0 条，前后时间戳跳变 {gap / 60000:.0f} 分钟（≥{OFFLINE_GAP_MIN}）；"
-            f"窗口内补传 {len(backfill)} 条（type={kinds}，窗口内读数共 {len(window_rows)} 条），"
-            f"最早入库时刻 {created_ms} 晚于窗口结束；"
-            f"device_offline {len(offline)} 条，其中 {len(recovered)} 条带 recovered_at；/status online=True")
+            f"窗口内读数 {len(rows)} 条且全部带 origin={DEMO_BACKFILL_MARK} 标记（type={kinds}），"
+            f"入库时刻均为窗口结束后 {DEMO_BACKFILL_DELAY_MIN} 分钟（{backfill_created}）且晚于各自采集时刻"
+            f"——「采集在断网期、入库在恢复后」由数据自证，与运行钟点无关；"
+            f"device_offline {len(offline)} 条，其中 {len(recovered)} 条带 recovered_at；"
+            f"当前 /status online={online}（灌数 180 s 后调度器会合法判离线，属预期，在线瞬时值不作判据）")
 
 
 def check_d7(api: Api, device_id: int) -> str:

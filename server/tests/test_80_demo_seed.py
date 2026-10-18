@@ -16,16 +16,20 @@ from app import config
 from app import db
 from app import demo_check
 from app import seed as seed_mod
-from app.seed import (DEMO_BACKFILL_DELAY_MIN, DEMO_OFFLINE_HOUR, DEMO_OFFLINE_MINUTES, DEMO_TODAY_ACTIVITY,
-                      DEMO_YESTERDAY_ACTIVITY)
+from app.seed import (DEMO_BACKFILL_COUNT, DEMO_BACKFILL_DELAY_MIN, DEMO_BACKFILL_MARK, DEMO_OFFLINE_HOUR,
+                      DEMO_OFFLINE_MINUTES, DEMO_TODAY_ACTIVITY, DEMO_YESTERDAY_ACTIVITY)
 from app.timeutil import cst_day_bounds_ms, ms_to_cst_date, now_ms
 
 TEST_BASE = "http://testserver"
 
 
-def _offline_window() -> tuple[int, int]:
-    """今天的断网窗口 [12:00, 13:00) → (起始 ms, 末 ms)，与 seed 的常量保持一致。"""
-    day_from, _ = cst_day_bounds_ms(ms_to_cst_date(now_ms()))
+def _offline_window(at_ms: int | None = None) -> tuple[int, int]:
+    """断网窗口 [12:00, 13:00) → (起始 ms, 末 ms)，与 seed 的常量保持一致。
+
+    `at_ms` 用于「把时钟往后推」的用例：窗口锚在被 seed 当作「今天」的那一天上，
+    否则推过 CST 零点后，拿真实时钟算出来的窗口会落到另一天（那是 offset=1 的正常全天快照）。
+    """
+    day_from, _ = cst_day_bounds_ms(ms_to_cst_date(at_ms if at_ms is not None else now_ms()))
     start = day_from + DEMO_OFFLINE_HOUR * 3600 * 1000
     return start, start + DEMO_OFFLINE_MINUTES * 60 * 1000 - 1
 
@@ -37,18 +41,35 @@ def _gateway_gap_min(device_id: int) -> float:
     return gap / 60000
 
 
-def _pattern(device_id: int) -> dict:
+def _window_rows(device_id: int, at_ms: int | None = None) -> list[dict]:
+    """断网窗口内的读数行（含 origin 标记与入库时刻），供「补传自证」与钟点无关性断言共用。"""
+    start, last = _offline_window(at_ms)
+    return db.fetch_all(
+        "SELECT node_sn, type, ts_ms, payload_json->>'$.origin' AS origin, "
+        "UNIX_TIMESTAMP(created_at) * 1000 AS created_ms FROM sensor_readings "
+        "WHERE device_id = :d AND ts_ms BETWEEN :f AND :t ORDER BY ts_ms",
+        {"d": device_id, "f": start, "t": last})
+
+
+def _pattern(device_id: int, at_ms: int | None = None) -> dict:
     """与「今天」无关的数据形状：跨天重跑必须完全相同。"""
     days = [int(row["count"]) for row in db.fetch_all(
         "SELECT `count` FROM activity_daily WHERE device_id = :d ORDER BY `date` DESC LIMIT 3", {"d": device_id})]
     alerts = sorted((row["type"], int(row["level"]), row["status"]) for row in db.fetch_all(
         "SELECT type, level, status FROM alerts WHERE device_id = :d", {"d": device_id}))
+    rows = _window_rows(device_id, at_ms)
+    _, last = _offline_window(at_ms)
     return {
         "days": days,
         "alerts": alerts,
         "readings": int(db.fetch_scalar("SELECT COUNT(*) FROM sensor_readings WHERE device_id = :d",
                                        {"d": device_id}, 0) or 0),
         "gateway_gap_min": round(_gateway_gap_min(device_id), 1),
+        # 断网窗口的形状也进指纹：窗口内条数/标记数一旦随运行钟点变（t61 F-03），这里就红。
+        # 入库时刻记「相对窗口结束的分钟数」而不是绝对 ms——换一天跑，绝对时刻本来就该变。
+        "window_rows": len(rows),
+        "window_marked": sum(1 for r in rows if (r.get("origin") or "") == DEMO_BACKFILL_MARK),
+        "window_created_offset_min": sorted({round((int(r["created_ms"]) - (last + 1)) / 60000, 1) for r in rows}),
     }
 
 
@@ -61,8 +82,8 @@ def test_seed_demo_produces_reproducible_dataset(client):
     today = ms_to_cst_date(now_ms())
 
     assert summary["activity_days"] == 60 and summary["alerts"] == 10
-    # 96×3 天的网关快照减去今天断网窗口里被刻意跳过的 4 个点
-    assert summary["readings"] == {"gateway": 284, "gas": 16, "fall": 4, "door": 5, "backfill": 11}
+    # 96×3 天的网关快照减去今天断网窗口里被刻意跳过的 4 个点；gas 少了窗口内那条 12:07 背景值
+    assert summary["readings"] == {"gateway": 284, "gas": 15, "fall": 4, "door": 5, "backfill": 11}
     assert db.fetch_scalar("SELECT `count` FROM activity_daily WHERE device_id = :d AND `date` = :day",
                            {"d": device_id, "day": today}, 0) == DEMO_TODAY_ACTIVITY
     assert db.fetch_scalar("SELECT `count` FROM activity_daily WHERE device_id = :d AND `date` = :day",
@@ -75,23 +96,19 @@ def test_seed_demo_produces_reproducible_dataset(client):
                                                       {"d": device_id})}
     assert statuses == {"pending", "resolved"}
 
-    # D6 的库内证据：窗口内无网关上报、跳变够大、补传是恢复之后才入库的
+    # D6 的库内证据：窗口内无网关上报、跳变够大、补传按标记自证（不看墙钟 → 任意钟点都成立）
     start, last = _offline_window()
     assert db.fetch_scalar("SELECT COUNT(*) FROM sensor_readings WHERE device_id = :d AND type = 'gateway' "
                            "AND ts_ms BETWEEN :f AND :t", {"d": device_id, "f": start, "t": last}, 0) == 0
     assert _gateway_gap_min(device_id) >= 55
-    window_rows = int(db.fetch_scalar("SELECT COUNT(*) FROM sensor_readings WHERE device_id = :d "
-                                      "AND ts_ms BETWEEN :f AND :t", {"d": device_id, "f": start, "t": last}, 0) or 0)
-    backfill = int(db.fetch_scalar("SELECT COUNT(*) FROM sensor_readings WHERE device_id = :d "
-                                   "AND ts_ms BETWEEN :f AND :t AND created_at > FROM_UNIXTIME(:end / 1000)",
-                                   {"d": device_id, "f": start, "t": last, "end": last + 1}, 0) or 0)
-    assert window_rows == 14, "窗口内读数 = 11 条补传 + 12:00 燃气背景 + 12:12/12:48 两个活动点"
-    assert backfill == 11
-    created_ms = int(db.fetch_scalar("SELECT UNIX_TIMESTAMP(MIN(created_at)) * 1000 FROM sensor_readings "
-                                     "WHERE device_id = :d AND ts_ms BETWEEN :f AND :t "
-                                     "AND created_at > FROM_UNIXTIME(:end / 1000)",
-                                     {"d": device_id, "f": start, "t": last, "end": last + 1}, 0) or 0)
-    assert created_ms == last + 1 + DEMO_BACKFILL_DELAY_MIN * 60 * 1000, "补传的入库时刻应为窗口结束后 3 分钟"
+    rows = _window_rows(device_id)
+    marked = [r for r in rows if (r.get("origin") or "") == DEMO_BACKFILL_MARK]
+    assert len(rows) == DEMO_BACKFILL_COUNT == len(marked), (
+        f"窗口内应只有 {DEMO_BACKFILL_COUNT} 条带 origin={DEMO_BACKFILL_MARK} 的补传样本，"
+        f"实际窗口内 {len(rows)} 条、带标记 {len(marked)} 条（窗口内混入实时写入的行会让判据随钟点退化）")
+    assert sorted({int(r["created_ms"]) for r in marked}) == [last + 1 + DEMO_BACKFILL_DELAY_MIN * 60 * 1000], \
+        "补传样本的入库时刻应为窗口结束后 3 分钟（数据内自证，与运行钟点无关）"
+    assert all(int(r["created_ms"]) > int(r["ts_ms"]) for r in marked), "补传样本必须「入库晚于采集」"
 
     online = db.fetch_one("SELECT online, alarm_state, last_properties_json FROM device_online WHERE device_id = :d",
                           {"d": device_id})
@@ -111,7 +128,11 @@ def test_seed_demo_is_repeatable(client):
 
 
 def test_demo_data_does_not_depend_on_run_hour(client, monkeypatch):
-    """冻结时钟：把「现在」往后推 10 小时（可能跨 CST 零点）重跑，数据形状必须一模一样。"""
+    """冻结时钟：把「现在」往后推 10 小时（可能跨 CST 零点）重跑，数据形状必须一模一样。
+
+    窗口类指纹要按「seed 眼里的今天」算（`at_ms=shifted`）：推过零点后，真实时钟算出的窗口
+    会落到另一天，那是 offset=1 的正常全天快照，不是断网窗口。
+    """
     device_id = seed_mod.run_demo()["device_id"]
     before = _pattern(device_id)
 
@@ -120,7 +141,7 @@ def test_demo_data_does_not_depend_on_run_hour(client, monkeypatch):
     again = seed_mod.run_demo()
 
     assert again["device_id"] == device_id
-    assert _pattern(device_id) == before
+    assert _pattern(device_id, at_ms=shifted) == before
 
 
 # --------------------------------------------------------------------------- 自检脚本
@@ -145,6 +166,19 @@ def test_demo_check_does_not_consume_pending_alert(client):
 def test_demo_check_fails_on_empty_db(client):
     """反向验证：库是空的（没灌 --demo）时必须红，否则自检没有意义。"""
     assert demo_check.run(client, base=TEST_BASE, quiet=True) == 1
+
+
+def test_demo_check_leaves_every_pending_alert_untouched(client):
+    """「读详情一律写回」要对**所有**待处置告警成立，不只是燃气（t61 F-01：待处置 SOS 被自检吃掉）。"""
+    device_id = seed_mod.run_demo()["device_id"]
+    sql = ("SELECT id, type, status, next_push_at, push_count FROM alerts WHERE device_id = :d ORDER BY id")
+    before = db.fetch_all(sql, {"d": device_id})
+    assert sum(1 for r in before if r["status"] == "pending") >= 2, "演示态应有不止一条待处置告警（燃气 + SOS）"
+
+    assert demo_check.run(client, base=TEST_BASE, quiet=True) == 0
+
+    after = db.fetch_all(sql, {"d": device_id})
+    assert after == before, "自检改变了告警行（逐字段比对）：自检必须只读"
 
 
 # --------------------------------------------------------------------------- 安全边界

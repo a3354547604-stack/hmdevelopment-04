@@ -289,7 +289,13 @@ DEMO_ACTIVITY_DAYS = 60          # 30 天（§6.18 month）+ 上一周期 30 天
 DEMO_GATEWAY_DAYS = 3            # 环境统计只需近几天，60 天 × 96 条快照没必要
 DEMO_OFFLINE_HOUR = 12           # 断网窗口 = 今天 CST 12:00–13:00（§4.7 演示动作 6）
 DEMO_OFFLINE_MINUTES = 60
-DEMO_BACKFILL_DELAY_MIN = 3      # 补传数据的入库时刻 = 恢复后 3 分钟（D6 判据：入库晚于窗口结束）
+DEMO_BACKFILL_DELAY_MIN = 3      # 补传数据的入库时刻 = 恢复后 3 分钟（数据内自证：created_at 晚于 ts）
+DEMO_BACKFILL_STEP_MIN = 5       # 补传样本粒度：窗口内每 5 分钟一条
+DEMO_BACKFILL_COUNT = 11         # (60-5)/5 = 11 条；D6 与用例按这个设计值断言
+# 补传样本的显式标记（写进读数 payload）。为什么需要它：旧判据用「created_at 晚于窗口结束」认补传，
+# 而窗口内只要有一条实时写入的行，13:00 CST 之后这条判据就会把实时行也算成补传（t61 F-03）——
+# 判据一旦依赖运行钟点，同一份数据在上午与晚上会给出不同答案。改成按标记认，与钟点无关。
+DEMO_BACKFILL_MARK = "backfill"
 DEMO_TODAY_ACTIVITY = 18         # 今日活动次数（写死 → §6.17 趋势句可复算：-25% → 「较昨日下降 25%」）
 DEMO_YESTERDAY_ACTIVITY = 24
 
@@ -312,6 +318,9 @@ def seed_demo_activity(device_id: int, days: int = DEMO_ACTIVITY_DAYS) -> dict[s
     """31 天的活动读数（M4 presence）：小时 08–19、分钟 (i×3)%60，故同一天内分钟不重复。
 
     `active_minutes` 与 `count` 因此都等于设计值，日报/周报/月报三份口径能互相印证。
+
+    落点刻意避开断网窗口（12:00–13:00）：断网期间网关本地缓存，恢复后补传，
+    所以窗口里不该出现「实时写入」的活动点——否则 D6 的「窗口内读数 = 补传样本」不成立（t61 F-06）。
     """
     today = ms_to_cst_date(now_ms())
     per_day: dict[str, int] = {}
@@ -319,7 +328,10 @@ def seed_demo_activity(device_id: int, days: int = DEMO_ACTIVITY_DAYS) -> dict[s
         day = today - timedelta(days=offset)
         count = demo_activity_count(offset)
         for i in range(count):
-            ts = _cst_at(day, 8 + (i % 12), (i * 3) % 60)
+            hour = 8 + (i % 12)
+            if hour == DEMO_OFFLINE_HOUR:
+                hour += 1                     # 挪出断网窗口（分钟不重复，不会与其它点撞唯一键）
+            ts = _cst_at(day, hour, (i * 3) % 60)
             _insert(device_id, "M4", "presence", ts, {"presence": True, "last_motion_ts": ts, "count": 1})
         per_day[iso(day)] = count
     return per_day
@@ -358,7 +370,10 @@ def seed_demo_nodes_readings(device_id: int) -> dict[str, int]:
     counts = {"gas": 0, "fall": 0, "door": 0, "backfill": 0}
 
     # 燃气：背景值（每 2 h 一条，分钟错开 07 避开过程点）远低于 §8.2 一级阈值 1500 mV
+    # 断网窗口内不写背景值：窗口里只留补传样本（见 seed_demo_nodes_readings 末尾）
     for hour in range(0, 24, 2):
+        if hour == DEMO_OFFLINE_HOUR:
+            continue
         _insert(device_id, "M1", "gas", _cst_at(today, hour, 7), {
             "smoke": 180, "lpg": 190, "temp": 24.2, "humi": 52.0, "adc_mv": 420, "level": 0, "warmup": False,
         })
@@ -390,17 +405,20 @@ def seed_demo_nodes_readings(device_id: int) -> dict[str, int]:
         _insert(device_id, "M4", "door", _cst_at(yesterday, hour, minute), {"door": opened, "window": False})
         counts["door"] += 1
 
-    # 断网窗口内补传的节点样本：ts 落在 12:00–13:00（断网期间），created_at 显式写成恢复后 3 分钟
+    # 断网窗口内补传的节点样本：ts 落在 12:00–13:00（断网期间），created_at 显式写成恢复后 3 分钟，
+    # 并在 payload 里打 origin=backfill 标记 —— D6 与用例按标记认补传，不看墙钟（t61 F-03）。
     off_start = _cst_at(today, DEMO_OFFLINE_HOUR, 0)
     off_end = off_start + DEMO_OFFLINE_MINUTES * 60 * 1000
-    for index, minute in enumerate(range(5, DEMO_OFFLINE_MINUTES, 5)):
+    for index, minute in enumerate(range(DEMO_BACKFILL_STEP_MIN, DEMO_OFFLINE_MINUTES, DEMO_BACKFILL_STEP_MIN)):
         _insert(device_id, ("M1", "M2", "M4")[index % 3], "status", off_start + minute * 60 * 1000, {
             "uptime_s": 4 * 3600 + minute * 60,
             "rssi": -58 - (index % 5),
             "power_src": "usb",
             "battery": 255,
+            "origin": DEMO_BACKFILL_MARK,       # 演示标记：仅 seed 写，设备侧不会上报这个字段
         }, created_ms=off_end + DEMO_BACKFILL_DELAY_MIN * 60 * 1000)
         counts["backfill"] += 1
+    assert counts["backfill"] == DEMO_BACKFILL_COUNT, "补传样本条数与设计值不一致（改窗口/粒度时同步改常量）"
     return counts
 
 
