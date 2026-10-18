@@ -155,6 +155,63 @@ def test_message_expands_node_array(client, device):
     assert db.jload(rows[1]["payload_json"])["door"] is True
 
 
+def test_message_accepts_bare_service_envelope(client, device):
+    """§4.6 的 `messages/up` 报文本身就是 service 对象（没有 `services` 外层）。
+
+    规则引擎按设备原始 payload 转发，所以真机明细走的就是这个形状；只认 §5.2 的
+    `{"services":[…]}` 会让它恒 handled=0 且不报错（t39 端到端串测 F-01）。
+    """
+    ts = now_ms()
+    content = json.dumps([
+        {"sn": "M1", "ts": ts, "type": "gas", "payload": {"smoke": 300, "temp": 25.0, "humi": 45.0}},
+        {"sn": "M4", "ts": ts + 1, "type": "door", "payload": {"door": False, "window": False}},
+    ])
+    bare = {"name": "node_samples", "id": f"{GATEWAY_SN}-{ts}", "content": content}
+    resp = _post(client, _envelope("device.message", GATEWAY_SN, bare))
+    assert resp.status_code == 200 and resp.json()["code"] == 0
+    assert resp.json()["data"]["handled"] == 2
+
+    rows = db.fetch_all("SELECT node_sn, type, payload_json FROM sensor_readings WHERE device_id = :d "
+                        "ORDER BY id", {"d": device["id"]})
+    assert [(r["node_sn"], r["type"]) for r in rows] == [("M1", "gas"), ("M4", "door")]
+    assert db.jload(rows[0]["payload_json"])["smoke"] == 300
+
+    # §6.8 回读：落库的读数能被 REST 读出来（不只库里躺着一行）
+    data = client.get(f"/api/devices/{device['id']}/readings?node_sn=M1&limit=5",
+                      headers={"Authorization": f"Bearer {device['token']}"}).json()["data"]
+    assert [it["payload"]["smoke"] for it in data["items"]] == [300]
+
+
+def test_message_accepts_both_envelope_shapes(client, device):
+    """两种信封并存：§4.6 裸对象与 §5.2 `{"services":[…]}` 都要能落库。
+
+    两批刻意用不同节点（M1 / M2），避免 (device,node,type,ts_ms) 唯一键把第二批吃掉。
+    """
+    ts = now_ms()
+    bare = {"name": "node_samples", "id": f"{GATEWAY_SN}-bare-{ts}",
+            "content": json.dumps([{"sn": "M1", "ts": ts, "type": "gas", "payload": {"smoke": 340}}])}
+    wrapped = {"services": [{"service_id": "gateway", "name": "node_samples",
+                             "id": f"{GATEWAY_SN}-wrapped-{ts}", "content": json.dumps(
+                                 [{"sn": "M2", "ts": ts, "type": "fall", "payload": {"fall": 1}}])}]}
+    bare_resp = _post(client, _envelope("device.message", GATEWAY_SN, bare))
+    wrapped_resp = _post(client, _envelope("device.message", GATEWAY_SN, wrapped))
+    assert bare_resp.json()["data"]["handled"] == 1
+    assert wrapped_resp.json()["data"]["handled"] == 1
+    sns = [r["sn"] for r in db.fetch_all("SELECT sn FROM nodes WHERE device_id = :d ORDER BY sn",
+                                         {"d": device["id"]})]
+    assert sns == ["H1", "M1", "M2", "M4"]
+
+
+def test_message_malformed_body_returns_200_handled_zero(client, device):
+    """既不是裸 service 也不含 `services` 的畸形体：不崩、handled=0、不落库（§5.2 兜底）。"""
+    for body in ({"foo": "bar", "bogus": 1}, {"services": "not-a-list"}, {"services": [1, 2]}):
+        resp = _post(client, _envelope("device.message", GATEWAY_SN, body))
+        assert resp.status_code == 200 and resp.json()["code"] == 0
+        assert resp.json()["data"]["handled"] == 0
+    assert db.fetch_scalar("SELECT COUNT(*) FROM sensor_readings WHERE device_id = :d",
+                           {"d": device["id"]}, 0) == 0
+
+
 def test_message_with_corrupt_content_returns_200(client, device):
     """§5.2：识别不了的载荷也必须 200，否则平台会一直重推把链路堵死。"""
     resp = _post(client, _envelope("device.message", GATEWAY_SN, {"services": [{

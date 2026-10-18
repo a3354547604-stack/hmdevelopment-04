@@ -2,6 +2,7 @@
 
 实现约束（§5.2 逐条）：
 - 只依赖 `resource` + `notify_data.header.device_id` + `notify_data.body.services[]`；
+  但 `body` 也可能是 §4.6 的**裸 service 对象**（`messages/up` 原文），见 `_services()`；
 - 无法识别的 `resource` **返回 200 并记 WARN**（不阻断平台重试队列）；
 - 缺 `device_id` 时用 SN 兼容匹配（`node_id` / 属性里的 `device_sn`）；
 - 平台重试靠 `event_id` 与 `sensor_readings` 唯一键幂等，不靠「只处理一次」。
@@ -31,9 +32,26 @@ RESOURCE_MESSAGE = "device.message"
 
 # --------------------------------------------------------------------------- 解析辅助
 
+# 一个 service 对象可能带的键（§4.3 属性 / §4.4 事件 / §4.6 报文都用这几个）
+_SERVICE_KEYS = ("content", "properties", "paras", "event_type", "service_id", "name")
+
+
 def _services(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """取出 service 列表，两种信封都吃。
+
+    §5.2 的信封是 `{"services": [...]}`；而 §4.6 的 `messages/up` 报文**本身就是**一个 service
+    对象（`{"name":"node_samples","id":…,"content":"[…]"}`）——规则引擎按设备原始 payload 转发，
+    不会替我们补 `services` 外层。只认前者会让真机明细恒 handled=0 且不报错（t39 F-01），
+    所以后者也要按「单元素列表」处理；`services` 存在但不是列表时同样回落到裸对象判断。
+    """
     services = body.get("services")
-    return services if isinstance(services, list) else []
+    if isinstance(services, list):
+        # 只留 dict：畸形载荷（`{"services":[1,2]}`）要走到「无法识别 → 200 + handled=0」，
+        # 而不是在 `services[0].get(...)` 上抛 AttributeError 变成 500。
+        return [item for item in services if isinstance(item, dict)]
+    if any(key in body for key in _SERVICE_KEYS):
+        return [body]
+    return []
 
 
 def _properties(body: dict[str, Any]) -> dict[str, Any]:
