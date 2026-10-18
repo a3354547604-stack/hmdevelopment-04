@@ -898,3 +898,30 @@ cd server && python -m pytest
 | CAL-09 | 节点 `ts` 可信前 `/api/health.clock_source` 必须为 `server`；固件实现 §3.4 `0x13` 校时后改 `CLOCK_SOURCE=device` |
 | Push Kit | P1：`PUSH_MODE=real` 需要 App 侧 client_id/secret（用户提供） |
 | 真机联调 | 当前下行命令为 `mock` 模式：命令流水可见、不会真正到达网关；接真机后置 `IOTDA_DISPATCH_MODE=real` |
+| 公网部署 | 服务器公网部署需要用户先给 **Q8**（云服务器系统版本 / SSH 方式 / 公网 IP / 安全组端口）——准备与施工单见 §12 |
+
+## 12. 公网部署（生产口径）
+
+给 App 提供 REST、并接收 **IoTDA 规则引擎 webhook 回调**，服务器必须在公网可达。生产用一份独立的 compose：
+
+```bash
+cd server
+cp .env.example .env                            # 填 5 个必填项：DB_PASSWORD / MYSQL_ROOT_PASSWORD / JWT_SECRET / WEBHOOK_TOKEN / PUBLIC_HTTP_PORT
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml ps    # db+api healthy、proxy Up
+curl -s http://127.0.0.1:3000/api/health        # {"code":0,... "db":"ok"}
+```
+
+| 文件 | 作用 |
+|---|---|
+| [`docker-compose.prod.yml`](docker-compose.prod.yml) | 生产栈：**db 不发布任何宿主机端口**（公网碰不到 3306）、api 只绑 `127.0.0.1:3000`、只有 nginx 反代对外、每服务有内存上限与日志轮转 |
+| [`deploy/nginx.prod.conf`](deploy/nginx.prod.conf) | 唯一对外入口（80）：`/api/` → api:3000，`/` 一律 404；`server_tokens off` |
+| [`deploy/hmprogram-server.service`](deploy/hmprogram-server.service) | 可选 systemd unit：开机自启 + `systemctl status/restart`（不装它则靠 compose 的 `restart: unless-stopped`） |
+| [`deploy/部署施工单.md`](deploy/部署施工单.md) | 从零到 `/api/health` 通的施工单（每段 ≤3 步、含失败对策与**回滚**步骤） |
+| [`deploy/IoTDA回调前置清单.md`](deploy/IoTDA回调前置清单.md) | 公网可达/端口/路径/鉴权口径 + 平台侧配置项 + 需要用户提供的信息（Q8） |
+| [`tools/db-backup.sh`](tools/db-backup.sh) / [`tools/db-restore.sh`](tools/db-restore.sh) / [`tools/db-rows.sh`](tools/db-rows.sh) | 备份（mysqldump 在 db 容器内执行）→ 清库恢复 → 逐表行数比对一致；产物落 `server/backups/`（已 gitignore） |
+
+- 与开发 compose **同项目名 `hmprogram`**（同一套容器名与数据卷）：切换时先 `docker compose down` 再起另一份，不要同时跑。
+- 脚本用 `bash tools/db-backup.sh` 调用（仓库里模式位 644，克隆后没有执行权限）；备份产物在 `server/backups/`，默认留 14 份。
+- 硬约束：只动本项目容器；不 `docker system prune`、不改系统自带 nginx、不用 host 网络。
+- 真实公网部署需要用户确认（Q8）后再做；本机只做本地实测。

@@ -1,0 +1,31 @@
+[Unit]
+# hmprogram 服务器（独居老人居家安全监测 · 后端）——把 docker compose 生产栈交给 systemd 管
+#
+# 二选一说明（验收允许 compose restart 或 systemd，本卡两个都给，推荐用这个）：
+#   · compose 的 `restart: unless-stopped` 只在 docker 守护进程活着时自愈；
+#   · 这份 unit 额外解决「开机自启 + 一条命令看状态/重启」，对不熟 docker 的人更友好。
+# 装了这份 unit 就不需要再 `docker compose up -d` 手动起服务了。
+#
+# 安装（施工单 §4）：
+#   sudo cp server/deploy/hmprogram-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now hmprogram-server
+# 若部署目录不是 /opt/hmprogram，把下面的 WorkingDirectory 与 ExecStart 里的路径一起改掉。
+Description=hmprogram server (eldercare monitoring backend, docker compose)
+# 施工单见部署目录里的「部署施工单.md」（systemd 不接受带中文路径的 Documentation=，故不写在这里）
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/hmprogram/server
+# --remove-orphans 只清理**本项目**的孤儿容器，不会碰这台机器上其它项目的容器
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -f docker-compose.prod.yml down
+ExecReload=/usr/bin/docker compose -f docker-compose.prod.yml restart api
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
