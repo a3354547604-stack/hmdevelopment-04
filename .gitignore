@@ -4,3 +4,37 @@ dist/
 *.log 
 .DS_Store 
 Thumbs.db 
+
+# ── t54 提交前仓库体检（2026-10-18）补充 ─────────────────────────
+# Python 缓存 / 测试缓存（tools/ 子树此前没有任何规则）
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 智能体协调状态（此前只在 .git/info/exclude 里，换机器 clone 会重新出现）
+.agent-teams/
+
+# WS63 固件产物与上板日志（ws63-firmware/ 此前没有 .gitignore）
+*.fwpkg
+*.img
+ws63-firmware/out/
+ws63-firmware/output/
+ws63-firmware/spike/logs/
+ws63-firmware/spike/out/
+# 上板一次性探针脚本与串口日志；scripts/ 下的 node-build.sh、node-targets.txt、
+# ws63-sdk-lock.sh 是生产脚本，下列两条规则不会命中它们
+ws63-firmware/scripts/*.ps1
+ws63-firmware/scripts/*_log.txt
+# 0-10 号是一次性上板记录（11 号起是正式设计文档，不受影响）
+ws63-firmware/doc/[0-9]-*
+# 厂商烧录工具（约 31 MB 的 Qt/JLink 二进制，不是本项目的产物）
+ws63-firmware/tools/
+# C# 烧录器编译出的可执行文件（源码 ws63flash.cs 保留在磁盘）
+ws63-firmware/flasher/*.exe
+
+# App 安装包（android-app/dist/、harmony-app/*.hap 已有子规则，这里兜底）
+*.hap
+*.apk
+
+# 第三方厂商手册（版权归原厂；留磁盘供开发参考，不进仓库）
+docs/雷达LD6002C/*.pdf
