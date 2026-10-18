@@ -90,13 +90,15 @@ void node_sensor_sample(uint32_t now_ms, node_snapshot_t *s)
         fall = 1;                               /* demo：本地造一次跌倒，走真实上报链路 */
     }
 
+    /* presence（§2.4.2）在 P0 是**省略键**：PM 2026-10-18 裁定（t23），见 node_cfg.h 的
+     * NODE_PRESENCE_ENABLE。刻意**不再**用「跌倒报警中=1」凑一个值 —— 那是把 fall 冒充成
+     * presence，会让 App 在没人在场时显示「有人」。0x0E01 + user log 关键字扫描（
+     * radar_hub_get_presence）原样留在驱动里当 P1 钩子，打开开关即可直接用真实判定。 */
+#if NODE_PRESENCE_ENABLE
     pres = radar_hub_get_presence(now_ms);
-    if (pres < 0) {
-        /* user log 关键字还没命中：presence 退化为「报警中=1，其余=0」。
-         * 这是硬件能力限制（模块协议里没有二进制存在帧），已在 doc/11 作为契约缺口上报；
-         * 一旦 [RADAR-LOG] 里出现可识别的存在行，presence 立刻改用真实判定。 */
-        pres = (fall == 1) ? 1 : 0;
-    }
+#else
+    pres = -1;              /* 本地哨兵：本版不产出，node_json_fall 也不会写这个键 */
+#endif
 
     /* 边沿检测：两个方向都要报（见文件头「职责边界」） */
     if (fall >= 0 && fall != g_last_fall) {
@@ -117,7 +119,7 @@ void node_sensor_sample(uint32_t now_ms, node_snapshot_t *s)
     }
 
     s->fall = (fall < 0) ? 0 : fall;
-    s->presence_i = pres;
+    s->presence_i = (pres < 0) ? 0 : pres;   /* §2.4.2 只有 0/1，-1 是本地概念（t23：该键 P0 不出现） */
     s->src = (radar_hub_get_fall_src() == 1) ? "tx2" : "uart";
     s->has_dist = false;
     s->warmup = false;

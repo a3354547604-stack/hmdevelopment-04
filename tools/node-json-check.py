@@ -44,8 +44,14 @@ SPEC = {
         # 注意：§2.4.1 把 temp/humi 标为「必填」，故这里把它们移到 required（见下 _fix）
     },
     "fall": {
-        "required": {"fall": "i", "presence": "i"},
+        # §2.4.2 的 presence 在 P0 **整键不出现**，所以它不是「选填」而是**禁止出现**：
+        # PM 2026-10-18 裁定（t23），presence 降为 P1。
+        # 为什么连 "presence":0 也不许：写 0 等于替硬件断言「确认无人」，而 LD6002C
+        # 根本没有二进制存在帧，节点拿不到这个事实（旧实现用「跌倒报警中=1」凑值）。
+        # 开关是 node_cfg.h 的 NODE_PRESENCE_ENABLE；打开它就要把这里从 absent 移回 required。
+        "required": {"fall": "i"},
         "optional": {"src": "s", "dist": "f"},
+        "absent": ["presence"],
     },
     "door": {
         "required": {"door": "b", "window": "b"},
@@ -142,8 +148,15 @@ def check_frame(name, raw):
     for k, kind in spec["required"].items():
         if k not in pl:
             bad(f"[{name}] {t} 缺必填字段 {k}")
+    # 「禁止出现」的键（当前只有 fall 的 presence，P0 省略；见 SPEC 里的裁定注释）。
+    # 单独一条消息，免得它掉进下面「契约外字段」里被说得含糊。
+    for k in spec.get("absent", ()):
+        if k in pl:
+            bad(f"[{name}] {t} 在 P0 不得出现 {k!r}（PM 2026-10-18 裁定，见 node_cfg.h "
+                f"NODE_PRESENCE_ENABLE）: {pl[k]!r}")
     for k, v in pl.items():
-        if k not in spec["required"] and k not in spec["optional"]:
+        if (k not in spec["required"] and k not in spec["optional"]
+                and k not in spec.get("absent", ())):
             bad(f"[{name}] {t} 出现契约外字段 {k!r}")
             continue
         kind = spec["required"].get(k) or spec["optional"][k]
@@ -210,7 +223,8 @@ def run_inside_docker(extra=()):
         "-v", f"{ROOT}:/w", "-w", "/w",
         IMAGE, "python3", "tools/node-json-check.py", "--inside-docker", *extra,
     ]
-    print("$ " + " ".join(cmd))
+    # 同样走 stderr，理由同上（--sample 的 stdout 必须只有样例本身）
+    print("$ " + " ".join(cmd), file=sys.stderr)
     return subprocess.call(cmd)
 
 
@@ -250,7 +264,11 @@ def main():
             print("容器里也没有找到 C 编译器（试过 %s）" % ", ".join(CC_CANDIDATES), file=sys.stderr)
             return 2
         if docker_available():
-            print(f"主机无 C 编译器 → 退回容器 {IMAGE} 执行（等价编译参数）")
+            # 走 stderr：这行是「怎么跑的」诊断信息，不是结果。留在 stdout 会混进
+            # --sample 的证据流里（而且因为 stdout 是块缓冲、容器输出直接写 fd 1，
+            # 它还会跑到文件末尾，把入库样例弄脏 2 行）。其余诊断本就用 stderr。
+            print(f"主机无 C 编译器 → 退回容器 {IMAGE} 执行（等价编译参数）",
+                  file=sys.stderr)
             return run_inside_docker(extra)
         print("环境缺 gcc 且没有可用的 docker 镜像 %s" % IMAGE, file=sys.stderr)
         return 2

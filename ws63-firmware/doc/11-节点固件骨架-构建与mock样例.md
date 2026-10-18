@@ -6,8 +6,12 @@
 >
 > **未做**：上板实测。本文里凡涉及真机读数/链路的地方都标注「待用户实测」。
 >
-> **后续任务**：**t32「雷达 fall/presence 采样缓存只读不写」**的修复记录见本文 **§9**
-> （同一份 `src/`、同一块板 M2；t32 只改了 `node_sensor_radar.c` 一个文件）。
+> **后续任务**：
+> - **t32「雷达 fall/presence 采样缓存只读不写」**的修复记录见本文 **§9**
+>   （同一份 `src/`、同一块板 M2；t32 只改了 `node_sensor_radar.c` 一个文件）。
+> - **t23「对齐 presence 裁定：P0 省略该键」**的记录见本文 **§10**（PM 2026-10-18 裁定，
+>   改了 `node_cfg.h`/`node_json.c`/`node_sensor_radar.c`/`node_sensor_mock.c` 四个文件；
+>   §5 样例、§6 缺口 1 已随该裁定更新）。
 
 ---
 
@@ -61,12 +65,18 @@ ws63-firmware/scripts/node-build.sh            # 也可只编 m2 mock
 
 | 目标 | 角色 | 额外宏 | 编进去的源文件 | 字节数 | sha256 |
 |---|---|---|---|---|---|
-| `NODE_M1.fwpkg` | M1 厨房 | `-def=NODE_ROLE=1` | node_main/node_json/node_link/**node_sensor_gas**/sle_hub/sle_hub_adv | 1467944 | `001c70200d232ded5cc76d5d293f1ddcf2a323380f59e3e2629267d10a45a067` |
-| `NODE_M2.fwpkg` | M2 卧室 | `-def=NODE_ROLE=2` | node_main/node_json/node_link/**node_sensor_radar + radar_hub**/sle_hub/sle_hub_adv | 1467816 | `e583bf06c848f95cf9584a389c4fbe255d59ac8544ff01dd3bca8f22c17cc1c6` |
-| `NODE_M4.fwpkg` | M4 门厅 | `-def=NODE_ROLE=4` | node_main/node_json/node_link/**node_sensor_door**/sle_hub/sle_hub_adv | 1463656 | `e49e8816e95a23c2883b3974f93c124f9b2b47c38d4b75208495c85a478e1ba6` |
-| `NODE_MOCK.fwpkg` | M1(伪数据) | `-def=NODE_ROLE=1,NODE_MOCK=1` | node_main/node_json/node_link/**node_sensor_mock**/sle_hub/sle_hub_adv | 1463016 | `7b7372051c1c7e6ed3f4a67ab8dcf79121514fc44f2a74d4a860bdca5e19a8e8` |
+| `NODE_M1.fwpkg` | M1 厨房 | `-def=NODE_ROLE=1` | node_main/node_json/node_link/**node_sensor_gas**/sle_hub/sle_hub_adv | 1467944 | `998d49dffb480cb7328be2a6c4ada2b18f0d6fc5e7697b3e357a0f305366e1cd` |
+| `NODE_M2.fwpkg` | M2 卧室 | `-def=NODE_ROLE=2` | node_main/node_json/node_link/**node_sensor_radar + radar_hub**/sle_hub/sle_hub_adv | 1467816 | `8ee2a5e0d27586f220accd3d81ccb0bc7f02395ddaca36d5f014dcbdf3bd6f09` |
+| `NODE_M4.fwpkg` | M4 门厅 | `-def=NODE_ROLE=4` | node_main/node_json/node_link/**node_sensor_door**/sle_hub/sle_hub_adv | 1463656 | `320e39d615a40b95b25b5e2df5c962c1410400aff595373748d877199b51a87c` |
+| `NODE_MOCK.fwpkg` | M1(伪数据) | `-def=NODE_ROLE=1,NODE_MOCK=1` | node_main/node_json/node_link/**node_sensor_mock**/sle_hub/sle_hub_adv | 1462952 | `cba8c29be47ba04c3e7afe53e656f133a71ec351249ddbc7a27e2b9f6c1a58d9` |
 
-（构建时刻 2026-10-17 22:18–22:19 +08:00。四个 sha256 互不相同 —— 这一条本身就是「四份确实是四份」的证据。）
+（构建时刻 **2026-10-18（t23 之后）**。上表是**当前入库包**的指纹；t32 那一轮的同表见 §9.9，
+t23 前后逐目标的差异与三个易误读点见 §10.5。四个 sha256 互不相同 ——
+这一条本身就是「四份确实是四份」的证据。
+`NODE_M2` 的字节数与 t2 相同**不代表回退**：t32 加了两行回填（+64 B）、t23 删掉
+`radar_hub_get_presence()` 调用与那个 `(fall==1)?1:0` 退化分支（−64 B），一来一去正好抵消；
+t32 的行为由 `tools/node-radar-cache-check.py` 单独证明。`NODE_M1`/`NODE_M4` 体积没变但
+sha256 变了也不是脏构建：`node_json.c` 是四个节点目标共编的同一个 TU。）
 
 **每份固件开机就自报角色**（`node_main.c:144-146` 的两行，`NODE_BUILD_TAG` 由 `node_cfg.h:163` 宏拼接），
 烧反 / `-def` 没生效一眼可见：
@@ -151,9 +161,12 @@ grep -c "packet success" build-*.log
   12  [M1] tx 158 bytes: {"sn":"M1","ts":1760000008000,"type":"gas","payload":{"smoke":1180,"temp":26.8,"humi":52.1,"adc_mv":[590],"warmup":false},"seq":205,"req_id":204,"fw":"0.1.0"}
 
   49  --- M2 卧室节点（fall，events 立即上报）---
-  50  [M2] tx 113 bytes: {"sn":"M2","ts":1760000000000,"type":"fall","payload":{"fall":1,"presence":1,"src":"uart"},"seq":20,"fw":"0.1.0"}
-  51  [M2] tx 113 bytes: {"sn":"M2","ts":1760000002000,"type":"fall","payload":{"fall":0,"presence":1,"src":"uart"},"seq":21,"fw":"0.1.0"}
-  57  [M2] tx 113 bytes: {"sn":"M2","ts":1760000030000,"type":"fall","payload":{"fall":0,"presence":0,"src":"uart"},"seq":35,"fw":"0.1.0"}
+  50  [M2] tx 100 bytes: {"sn":"M2","ts":1760000000000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":20,"fw":"0.1.0"}
+  51  [M2] tx 100 bytes: {"sn":"M2","ts":1760000002000,"type":"fall","payload":{"fall":0,"src":"uart"},"seq":21,"fw":"0.1.0"}
+  60  [M2] tx 100 bytes: {"sn":"M2","ts":1760000020000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":30,"fw":"0.1.0"}
+
+      ↑ M2 的 payload **只有 fall 一个键**（100 字节）。t23 之前是三键
+        `{"fall":…,"presence":…,"src":"uart"}`（113 字节）——presence 已按 PM 裁定从 P0 移除，见 §10。
 
   81  --- M4 门厅节点（door/presence，跳变立即上报）---
   82  [M4] tx 112 bytes: {"sn":"M4","ts":1760000000000,"type":"door","payload":{"door":true,"window":false,"ch":0},"seq":30,"fw":"0.1.0"}
@@ -176,20 +189,23 @@ grep -c "packet success" build-*.log
 | `warmup` 从第 6 行 true 变第 9 行 false，且**每帧都带**（不是缺省） | §2.4.1 选填；M1 每帧都显式给出预热状态，让云端别按正常阈值告警 |
 | 全文 `:null` 出现 0 次（未装 MQ-5/MQ-7 就整键不写 `lpg`/`co`） | §0.4「无值 = 字段缺省，不写 null」 |
 | M4 的 `ch` 只在 `door` 跳变帧里出现 | §2.4.3「ch 仅跳变上报时出现」 |
-| M2 的 `presence` 在第 57 行由 1 变 0（60 s 无新触发） | §2.4.4 语义（M2 的实际能力见 §6 第 1 条） |
+| M2 的 `fall` 帧里**没有** `presence` 键（100 字节，比 t23 之前少 13 字节） | PM 2026-10-18 裁定：presence 降为 P1、P0 **整键不出现**（见 §10；不是「选填」，连 `"presence":0` 也不许） |
 
 ---
 
 ## 6. 与契约的偏差 / 需要 PM 裁决的缺口
 
-1. **`presence`（M2）没有可靠数据源 —— 契约缺口。**
-   §2.4.2 把 `presence` 列为 `fall` 的**必填**字段，但 LD6002C 的二进制协议里**没有任何存在/有人上报帧**
+1. **`presence`（M2）没有可靠数据源 —— 已裁（PM 2026-10-18，t23）：presence 降为 P1，
+   P0 的 `fall` payload **整键不出现**。契约不改，实现按「不产出该键」执行。**
+   （原缺口：）§2.4.2 把 `presence` 列为 `fall` 的**必填**字段，但 LD6002C 的二进制协议里**没有任何存在/有人上报帧**
    （类型全集：0x0E02 跌倒、0x0E04/0x0E06/0x0E08/0x0E0A/0x0E0C/0x0E0E 设置与回包、0x0E01 user log 开关；
    实测日志里另有未文档化的 0x0F09，语义未知，**不假定它是存在状态**）。
    技术规格书 V1.1 §5.2 第 12 条说明「有无人存在」只能从上位机打开的 **user log** 里看英文字符串。
    本固件为此做了两手：开机发 `0x0E01`（DATA[0]=1）打开 user log 并扫描 ASCII 关键字；
-   **未命中关键字之前**，`presence` 退化为「跌倒报警中=1，否则 0」。
-   → 需要 PM 决定：是允许 M2 的 `presence` 长期缺省/退化，还是给 M2 加一路真的存在传感器（PIR/毫米波）。
+   **未命中关键字之前**，`presence` 曾退化为「跌倒报警中=1，否则 0」。
+   → **裁定结果**：不再用退化值冒充（它会让 App 在没人在场时显示「有人」，演示中误导评委）。
+   开关 `NODE_PRESENCE_ENABLE`（`node_cfg.h`）默认 0；打开条件与理由见 §10。
+   0x0E01 + user log 扫描**整条链路保留**，作为 P1 钩子与现场诊断日志。
 2. **`cmd=reboot` 无实现 —— SDK 没有可用接口。** SDK 公开头文件里搜不到 `uapi_reboot`/`osal_reboot`/
    `uapi_reset` 一类复位 API。当前实现：回一条 `nack`（不改状态），并在串口打印原因。
 3. **`set` 的 `result` 码复用 §6.7 口径**：成功=0、越界=1002、未知键=1003。契约 §2.5 只给了
@@ -391,3 +407,116 @@ HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh bash ws63-firmware/script
 没有蹭到汇聚固件。+64 B 就是两行回填加上注释/符号带来的差异。
 
 `tools/node-compile-check.py m2` 亦复跑通过（7 个「目标×文件」，失败 0）。
+
+---
+
+## 10. t23 记录：presence 对齐 PM 裁定（P0 省略该键）
+
+> 任务卡 **t23**。范围：`ws63-firmware/src/`（radar/mock 驱动里的 fall payload 组装）
+> + 自己的自检脚本 + 本文件。**未动** SLE 上报协议、身份派生（§2.7）、M4 的 `presence` payload（§2.4.4）。
+
+### 10.1 裁定（PM 2026-10-18）
+
+presence **降为 P1**，P0 的 `fall` payload 里**整键不出现**。理由：LD6002C 二进制协议确无存在/有人帧；
+D5 已定 P0 的「无活动」判定 = 门磁跳变 + 心跳，presence 不是 P0 必需。
+**明确禁止**继续用「跌倒报警中=1」的退化值冒充 —— 那会让 App 在没人在场时显示「有人」，演示时误导评委。
+
+### 10.2 改了什么（4 个源文件）
+
+| 文件 | 改动 | 为什么 |
+|---|---|---|
+| `node_cfg.h` | 新增 `#define NODE_PRESENCE_ENABLE 0` + 长注释（裁定来源、为什么整键不出现、何时打开） | 让「要不要产出这个键」是一处**可查的开关**，而不是散在各处的 `#if` |
+| `node_json.c` | 加 `#include "node_cfg.h"`；`node_json_fall()` 里 presence 那两行包进 `#if NODE_PRESENCE_ENABLE` | 序列化层是唯一的出口，键从这里消失才是真的消失 |
+| `node_sensor_radar.c` | `pres = radar_hub_get_presence(now_ms)` 改为 `#if` 分支，P0 走 `pres = -1`；`s->presence_i = (pres < 0) ? 0 : pres` | **删掉那个退化值**（`(fall == 1) ? 1 : 0`）；`-1` 是本地哨兵，§2.4.2 只有 0/1 |
+| `node_sensor_mock.c` | 删掉 `s->presence_i = (pulse != 0 \|\| …) ? 1 : 0;` | mock 的 M2 分支原本**纯造数**，比退化值更没依据；M4 分支的 `g_occ`（真来源：门磁活动 + 60 s 保持）**保留** |
+
+**为什么是「整键不出现」而不是 `"presence":0`**：§0.4 的缺省语义就是「键不出现」；
+写 0 等于替硬件断言「确认无人」，而节点**没有这个事实**。宁可让上层看到键不存在，
+也不要给一个编出来的确定值。
+
+### 10.3 `NODE_PRESENCE_ENABLE` 什么时候打开（=1）
+
+① 给 M2 补一路真实存在传感器（PIR / 毫米波存在通道）；或
+② 现场实测确认 LD6002C 的 User log 存在行措辞稳定可解析（`radar_hub.c` 的 `g_kw_on[]` 命中率可接受）。
+
+打开时**同时**要把 `tools/node-json-check.py` 的 `SPEC["fall"]["absent"]` 改回 `required`，
+并把 `tools/node-radar-cache-check.py` 的 `FALL_SPEC` 一并改回 —— 两处都在注释里写了这句话。
+**P0 下这条链路没被拆掉**：开机 `0x0E01`（DATA[0]=1）开 user log、行捕获、关键字匹配、
+`radar_hub_get_presence()` 全部保留，它是 P1 钩子，也是排查现场问题的唯一现场日志。
+
+### 10.4 无板证据（可复现命令 + 计数）
+
+```bash
+tools/build-lock.sh python3 tools/node-json-check.py            # 契约断言：SELFTEST OK，10 帧 / 8 条字段断言
+tools/build-lock.sh python3 tools/node-json-check.py --sample \
+  > ws63-firmware/out/node-uplink-sample.txt                    # 样例重新生成（119 行，与旧版逐行可比）
+HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh python3 tools/node-radar-cache-check.py   # t32 证据不回归
+tools/build-lock.sh python3 tools/node-compile-check.py         # 41 个（目标×文件），失败 0
+```
+
+- **契约断言升级为「presence 缺席」**：`tools/node-json-check.py` 的 `SPEC["fall"]` 由
+  `required: {fall, presence}` 改成 `required: {fall}` + `absent: ["presence"]`，
+  并在 unknown-field 检查**之前**单独报一条（免得和「契约外字段」混为一谈）。
+  `tools/node-json-selftest.c` 里那两段 fall 断言改 `EXPECT_NO(g_buf, "presence")`，
+  且**第一段故意保留 `s.presence_i = 1`** —— 内存里是 1，帧里也必须没有，这就是反例。
+- **样例文件的自证**：`git diff -- ws63-firmware/out/node-uplink-sample.txt` 恰好 30 行改动
+  （30 删 30 增），且**全部是 M2 的 fall 帧**（`grep -E '^[-+]\[M2\]'` 命中 60 条，
+  `grep -E '^[-+]\[' | grep -v '\[M2\]'` 为空）：每帧 `113 B → 100 B`，
+  payload 由三键 `{"fall":…,"presence":…,"src":"uart"}` 变两键 `{"fall":…,"src":"uart"}`。
+  M1 的 gas 帧、M4 的 door/presence 帧、下行回执**一个字都没动**。
+- **t32 的证据不回归**：`tools/node-radar-cache-check.py` rc=0，4 场景 `SELFTEST OK`、
+  24 帧 / 24 条字段断言 / 0 失败；持续跌倒窗口仍是
+  `poll 12 次，其中落在采样间隙 6 次，错报 fall=0 的 0 次`；
+  变异体（删掉回填两行）仍是 `SELFTEST FAILED: 8`、`错报 6 次 == 间隙 6 次`。
+  该脚本的 `FALL_SPEC`/`TAG_EXPECT` 也同步改成「只比 fall 标量 + presence 缺席」。
+- **顺手修的一处证据污染**：`tools/node-json-check.py` 里
+  `主机无 C 编译器 → 退回容器 …` 与 `$ docker run …` 两行原本走 **stdout**，
+  而 stdout 是块缓冲、容器输出直接写 fd 1，于是这两行会**跑到样例文件末尾**，
+  把入库样例弄脏 2 行。已改走 stderr（该脚本其余诊断本就用 stderr），
+  `--sample > 文件` 现在拿到的是纯样例（119 行，与上一次入库版本行数一致）。
+
+### 10.5 与旧包的差异（六个目标）
+
+```bash
+HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh   # 四个节点目标
+HM_BUILD_LOCK=/tmp/hm-build-2.lock tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh mock hub hubmock
+# 两次退出码均为 0
+```
+
+| 目标 | t23 前 | t23 后 | 变化 | t23 后 sha256 |
+|---|---|---|---|---|
+| `NODE_M1.fwpkg` | 1467944 | 1467944 | 体积不变、内容变了（`node_json.c` 共编） | `998d49dffb480cb7328be2a6c4ada2b18f0d6fc5e7697b3e357a0f305366e1cd` |
+| `NODE_M2.fwpkg` | 1467880（t32 后） | **1467816** | **−64 B**（t32 的 +64 与本次的删减恰好抵回 t2 体积，见下） | `8ee2a5e0d27586f220accd3d81ccb0bc7f02395ddaca36d5f014dcbdf3bd6f09` |
+| `NODE_M4.fwpkg` | 1463656 | 1463656 | 体积不变、内容变了（`node_json.c` 共编） | `320e39d615a40b95b25b5e2df5c962c1410400aff595373748d877199b51a87c` |
+| `NODE_MOCK.fwpkg` | 1463016 | **1462952** | **−64 B**（少了那一行造数） | `cba8c29be47ba04c3e7afe53e656f133a71ec351249ddbc7a27e2b9f6c1a58d9` |
+| `HUB_HUB.fwpkg` | 1472744 | 1472744 | **sha256 逐位不变** | `8ef1978be0b414308691f2ab709fe6c3d3bad326de6e0b3588f4bc568fc1f2f4` |
+| `HUB_HUBMOCK.fwpkg` | 1476200 | 1476200 | 体积不变、内容变了（hubmock 清单里有 `node_json.c`） | `741d9323667ef89b4beb061cfb11955ff34a66314d18908657f7a8be9f4702f5` |
+
+**两个容易误读的地方，先自己说清**：
+
+1. **M1/M4 的 sha256 变了但体积没变 —— 这是对的，不是脏构建。** `node_json.c` 是四个节点目标
+   共编的同一个 TU（`node_json_fall()` 也在里面），presence 那几行删掉后四个包的机器码都变了；
+   M1/M4 的 fall 分支不被调用但仍在，删掉的字节数与对齐填充相互抵消，所以体积不变。
+2. **M2 的体积回到了 t2 的值（1467816），但不代表回退**：t32 加了两行回填（+64 B），
+   t23 删掉调用 `radar_hub_get_presence()` 与那个 `(fall==1)?1:0` 分支（−64 B），一来一去正好抵消。
+   **t32 的行为仍被独立验证**：`tools/node-radar-cache-check.py` 本次 rc=0、
+   间隙错报 0 次、变异体必失败（见 §10.4）—— 体积相同 ≠ 行为回退，证据在自测而不在字节数。
+3. `HUB_HUB.fwpkg` 的 sha256 与 t3 复核、t32 重编**三次逐位相同**（`8ef1978b…`）：
+   `.fwpkg` 在本项目是**可复现**的（与 AGENTS.md 里 HAP 的「sha256 跨次不可复现」不同）。
+   即便如此，本表仍以「体积 + 提交号」为主口径，sha256 只作当次记录。
+
+### 10.6 本次未做 / 环境记录
+
+- **未上板**：presence 键消失这件事，最终判据仍是 §7 的串口原文（M2 的每一帧 payload 里
+  只应有 `fall`/`src`/`dist`，没有 `presence`）。上板判据已补进 §7。
+- **首次 `mock` 目标编译失败是环境冲突，不是代码问题**：错误是
+  `cc1: fatal error: /sdk/src/output/ws63/acore/ws63-liteos-app/mconfig.h: No such file or directory`
+  与一批 `opening dependency file …obj.d: No such file or directory` —— 即**构建输出目录在编译中途被删**。
+  当时有另一名员工在同一棵 SDK 上跑星闪 spike 构建；`tools/build-lock.sh` 的两个槽
+  （`/tmp/hm-build.lock`、`/tmp/hm-build-2.lock`）**只保证「不超过两个重构建」，并不互斥同一棵 SDK 输出目录**。
+  同一命令原样重跑即通过（`mock hub hubmock`，rc=0）。已把这条坑报告给 PM：
+  两块板/两棵树之外，**同一棵 SDK 上的两个构建必须串行**。
+- 未改 `radar_hub.c`/`radar_hub.h`、未改 `node_json_presence()`（M4 的 §2.4.4 payload 是另一回事，
+  它的 `presence` 是**真来源**：门磁活动 + `NODE_PRESENCE_HOLD_S`=60 s）；
+  未改 `NODE_ROLE_NAME "door+presence"`（`node-build.sh` 的角色断言按这串字面量 grep，
+  而它不在本卡 inScope 内）。

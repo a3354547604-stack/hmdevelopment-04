@@ -13,6 +13,10 @@
 
 #include <string.h>
 
+/* 只为 NODE_PRESENCE_ENABLE（presence 是 P0 省略 / P1 才产出的键，见该宏的裁定注释）。
+ * node_cfg.h 是纯宏头（不 include 任何 SDK 头），所以主机自测也能照编。 */
+#include "node_cfg.h"
+
 /* ================================================================== */
 /* 写入器                                                              */
 /* ================================================================== */
@@ -234,8 +238,13 @@ int node_json_fall(char *buf, size_t cap, const char *sn, const char *fw, const 
     jw_init(&w, buf, cap);
     jw_env_head(&w, sn, "fall", s);
     jw_kv_u32(&w, "fall", (uint32_t)(s->fall != 0));       /* §2.4.2：int 0/1 */
+    /* presence：P0 **整键不出现** —— PM 2026-10-18 裁定（t23），presence 降为 P1。
+     * 不写 "presence":0 的理由与开关的启用条件见 node_cfg.h 的 NODE_PRESENCE_ENABLE：
+     * 写 0 等于替硬件断言「确认无人」，而 LD6002C 没有存在帧、节点没有这个事实。 */
+#if NODE_PRESENCE_ENABLE
     jw_ch(&w, ',');
     jw_kv_u32(&w, "presence", (uint32_t)(s->presence_i != 0));
+#endif
     if (s->src != NULL && s->src[0] != '\0') {
         jw_ch(&w, ',');
         jw_kv_str(&w, "src", s->src);

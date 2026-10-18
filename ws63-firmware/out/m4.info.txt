@@ -2,6 +2,6 @@ target=m4
 extra_build_args=-def=NODE_ROLE=4
 sources= node_main.c node_json.c node_link.c node_sensor_door.c sle_hub.c sle_hub_adv.c
 bytes=1463656
-sha256=e49e8816e95a23c2883b3974f93c124f9b2b47c38d4b75208495c85a478e1ba6
-built_at=2026-10-18T08:37:42+08:00
+sha256=320e39d615a40b95b25b5e2df5c962c1410400aff595373748d877199b51a87c
+built_at=2026-10-18T08:51:05+08:00
 role_marker=EC-NODE-ROLE=M4 type=door+presence count=1

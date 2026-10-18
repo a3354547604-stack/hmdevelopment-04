@@ -123,8 +123,12 @@ uint32_t radar_hub_get_rx_total(void)
     return g_fall_reads;
 }
 
-/* 恒返回 -1：复现真机上「user log 关键字还没命中」的降级路径，
- * 让被测代码自己算出 presence = (fall == 1) ? 1 : 0 —— 保持 presence 与 fall 同源。 */
+/* P1 钩子的替身：恒返回 -1，复现真机上「user log 关键字还没命中」的降级路径。
+ *
+ * t23（PM 2026-10-18 裁定）之后 **P0 下被测代码不再调用它** —— presence 在 fall payload 里
+ * 整键不出现（node_cfg.h NODE_PRESENCE_ENABLE=0）。之所以还留着这个定义而不是删掉：
+ * 它是「开关打开后这套自测仍能编」的保证，同时提醒读代码的人这条链路**没被拆掉**，
+ * 只是当前不取用。它返回什么都影响不了 P0 的帧，下面三处断言也因此改成「恒 0」。 */
 int radar_hub_get_presence(uint32_t now_ms)
 {
     (void)now_ms;
@@ -334,7 +338,7 @@ static void scenario_before_first_sample(void)
     sampled = tick(500u, &s);             /* 500 - 0 < 2000 → 间隙分支 */
     EXPECT_EQ("开机首拍是否采样节拍", sampled, 0);
     EXPECT_EQ("未采样时 poll 应答的 fall", s.fall, 0);
-    EXPECT_EQ("未采样时 poll 应答的 presence", s.presence_i, 0);
+    EXPECT_EQ("未采样时 poll 应答的 presence（P0 恒 0，键不上报）", s.presence_i, 0);
     EXPECT_EQ("未采样时 src", strcmp(s.src, "uart") == 0, 1);
     emit_poll(500u, &s, "poll-boot");
 }
@@ -358,7 +362,7 @@ static void scenario_module_silent(void)
     sampled = tick(2500u, &s);            /* 间隙：缓存里存的仍是「未知」 */
     EXPECT_EQ("间隙这一拍是否采样节拍", sampled, 0);
     EXPECT_EQ("未知读数在间隙里的 fall", s.fall, 0);
-    EXPECT_EQ("未知读数在间隙里的 presence", s.presence_i, 0);
+    EXPECT_EQ("未知读数在间隙里的 presence（P0 恒 0，键不上报）", s.presence_i, 0);
     emit_poll(2500u, &s, "poll-unknown");
 }
 
@@ -388,7 +392,9 @@ static void scenario_demo(void)
 
     (void)tick(8500u, &s);                /* 间隙：缓存里必须是覆盖后的 1（……poll 应答不能改口） */
     EXPECT_EQ("demo 期间间隙 poll 的 fall", s.fall, 1);
-    EXPECT_EQ("demo 期间间隙 poll 的 presence", s.presence_i, 1);
+    /* t23：demo 只覆盖 fall。presence 在 P0 不产出，所以这里期望 0（改前是 1，
+     * 那是「跌倒报警中=1」的退化值，正是裁定要废掉的东西）。 */
+    EXPECT_EQ("demo 期间间隙 poll 的 presence（P0 恒 0，键不上报）", s.presence_i, 0);
     emit_poll(8500u, &s, "poll-demo-gap");
 
     /* demo 到期后必须回落，且只回落一次（不能因为缓存就永久卡在 1） */

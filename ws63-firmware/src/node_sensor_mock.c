@@ -64,7 +64,9 @@ static void mock_fall(node_snapshot_t *s)
     int pulse = ((g_tick % 10u) == 0u) ? 1 : 0;
 
     s->fall = pulse;
-    s->presence_i = (pulse != 0 || ((g_tick % 10u) < 5u)) ? 1 : 0;
+    /* presence 不填：P0 的 fall payload 里这个键**整键不出现**（PM 2026-10-18 裁定，t23）。
+     * 这里原本按脉冲编一个 0/1 —— 那是纯造数，比 M2 的「跌倒报警中」退化更没依据
+     * （§0.4：缺省字段不输出 null，是整个键不出现）。开关见 node_cfg.h NODE_PRESENCE_ENABLE。 */
     s->src = "uart";
     s->has_dist = false;                              /* 本版无测距：dist 缺省（契约 §2.4.2 选填） */
     if (pulse != 0) {

@@ -53,24 +53,26 @@ ENVELOPE_ORDER = ["sn", "ts", "type", "payload", "seq", "req_id", "fw"]
 ENVELOPE_REQUIRED = ["sn", "ts", "type", "payload"]
 SN_RE = re.compile(r"^[A-Z][A-Z0-9]{0,7}$")
 MAX_LEN = 512
-# §2.4.2：fall 与 presence 是 int 0/1（不是 bool），src 只能 uart/tx2，dist 单位为 0.1 m
-FALL_SPEC = {"required": {"fall": "i", "presence": "i"}, "optional": {"src": "s", "dist": "f"}}
-I01 = ("fall", "presence")
+# §2.4.2：fall 是 int 0/1（不是 bool），src 只能 uart/tx2，dist 单位为 0.1 m。
+# presence 在 P0 **整键不出现**（PM 2026-10-18 裁定，t23）—— 所以它是 "absent" 不是 required，
+# 而且是**禁止出现**：写 0 等于替硬件断言「确认无人」。开关见 node_cfg.h NODE_PRESENCE_ENABLE。
+FALL_SPEC = {"required": {"fall": "i"}, "optional": {"src": "s", "dist": "f"},
+             "absent": ["presence"]}
 SRC_VALUES = ("uart", "tx2")
 
-# 每个 tag 期望的 (fall, presence)。tag 由**脚本模型**（不是被测代码报出来的值）决定，
+# 每个 tag 期望的 fall。tag 由**脚本模型**（不是被测代码报出来的值）决定，
 # 否则代码错报时 tag 会跟着变、断言就成了自我实现。
 # poll-lagging：模型说已起床、但节点还没采到的那一拍，报 1 是正确的（采样分辨率 2 s）。
 # poll-normal：跌倒还没发生的那几拍，必须报 0。
 TAG_EXPECT = {
-    "gap-poll-fall": (1, 1),
-    "poll-normal": (0, 0),
-    "poll-lagging": (1, 1),
-    "poll-recovered": (0, 0),
-    "poll-boot": (0, 0),
-    "poll-unknown": (0, 0),
-    "poll-demo-gap": (1, 1),
-    "poll-demo-expired": (0, 0),
+    "gap-poll-fall": 1,
+    "poll-normal": 0,
+    "poll-lagging": 1,
+    "poll-recovered": 0,
+    "poll-boot": 0,
+    "poll-unknown": 0,
+    "poll-demo-gap": 1,
+    "poll-demo-expired": 0,
 }
 
 STUB_SOC_OSAL = """/* 替身（由 tools/node-radar-cache-check.py 生成）：只提供被测源码用到的那一个符号。
@@ -181,13 +183,21 @@ def check_fall_frame(tag, raw):
     for k in FALL_SPEC["required"]:
         if k not in pl:
             bad(f"[{tag}] fall 缺必填字段 {k}")
+    # 「禁止出现」的键（t23：presence 在 P0 整键不出现）。单独一条消息，
+    # 免得它掉进下面「契约外字段」里被说得含糊；写 "presence":0 同样不允许。
+    for k in FALL_SPEC.get("absent", ()):
+        if k in pl:
+            bad(f"[{tag}] P0 不得出现 {k!r}（PM 2026-10-18 裁定，见 node_cfg.h "
+                f"NODE_PRESENCE_ENABLE）: {pl[k]!r}")
     for k, v in pl.items():
         kind = FALL_SPEC["required"].get(k) or FALL_SPEC["optional"].get(k)
         if kind is None:
+            if k in FALL_SPEC.get("absent", ()):
+                continue
             bad(f"[{tag}] fall 出现契约外字段 {k!r}")
             continue
         if kind == "i":
-            # §2.4.2 明确 fall/presence 是 int 0/1 —— 不是 bool，也不能是别的数
+            # §2.4.2 明确 fall 是 int 0/1 —— 不是 bool，也不能是别的数
             if not isinstance(v, int) or isinstance(v, bool) or v not in (0, 1):
                 bad(f"[{tag}] {k} 应为 int 0/1，实为 {v!r}")
         elif kind == "s":
@@ -201,9 +211,8 @@ def check_fall_frame(tag, raw):
 
     want = TAG_EXPECT.get(tag)
     if want is not None:
-        if (pl.get("fall"), pl.get("presence")) != want:
-            bad(f"[{tag}] fall/presence = ({pl.get('fall')!r},{pl.get('presence')!r})，"
-                f"期望 {want}（ts={ts}）")
+        if pl.get("fall") != want:
+            bad(f"[{tag}] fall = {pl.get('fall')!r}，期望 {want}（ts={ts}）")
 
 
 def parse_gap_line(out):

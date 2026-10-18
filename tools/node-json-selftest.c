@@ -118,7 +118,7 @@ int main(void)
     /* ---------------- 2. §2.4.2 fall ---------------- */
     base_snapshot(&s, 1760000000000LL, 2);
     s.fall       = 1;
-    s.presence_i = 1;
+    s.presence_i = 1;         /* 故意设成 1：P0 下这个值**不该**被写出去（t23 裁定） */
     s.src        = "uart";
     s.dist_cm    = 180;       /* → 1.8 m */
     s.has_dist   = true;
@@ -126,7 +126,10 @@ int main(void)
     EXPECT(n > 0);
     EXPECT_STR(g_buf, "\"type\":\"fall\"");
     EXPECT_STR(g_buf, "\"fall\":1");          /* int 而不是 true */
-    EXPECT_STR(g_buf, "\"presence\":1");
+    /* presence 在 P0 整键不出现（PM 2026-10-18 裁定，t23；开关见 node_cfg.h
+     * NODE_PRESENCE_ENABLE）。上面的 presence_i=1 就是**反例**：哪怕内存里是 1，
+     * 也不能出现在帧里 —— 否则 App 会在没人在场时显示「有人」。 */
+    EXPECT_NO(g_buf, "presence");
     EXPECT_STR(g_buf, "\"src\":\"uart\"");
     EXPECT_STR(g_buf, "\"dist\":1.8");
     EXPECT_NO(g_buf, "\"fall\":true");
@@ -138,6 +141,7 @@ int main(void)
     s.src = "tx2";
     n = node_json_fall(g_buf, sizeof(g_buf), "M2", "0.1.0", &s);
     EXPECT_STR(g_buf, "\"fall\":0");
+    EXPECT_NO(g_buf, "presence");             /* 同样不许出现，连 0 也不行（≠「确认无人」） */
     EXPECT_STR(g_buf, "\"src\":\"tx2\"");
     EXPECT_NO(g_buf, "dist");
     emit("fall_M2_clear_tx2", g_buf, n);
