@@ -1,0 +1,82 @@
+== git status 分类（共 72 条）==
+   验收报告         提交包=可选    59 条    853.2 KB
+   源码/配置        提交包=入包     4 条     35.3 KB
+   日志或抓包        提交包=排除     4 条      1.2 KB
+   赛事资料         提交包=排除     2 条     22.4 KB
+   内部运行文档       提交包=排除     1 条      6.8 KB
+   构建产物         提交包=排除     1 条   1438.9 KB
+   实验记录         提交包=排除     1 条     12.4 KB
+   -- 非报告类明细 --
+   [源码/配置/入包] M  .gitignore
+   [内部运行文档/排除] M  docs/执行/停机恢复检查点.md
+   [构建产物/排除] M  ws63-firmware/out/HUB_HUB.fwpkg
+   [日志或抓包/排除] M  ws63-firmware/out/hub.info.txt
+   [日志或抓包/排除] M  ws63-firmware/out/m1.info.txt
+   [日志或抓包/排除] M  ws63-firmware/out/m4.info.txt
+   [日志或抓包/排除] M  ws63-firmware/out/mock.info.txt
+   [赛事资料/排除] ?? docs/赛事资料/notice.md
+   [赛事资料/排除] ?? docs/赛事资料/training.md
+   [源码/配置/入包] ?? tools/test/review/repo_health.py
+   [源码/配置/入包] ?? ws63-firmware/burn.bat
+   [实验记录/排除] ?? ws63-firmware/doc/10-LD6002C实物接线判通-2026-10-16.txt
+   [源码/配置/入包] ?? ws63-firmware/flasher/ws63flash.cs
+== 敏感扫描：文本文件 574 个，命中 125 处 ==
+   身份-院校/角色         76
+   身份-本机用户名         18
+   联系-手机号           15
+   凭据-口令赋值          10
+   联系-邮箱            5
+   凭据-JWT           1
+   -- 非良性命中（需人工判读）--
+   docs/赛事资料/notice.md  (23 处，例：L1 学校)
+   docs/参赛材料/00-材料总览与提交清单.md  (10 处，例：L17 指导老师)
+   ws63-firmware/spike/out/build-evidence.txt  (6 处，例：L3 qinyixiang)
+   docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md  (4 处，例：L100 学校)
+   docs/评审与验证/计划评审与可行性核查-2026-10-14.md  (4 处，例：L25 学校)
+   docs/评审与验证/复核-t71-参赛材料正文-2026-10-18.md  (4 处，例：L136 学校)
+   tools/test/review/repo_health.py  (4 处，例：L14 13800000000)
+   赛题四-实施计划.md  (4 处，例：L499 学校)
+   docs/评审与验证/复核-t11-Android配网App-2026-10-18.md  (4 处，例：L21 学校)
+   tools/test/review/check_harmony_contract.py  (3 处，例：L15 学校)
+   ws63-firmware/doc/13-构建串行化.md  (3 处，例：L189 qinyixiang)
+   docs/技术/接口契约.md  (3 处，例：L844 13800000000)
+   android-app/docs/evidence/evidence-03d601d-20261017T170618Z.md  (3 处，例：L120 qinyixiang)
+   docs/项目章程.md  (3 处，例：L112 学校)
+   docs/执行/待确认问题.md  (2 处，例：L16 指导老师)
+   tools/test/suites/s03_iotda.py  (1 处，例：L5 队长)
+   AGENTS.md  (2 处，例：L13 学校)
+   android-app/app/src/test/java/com/hmprogram/eldercare/provision/ProvisionViewModelTest.kt  (2 处，例：L73 password = "Home-2.4G-Pass")
+   docs/参赛材料/12-视频文案与镜头表.md  (2 处，例：L33 指导老师)
+   rk2206-gateway/src/gw_timesync.h  (2 处，例：L4 队长)
+   harmony-app/hvigor/hvigor-config.json5  (2 处，例：L14 qinyixiang)
+   docs/评审与验证/复核-t21-契约v1.2与接线表v1.3-2026-10-17.md  (2 处，例：L36 队长)
+   rk2206-gateway/src/gw_config.h  (2 处，例：L130 队长)
+   docs/技术笔记/本地资料库索引.md  (2 处，例：L39 学校)
+   server/README.md  (2 处，例：L192 13800000000)
+   README.md  (2 处，例：L3 学校)
+   docs/参赛材料/11-PPT正文.md  (1 处，例：L41 指导老师)
+   tools/test/review/check_harmony_http.py  (1 处，例：L99 13800000001)
+   harmony-app/AppScope/app.json5  (1 处，例：L9 学校)
+   tools/test/mock_server.py  (1 处，例：L362 token = "tok-%d")
+   docs/参赛材料/02-5分钟视频分镜.md  (1 处，例：L167 学校)
+   docs/参赛材料/10-说明文档正文.md  (1 处，例：L18 学校)
+   android-app/app/src/main/java/com/hmprogram/eldercare/provision/data/net/MockTransport.kt  (1 处，例：L145 13800000000)
+   harmony-app/tools/selfcheck-entry.ts  (1 处，例：L125 13800000002)
+   docs/赛事资料/training.md  (1 处，例：L3 学校)
+   harmony-app/deliverables/07-截图与录屏清单.md  (1 处，例：L105 学校)
+   harmony-app/deliverables/01-HAP构建日志.txt  (1 处，例：L50 qinyixiang)
+   rk2206-gateway/src/gw_main.c  (1 处，例：L11 队长)
+   android-app/tools/h5_samples/bad.html  (1 处，例：L37 passwd: 'P@ssw0rd8')
+   docs/参赛材料/01-说明文档大纲.md  (1 处，例：L20 学校)
+   harmony-app/tools/gen-assets.py  (1 处，例：L6 学校)
+   server/tests/test_20_auth.py  (1 处，例：L11 13800000000)
+   harmony-app/deliverables/05-DevEco运行指引.md  (1 处，例：L215 学校)
+   docs/评审与验证/复核-t6-鸿蒙App骨架-2026-10-17.md  (1 处，例：L36 学校)
+   harmony-app/entry/src/main/ets/service/MockData.ets  (1 处，例：L79 13800000000)
+   -- 良性命中（占位符/测试夹具/规则文本）--
+   docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md  (1 处)
+   tools/test/suites/s03_iotda.py  (1 处)
+   server/tests/conftest.py  (1 处)
+   docs/评审与验证/复核-t5-服务器骨架与模拟API-2026-10-17.md  (1 处)
+   server/tests/test_60_webhook.py  (1 处)
+结构化结果 → tools/test/reports/t54-repo-health-20261018.json

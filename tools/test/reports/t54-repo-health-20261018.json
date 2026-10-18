@@ -1,0 +1,1654 @@
+{
+ "classify": [
+  {
+   "status": "M",
+   "path": ".gitignore",
+   "size": 1381,
+   "cat": "源码/配置",
+   "pack": "入包",
+   "why": "版本控制规则/烧录器源码（必须入库）",
+   "act": "keep"
+  },
+  {
+   "status": "M",
+   "path": "docs/执行/停机恢复检查点.md",
+   "size": 6960,
+   "cat": "内部运行文档",
+   "pack": "排除",
+   "why": "团队内部执行/检查点文档",
+   "act": "keep-repo"
+  },
+  {
+   "status": "M",
+   "path": "tools/test/reports/latest.md",
+   "size": 6074,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "M",
+   "path": "ws63-firmware/out/HUB_HUB.fwpkg",
+   "size": 1473384,
+   "cat": "构建产物",
+   "pack": "排除",
+   "why": "编译/打包产物（指纹口径用体积+提交号）",
+   "act": "add-ignore"
+  },
+  {
+   "status": "M",
+   "path": "ws63-firmware/out/hub.info.txt",
+   "size": 312,
+   "cat": "日志或抓包",
+   "pack": "排除",
+   "why": "构建/烧录/串口日志",
+   "act": "add-ignore"
+  },
+  {
+   "status": "M",
+   "path": "ws63-firmware/out/m1.info.txt",
+   "size": 297,
+   "cat": "日志或抓包",
+   "pack": "排除",
+   "why": "构建/烧录/串口日志",
+   "act": "add-ignore"
+  },
+  {
+   "status": "M",
+   "path": "ws63-firmware/out/m4.info.txt",
+   "size": 308,
+   "cat": "日志或抓包",
+   "pack": "排除",
+   "why": "构建/烧录/串口日志",
+   "act": "add-ignore"
+  },
+  {
+   "status": "M",
+   "path": "ws63-firmware/out/mock.info.txt",
+   "size": 319,
+   "cat": "日志或抓包",
+   "pack": "排除",
+   "why": "构建/烧录/串口日志",
+   "act": "add-ignore"
+  },
+  {
+   "status": "??",
+   "path": "docs/赛事资料/notice.md",
+   "size": 20292,
+   "cat": "赛事资料",
+   "pack": "排除",
+   "why": "官方通知/培训材料（含主办方联系信息，不入公开提交包）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "docs/赛事资料/training.md",
+   "size": 2659,
+   "cat": "赛事资料",
+   "pack": "排除",
+   "why": "官方通知/培训材料（含主办方联系信息，不入公开提交包）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/acceptance-20261018-092311.json",
+   "size": 25291,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/acceptance-20261018-092311.md",
+   "size": 6074,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/acceptance-20261018-092353.json",
+   "size": 25293,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/acceptance-20261018-092353.md",
+   "size": 6074,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/acceptance-20261018-092429.json",
+   "size": 25298,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/acceptance-20261018-092429.md",
+   "size": 6074,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/acceptance-20261018-095046.json",
+   "size": 25288,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/acceptance-20261018-095046.md",
+   "size": 6074,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-020821.json",
+   "size": 2141,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-020821.md",
+   "size": 1078,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021418.json",
+   "size": 2141,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021418.md",
+   "size": 1078,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021539.json",
+   "size": 2141,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021539.md",
+   "size": 1078,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021750.json",
+   "size": 2141,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021750.md",
+   "size": 1078,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021826.json",
+   "size": 2915,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021826.md",
+   "size": 1516,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021827.json",
+   "size": 3069,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021827.md",
+   "size": 1675,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021828.json",
+   "size": 2915,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-021828.md",
+   "size": 1516,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034459.json",
+   "size": 20492,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034459.md",
+   "size": 2452,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034551.json",
+   "size": 19422,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034551.md",
+   "size": 2509,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034656.json",
+   "size": 18537,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034656.md",
+   "size": 2344,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034716.json",
+   "size": 19249,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034716.md",
+   "size": 2372,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034735.json",
+   "size": 19179,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034735.md",
+   "size": 2249,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034747.json",
+   "size": 23577,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034747.md",
+   "size": 4302,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034920.json",
+   "size": 19179,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034920.md",
+   "size": 2249,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034939.json",
+   "size": 37319,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-034939.md",
+   "size": 2249,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-035308.json",
+   "size": 42379,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-035308.md",
+   "size": 4715,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-035448.json",
+   "size": 42714,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-035448.md",
+   "size": 4705,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040208.json",
+   "size": 42591,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040208.md",
+   "size": 4498,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040257.json",
+   "size": 45388,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040257.md",
+   "size": 5568,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040331.json",
+   "size": 47999,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040331.md",
+   "size": 6355,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040406.json",
+   "size": 48287,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040406.md",
+   "size": 6471,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040456.json",
+   "size": 48719,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040456.md",
+   "size": 6763,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040534.json",
+   "size": 48889,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040534.md",
+   "size": 6931,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-040622.json",
+   "size": 48629,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-041812.json",
+   "size": 48229,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/e2e-20261018-041812.md",
+   "size": 8165,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/reports/t54-repo-health-20261018.txt",
+   "size": 0,
+   "cat": "验收报告",
+   "pack": "可选",
+   "why": "验收/串测报告（仓库证据；提交包只需比赛材料）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "tools/test/review/repo_health.py",
+   "size": 12461,
+   "cat": "源码/配置",
+   "pack": "入包",
+   "why": "源码与配置（必须入库）",
+   "act": "keep"
+  },
+  {
+   "status": "??",
+   "path": "ws63-firmware/burn.bat",
+   "size": 268,
+   "cat": "源码/配置",
+   "pack": "入包",
+   "why": "源码与配置（必须入库）",
+   "act": "keep"
+  },
+  {
+   "status": "??",
+   "path": "ws63-firmware/doc/10-LD6002C实物接线判通-2026-10-16.txt",
+   "size": 12672,
+   "cat": "实验记录",
+   "pack": "排除",
+   "why": "上板调试/烧录过程记录（留档用）",
+   "act": "keep-repo"
+  },
+  {
+   "status": "??",
+   "path": "ws63-firmware/flasher/ws63flash.cs",
+   "size": 22001,
+   "cat": "源码/配置",
+   "pack": "入包",
+   "why": "版本控制规则/烧录器源码（必须入库）",
+   "act": "keep"
+  }
+ ],
+ "scan": [
+  {
+   "path": "AGENTS.md",
+   "line": 13,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- 注释解释“为什么”，不复述代码；不提交密钥、账号、证书、学校/团队/指导老师信息。",
+   "benign": false
+  },
+  {
+   "path": "AGENTS.md",
+   "line": 46,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- Git：完成一个任务就提交一次，提交信息写任务 ID；不把半成品、密钥、学校/团队信息提交。",
+   "benign": false
+  },
+  {
+   "path": "README.md",
+   "line": 3,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "> 2026 年（第三届）河南省高等学校信息技术应用创新大赛 · 开源鸿蒙赛道",
+   "benign": false
+  },
+  {
+   "path": "README.md",
+   "line": 125,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "docker run --rm -v /home/qinyixiang/ws63/fbb_ws63-master:/sdk -w /sdk/src ws63wsl:latest \\",
+   "benign": false
+  },
+  {
+   "path": "android-app/app/src/main/java/com/hmprogram/eldercare/provision/data/net/MockTransport.kt",
+   "line": 145,
+   "kind": "联系-手机号",
+   "frag": "13800000000",
+   "text": "put(\"user\", jsonOf(UserNone(1, username, \"13800000000\")))",
+   "benign": false
+  },
+  {
+   "path": "android-app/app/src/test/java/com/hmprogram/eldercare/provision/ProvisionViewModelTest.kt",
+   "line": 73,
+   "kind": "凭据-口令赋值",
+   "frag": "password = \"Home-2.4G-Pass\"",
+   "text": "val password = \"Home-2.4G-Pass\"",
+   "benign": false
+  },
+  {
+   "path": "android-app/app/src/test/java/com/hmprogram/eldercare/provision/ProvisionViewModelTest.kt",
+   "line": 233,
+   "kind": "凭据-口令赋值",
+   "frag": "token = \"mock-jwt-x\"",
+   "text": "e.session.token = \"mock-jwt-x\"",
+   "benign": false
+  },
+  {
+   "path": "android-app/docs/evidence/evidence-03d601d-20261017T170618Z.md",
+   "line": 120,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "-rwxrwxrwx 1 qinyixiang qinyixiang 7069346 Oct 17 23:03 android-app/dist/eldercare-provision-0.1.0-debug.apk",
+   "benign": false
+  },
+  {
+   "path": "android-app/docs/evidence/evidence-03d601d-20261017T170618Z.md",
+   "line": 129,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "$ tools/build-lock.sh /home/qinyixiang/toolchains/gradle-8.7/bin/gradle -I android-app/tools/wsl-build-dir.init.gradle -p android-app testDebugUnitTest --rerun assembleDebug --cons",
+   "benign": false
+  },
+  {
+   "path": "android-app/docs/evidence/evidence-03d601d-20261017T170618Z.md",
+   "line": 140,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "JUnit XML 汇总（`/home/qinyixiang/eldercare-build/_app/test-results/testDebugUnitTest`，mtime 2026-10-17T17:06:27Z）：",
+   "benign": false
+  },
+  {
+   "path": "android-app/tools/h5_samples/bad.html",
+   "line": 37,
+   "kind": "凭据-口令赋值",
+   "frag": "passwd: 'P@ssw0rd8'",
+   "text": "body: JSON.stringify({ ssid: 'HOME-2.4G', passwd: 'P@ssw0rd8', timeoutS: 30 }),",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 17,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "| R2 | 所有材料内容中**均不得出现参赛团队、指导老师、院校等相关信息** | 内容匿名；rar 文件名里的「XX 学校团队名称」是唯一允许出现的地方 | 见 §4 自检 |",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 22,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| R7 | 全部材料压缩为 **rar**，命名「**赛题序号+赛题名称+XX 学校团队名称**」（示例：`赛题一+非物质文化遗产指尖传承独立展示应用+XX 学校筑梦队.rar`） | 我们的文件名形如 `赛题四+独居老人居家安全监测与应急辅助系统+XX 学校XX队.rar`（**学校/队名由用户填**） | 见 §5 自检 |",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 25,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "| R10 | （非本卡范围）报名截止 2026-10-30，报名表发指定邮箱；每队 2–3 选手 + 1–2 指导老师，不得跨校组队 | 报名若未完成，先办报名 | 用户确认 |",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 79,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "**检查项（每份材料、每张图、每段视频过一遍）**：不得出现 ①学校/学院/大学名称 ②团队名/队名 ③指导老师/教师姓名 ④选手真实姓名 ⑤真实手机号/微信号/QQ 号 ⑥真实住址 ⑦真实 Wi-Fi 名称与口令 ⑧含上述信息的截图（通知栏、浏览器书签栏、桌面壁纸）。",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 81,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "**允许出现**：`daughter01` / `P@ssw0rd!`（mock 假账号）、`192.168.4.1`、`ElderCare-XXXX`、`XX 学校`/`XX 队` 占位符、rar 文件名里的真实校队名（R7 要求）。",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 87,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "grep -rniE \"学校|学院|大学|团队|队名|指导老师|指导教师|姓名\" docs/参赛材料/",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 89,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "#   (a) 占位符 `XX 学校` / `XX 队`",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 90,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "#   (b) 规则引用句（「不得出现参赛团队、指导老师、院校」等）",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 113,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| rar 命名 | `ls 赛题四*.rar` | 形如 `赛题四+独居老人居家安全监测与应急辅助系统+XX 学校XX队.rar` |",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/00-材料总览与提交清单.md",
+   "line": 154,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| 三份材料统一 | 学校/队名占位符替换、rar 命名 | 用户 |",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/01-说明文档大纲.md",
+   "line": 20,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| 匿名 | 全文不得出现学校/学院/团队/指导老师/选手姓名（`00` §4 自检） | 封面作者栏写「参赛队」即可 |",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/02-5分钟视频分镜.md",
+   "line": 167,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "4. **匿名**：不出现学校/团队/老师/真实姓名/手机号/真实 Wi-Fi 名与口令；拍前清通知栏（`07` §6）。",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/10-说明文档正文.md",
+   "line": 18,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- 参赛队：**参赛队**（不写学校/学院/团队名/指导老师/选手姓名）",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/11-PPT正文.md",
+   "line": 41,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "3. 参赛队（不写校名/指导老师/选手姓名）",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/12-视频文案与镜头表.md",
+   "line": 33,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "> 片头**不写校名、不写指导老师、不写选手姓名**；如需署名写「参赛队」。",
+   "benign": false
+  },
+  {
+   "path": "docs/参赛材料/12-视频文案与镜头表.md",
+   "line": 207,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "4. **匿名**：不出现学校 / 团队 / 老师 / 真实姓名 / 手机号 / 真实 Wi-Fi 名与口令；拍前清通知栏。",
+   "benign": false
+  },
+  {
+   "path": "docs/执行/待确认问题.md",
+   "line": 16,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "| Q15 | **报名（10/30 截止）**：赛题四报名是否已提交？需要我准备哪些信息（队员/指导老师/学校信息由你填，我不经手敏感信息）？ | 10/18 | 需用户办 | 参赛资格 | |",
+   "benign": false
+  },
+  {
+   "path": "docs/执行/待确认问题.md",
+   "line": 63,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- **提交包排除清单（D15，2026-10-18，t52 盘点发现，PM 裁定）**：`ws63-firmware/` 有 **53 条未跟踪 ≈37 MB**，其中 `ws63-firmware/tools/` 31 MB/40 项**含原厂 `BurnTool.exe`**，另有原厂 AT 恢复镜像 `output/WS63-XF_AT-2.0.1-",
+   "benign": false
+  },
+  {
+   "path": "docs/技术/接口契约.md",
+   "line": 844,
+   "kind": "联系-手机号",
+   "frag": "13800000000",
+   "text": "| `phone` | string | 否 | 11 位数字 | `\"13800000000\"` |",
+   "benign": false
+  },
+  {
+   "path": "docs/技术/接口契约.md",
+   "line": 852,
+   "kind": "联系-手机号",
+   "frag": "13800000000",
+   "text": "响应 `data`：`{\"token\":\"<JWT>\",\"expires_in\":604800,\"user\":{\"id\":1,\"username\":\"daughter01\",\"phone\":\"13800000000\"}}`",
+   "benign": false
+  },
+  {
+   "path": "docs/技术/接口契约.md",
+   "line": 1116,
+   "kind": "联系-手机号",
+   "frag": "13800000000",
+   "text": "| `phone` | VARCHAR(20) | — | 是 | NULL | 11 位数字 | `\"13800000000\"` |",
+   "benign": false
+  },
+  {
+   "path": "docs/技术笔记/本地资料库索引.md",
+   "line": 39,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- `第三届河南省高等学校信息技术应用创新大赛 通知(1).pdf` → 已转 **`notice.md`**（**含附件 1 全部赛题原文、材料规格、报名要求**）",
+   "benign": false
+  },
+  {
+   "path": "docs/技术笔记/本地资料库索引.md",
+   "line": 40,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- `第三届河南省高等学校信息技术应用创新大赛-鸿蒙技术培训公告.pdf` → 已转 **`training.md`**（官方培训以**通晓 Smart（RK2206）**为载体，**未涉及星闪**）",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t11-Android配网App-2026-10-18.md",
+   "line": 21,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| 5 | 合规：无学校/团队/指导老师信息、无密钥/口令/证书；`dist/`、`~/toolchains`、`builder/`、`local.properties` 未进 git | **PASS** | §6：APK 关键词命中全部来自第三方库（AndroidX 自动填充 TLD 词表、DEX 子串），仓库内机构关键词 **0 命中**；APK 内无",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t11-Android配网App-2026-10-18.md",
+   "line": 109,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- 签名：`apksigner verify --print-certs` → `CN=Android Debug, O=Android, C=US`，SHA-256 `82d6ab4c…`（本机自动生成的 debug 证书），**不含项目/学校身份信息**。",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t11-Android配网App-2026-10-18.md",
+   "line": 113,
+   "kind": "身份-院校/角色",
+   "frag": "大学",
+   "text": "- 机构类关键词（`大学/学院/学校/团队/指导/老师/教授/实验室`、`university/college/teacher/advisor/mentor`）：**0 命中**。",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t11-Android配网App-2026-10-18.md",
+   "line": 114,
+   "kind": "凭据-口令赋值",
+   "frag": "password = \"Home-2.4G-Pass\"",
+   "text": "- 凭据类模式（`BEGIN … PRIVATE KEY`、`AKIA[0-9A-Z]{16}`、`password=\"…\"`、`secret=\"…\"`）：仅 2 处**合成测试值** —— `ProvisionViewModelTest.kt:71 val password = \"Home-2.4G-Pass\"`、`MockTransport.kt:194",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t21-契约v1.2与接线表v1.3-2026-10-17.md",
+   "line": 36,
+   "kind": "身份-院校/角色",
+   "frag": "队长",
+   "text": "| ④ | D-01~D-06（data 平铺、缺省省略键、`accepted`/`rejected` 整型键、`confirmed` 可筛选、`gas_l1_to_l2_s` 归属 §8、§6.9 错引用已改） | **通过**（第 3 子项口径待确认，见 F11） | D-01：§8.2 有 `gas_l1_to_l2_s`、§6.9 **L924** ",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t21-契约v1.2与接线表v1.3-2026-10-17.md",
+   "line": 114,
+   "kind": "身份-院校/角色",
+   "frag": "队长",
+   "text": "| **F11** | low | 契约 §6.11 **L942** | `accepted`/`rejected` 的元素类型 = **字符串数组（键名）**；队长转发验收项写的是「**整型键**」。我回查 PM 原文（m00570/m00700）**只规定「定为 data 内两字段」，未规定类型**，故不算 t14 未落地；但 App/服务器两侧解析方",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md",
+   "line": 100,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- 扫描对象：`git show 923a3b1` 全文 + `git ls-files server` 的 **59 个受版本控制文件**（含 `server/.env.example`）。规则：机构/学校/团队/指导老师/学号/常见邮箱域；`secret|password|token|api_key|access_key` 赋值且值 ≥8 字符且**非*",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md",
+   "line": 103,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "2. `Author: qinyixiang <a3354547604@163.com>` —— **git 提交元数据**，不是文件内容，且是本仓库全部提交的既有作者信息（非 t30 引入）；",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md",
+   "line": 103,
+   "kind": "联系-邮箱",
+   "frag": "a3354547604@163.com",
+   "text": "2. `Author: qinyixiang <a3354547604@163.com>` —— **git 提交元数据**，不是文件内容，且是本仓库全部提交的既有作者信息（非 t30 引入）；",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md",
+   "line": 104,
+   "kind": "凭据-口令赋值",
+   "frag": "token=\"wrong-token\"",
+   "text": "3. `server/tests/test_60_webhook.py:44` 的 `token=\"wrong-token\"` —— 测试字面量。",
+   "benign": true
+  },
+  {
+   "path": "docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md",
+   "line": 106,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- 结论：t30 交付物**无真实凭据、无学校/团队/机构信息**。",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t5-服务器骨架与模拟API-2026-10-17.md",
+   "line": 22,
+   "kind": "凭据-口令赋值",
+   "frag": "token=\"wrong-token\"",
+   "text": "| 4 | 密钥/口令/AK/SK 不入库扫描 | **PASS** | 探针 F 段（48 文件）+ 我独立 grep：真实口令/AK 形态 **0 命中**；唯一命中是负例测试字面量 `server/tests/test_60_webhook.py:44`（`token=\"wrong-token\"`）；`git ls-files server/` 无 `",
+   "benign": true
+  },
+  {
+   "path": "docs/评审与验证/复核-t6-鸿蒙App骨架-2026-10-17.md",
+   "line": 36,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| ⑦ | 全文无学校/团队/指导老师信息 | **PASS** | 我对 `harmony-app/**` 做了关键词扫描：0 条真实命中（2 条初始命中经核实是仓库自身策略句\"不写/不提交学校/团队/指导老师信息\"） |",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t71-参赛材料正文-2026-10-18.md",
+   "line": 136,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- **命令（沿用材料自己的口径）**：`grep -rniE \"学校|学院|大学|团队|队名|指导老师|指导教师|姓名\" docs/参赛材料/`",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t71-参赛材料正文-2026-10-18.md",
+   "line": 141,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| (a) 占位符 | 6 | `00:22`「`赛题四+…+XX 学校XX队.rar`」、`00:81`「`XX 学校`/`XX 队` 占位符」、`10:18`「参赛队：**参赛队**（不写学校/学院/团队名/指导老师/选手姓名）」 | 允许（R7 要求用户填真名，材料内只留占位） |",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t71-参赛材料正文-2026-10-18.md",
+   "line": 145,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "- **真实校名 / 队名 / 指导老师姓名 / 选手姓名 / 手机号 / 真实 Wi-Fi 名：0 条命中**。`00` §4 声明的「2026-10-18 自检命中 16 行」在 `00/01/02/03` 四份上复跑得到同样的 16 行，范围口径准确。",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/复核-t71-参赛材料正文-2026-10-18.md",
+   "line": 230,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "grep -rniE \"学校|学院|大学|团队|队名|指导老师|指导教师|姓名\" docs/参赛材料/   # 25 行",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/计划评审与可行性核查-2026-10-14.md",
+   "line": 25,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "1. ✅ **时间节点、材料规格全部对得上**：API 12 及以上；docx（宋体小四、1.5 倍行距）；mp4 ≤100MB、≤5 分钟；PPT 讲解 ≤10 分钟；rar 命名「赛题序号+赛题名称+XX 学校团队名称」；不得出现学校/团队/指导老师信息；报名 10-30、提交 11-06、路演 11-13~14 郑东新区。",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/计划评审与可行性核查-2026-10-14.md",
+   "line": 34,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "4. ⚠️ **报名流程缺失**：通知要求报名表（EXCEL）+ **学校盖章后的扫描件**，**以二级学院为单位统一报名**，发至 mfjy2018@126.com，**现场另交盖章纸质版**。计划的 W0.5 只写了「报名表（组别+赛题下拉选择）」，漏了盖章与纸质件——这类事卡在学院流程上会误期。",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/计划评审与可行性核查-2026-10-14.md",
+   "line": 34,
+   "kind": "联系-邮箱",
+   "frag": "mfjy2018@126.com",
+   "text": "4. ⚠️ **报名流程缺失**：通知要求报名表（EXCEL）+ **学校盖章后的扫描件**，**以二级学院为单位统一报名**，发至 mfjy2018@126.com，**现场另交盖章纸质版**。计划的 W0.5 只写了「报名表（组别+赛题下拉选择）」，漏了盖章与纸质件——这类事卡在学院流程上会误期。",
+   "benign": false
+  },
+  {
+   "path": "docs/评审与验证/计划评审与可行性核查-2026-10-14.md",
+   "line": 167,
+   "kind": "身份-院校/角色",
+   "frag": "学院",
+   "text": "2. 删掉 §7.1 / §12-6 的金仓疑虑，MySQL 定版；补报名流程（盖章扫描件 + 二级学院 + 纸质版）。",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 1,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "# <u>河南省高等学校计算机教育研究会</u>",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 3,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "## 关于举办 2026 年（第三届）河南省高等学校 信息技术应用创新大赛的通知",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 5,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "各高等学校： OpenHarmony 作为万物互联时代全场景智能底座，是我国科技自立自 强的关键技术载体。伴随 2026 年鸿蒙生态持续扩容，软硬件适配与行业落 地加速推进，依托自主研发与开源共建实现核心技术自主可控，广泛赋能千 行百业，在新质生产力加快发展的背景下，成为推动数字经济与经济社会高 质量发展的重要引擎。为落实“数字中国”、对接“数字河南”建设需",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 7,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "参赛队伍只能从中选择 1 个赛题参赛。 具体参赛规程请查看附件 1：《开源鸿蒙大赛参赛方案》。 三、竞赛方式 以线下方式进行比赛，分本科组和高职高专组。竞赛以团体赛（路演形 式）呈现。 四、参赛对象与要求 （一）参赛对象 参赛选手须为河南省普通高等学校全日制在籍本科、高职学生。 （二）组队要求每支参赛队包含 2-3 名参赛选手及 1-2 名指导老师。 不得跨",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 13,
+   "kind": "身份-院校/角色",
+   "frag": "大学",
+   "text": "|比|赛|地|点：河南财经政法大学（郑东新区）|",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 15,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "六、参赛费用 本次大赛不收取任何费用，参赛学校自行承担因参赛产生的食宿交通、 参赛选手保险等其他费用。 七、奖项设置 大赛按竞赛组别分开评奖。大赛设置一、二、三等奖，各奖项的获奖比 例不超过本竞赛组别参赛队伍总数量的 10%、20%、30%。获奖证书由河南 省高等学校计算机教育研究会、软通动力共同颁发。 获得一等奖作品的选手有优先机会签约软通动力实习岗位工作",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 23,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "|河南省高等学校计算机教育研究会|尚展垒|13838156565|",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 23,
+   "kind": "联系-手机号",
+   "frag": "13838156565",
+   "text": "|河南省高等学校计算机教育研究会|尚展垒|13838156565|",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 25,
+   "kind": "联系-手机号",
+   "frag": "15639777957",
+   "text": "|河南省信息技术应用创新产教融合体|秦丽|15639777957|",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 26,
+   "kind": "联系-手机号",
+   "frag": "18236922995",
+   "text": "|北京软通动力教育科技有限公司|李飞洋|18236922995|",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 27,
+   "kind": "身份-院校/角色",
+   "frag": "大学",
+   "text": "|河南财经政法大学（承办校）|张斌|18503887911|",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 27,
+   "kind": "联系-手机号",
+   "frag": "18503887911",
+   "text": "|河南财经政法大学（承办校）|张斌|18503887911|",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 29,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "（二）仲裁投诉受理 河南省高等教育学会 0371-66078251 河南省高等学校大学生竞赛管理服务中心 0373-3326195 hnjsglzx@htu.edu.cn 附件 1：《开源鸿蒙大赛参赛方案》 附件 2：《开源鸿蒙大赛参赛报名表》",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 31,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "河南省高等学校计算机教育研究会",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 152,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "不得出现参赛团队、指导老师、院校等相关信息，确保评审公平公正。",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 166,
+   "kind": "联系-邮箱",
+   "frag": "mfjy2018@126.com",
+   "text": "参赛报名表”到指定邮箱 mfjy2018@126.com。",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 169,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "命名格式为“赛题序号+赛题名称+XX 学校团队名称”（示例：赛题一+非 物质文化遗产指尖传承独立展示应用+XX 学校筑梦队.rar）。 提交方式：参赛团队在作品提交截止时间（2026 年 11 月 6 日）前，以 竞赛 QQ 群里规定的方式提交作品。",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 173,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "|||参赛单位（盖章）：XX 学校|XX 学院||||第三届开源鸿蒙大赛参赛报名表||||||||||",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 174,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "|序 号|学校名称|二级学院 名称|组别|队名|赛题|作品名 称|参赛选 手 1|联系电 话|参赛选 手 2|联系 电话|参赛选 手 3|联系 电话|指导 老师 1|联系 电话|指导老 师 2|联系 电话|",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 175,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "|1|XX 学校|XX 学院|本科 组|XX 参赛队|赛题一：黄河 记忆·黄河文 化分布式数字 档案|XXX|||||||||||",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 178,
+   "kind": "身份-院校/角色",
+   "frag": "指导老师",
+   "text": "|- 10|说明： -|5. 报名邮箱：mfjy2018@126.com。 6. 报名截止时间：2026 年 10 月 30 日。 7. 报名电话：秦老师|4. 每个作品指导老师不超过 2 人，参赛选手不超过 3 人。|2. 组别与赛题两列，请在下拉列表中进行选择，不要手动输入。 15639777957。|1. 请确保每一位参赛选手的联系方式填写正确，联系电",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 178,
+   "kind": "联系-邮箱",
+   "frag": "mfjy2018@126.com",
+   "text": "|- 10|说明： -|5. 报名邮箱：mfjy2018@126.com。 6. 报名截止时间：2026 年 10 月 30 日。 7. 报名电话：秦老师|4. 每个作品指导老师不超过 2 人，参赛选手不超过 3 人。|2. 组别与赛题两列，请在下拉列表中进行选择，不要手动输入。 15639777957。|1. 请确保每一位参赛选手的联系方式填写正确，联系电",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/notice.md",
+   "line": 178,
+   "kind": "联系-手机号",
+   "frag": "15639777957",
+   "text": "|- 10|说明： -|5. 报名邮箱：mfjy2018@126.com。 6. 报名截止时间：2026 年 10 月 30 日。 7. 报名电话：秦老师|4. 每个作品指导老师不超过 2 人，参赛选手不超过 3 人。|2. 组别与赛题两列，请在下拉列表中进行选择，不要手动输入。 15639777957。|1. 请确保每一位参赛选手的联系方式填写正确，联系电",
+   "benign": false
+  },
+  {
+   "path": "docs/赛事资料/training.md",
+   "line": 3,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "为助力全省高校师生备战第三届河南省高等学校信息技术应用创新大 赛，夯实参赛队伍鸿蒙南北向开发技术基础，提升大赛作品质量与参赛竞 争力，现面向参赛师生开展免费鸿蒙技术专项培训与技术支持。本次培训 聚焦鸿蒙北向移动开发与南向设备开发核心技术，采用五次线上理论直播 授课模式，贴合大赛赛题技术方向，现将具体培训内容公告如下：",
+   "benign": false
+  },
+  {
+   "path": "docs/项目章程.md",
+   "line": 112,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| 文档/材料 | 我 + 用户 | 计划书、设计 docx、PPT、视频脚本、匿名检查 | 不出现学校/团队/指导老师信息 |",
+   "benign": false
+  },
+  {
+   "path": "docs/项目章程.md",
+   "line": 167,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- 不提交密钥、账号、证书、学校信息。",
+   "benign": false
+  },
+  {
+   "path": "docs/项目章程.md",
+   "line": 200,
+   "kind": "身份-院校/角色",
+   "frag": "团队名",
+   "text": "- **团队**：`dsh-agent-teams` 插件；团队名 `hmprogram-eldercare`；成员与任务见 Agent Teams 看板。",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/AppScope/app.json5",
+   "line": 9,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "* vendor/label 一律使用项目中性名，**不写学校 / 团队 / 指导老师信息**（项目章程）。",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/deliverables/01-HAP构建日志.txt",
+   "line": 50,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "-rwxrwxrwx 1 qinyixiang qinyixiang 971362 Oct 18 11:45 entry/build/default/outputs/default/entry-default-unsigned.hap",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/deliverables/05-DevEco运行指引.md",
+   "line": 215,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- 本文与配套材料**不含**学校、团队、指导老师、真实姓名、真实手机号等任何身份信息。",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/deliverables/07-截图与录屏清单.md",
+   "line": 105,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "4. **匿名检查（每张过一遍）**：**不得**出现学校、团队、指导老师、真实姓名、真实手机号、真实住址、真实 Wi-Fi 名称/密码；演示账号 `daughter01` 是 mock 专用假账号，可入镜。",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/entry/src/main/ets/service/MockData.ets",
+   "line": 79,
+   "kind": "联系-手机号",
+   "frag": "13800000000",
+   "text": "const user: JsonObject = { 'id': 1, 'username': 'daughter01', 'phone': '13800000000' };",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/hvigor/hvigor-config.json5",
+   "line": 14,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "\"@ohos/hvigor-ohos-plugin\": \"file:/home/qinyixiang/harmony-toolchain/clt/command-line-tools/hvigor/hvigor-ohos-plugin\",",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/hvigor/hvigor-config.json5",
+   "line": 15,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "\"@ohos/hvigor\": \"file:/home/qinyixiang/harmony-toolchain/clt/command-line-tools/hvigor/hvigor\"",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/tools/gen-assets.py",
+   "line": 6,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "AGENTS.md 要求「不提交学校/团队/指导老师信息」，也不引入第三方素材版权风险。",
+   "benign": false
+  },
+  {
+   "path": "harmony-app/tools/selfcheck-entry.ts",
+   "line": 125,
+   "kind": "联系-手机号",
+   "frag": "13800000002",
+   "text": "const reg: ApiResult<RegisterResult> = await this.api.register('daughter02', 'P@ssw0rd!', '13800000002');",
+   "benign": false
+  },
+  {
+   "path": "rk2206-gateway/src/gw_config.h",
+   "line": 130,
+   "kind": "身份-院校/角色",
+   "frag": "队长",
+   "text": "* 7. 节拍与时序（t4：数值来自契约 §8 与队长 2026-10-17 的取时顺序决策）",
+   "benign": false
+  },
+  {
+   "path": "rk2206-gateway/src/gw_config.h",
+   "line": 143,
+   "kind": "身份-院校/角色",
+   "frag": "队长",
+   "text": "/* 取时（队长决策：联网 → 取 UTC → 连 IoTDA；两个源都失败就不连）",
+   "benign": false
+  },
+  {
+   "path": "rk2206-gateway/src/gw_main.c",
+   "line": 11,
+   "kind": "身份-院校/角色",
+   "frag": "队长",
+   "text": "* 严格顺序（队长 2026-10-17 决策 + 契约 §4.1）：联网 → 取 UTC → 连 IoTDA。",
+   "benign": false
+  },
+  {
+   "path": "rk2206-gateway/src/gw_timesync.h",
+   "line": 4,
+   "kind": "身份-院校/角色",
+   "frag": "队长",
+   "text": "* 为什么这一步不能省（契约 §4.1 + 队长 2026-10-17 决策）：",
+   "benign": false
+  },
+  {
+   "path": "rk2206-gateway/src/gw_timesync.h",
+   "line": 10,
+   "kind": "身份-院校/角色",
+   "frag": "队长",
+   "text": "* 取时顺序（队长 D2）：",
+   "benign": false
+  },
+  {
+   "path": "server/README.md",
+   "line": 192,
+   "kind": "联系-手机号",
+   "frag": "13800000000",
+   "text": "$ curl -s -X POST http://127.0.0.1:3000/api/auth/register -H 'Content-Type: application/json' -d '{\"username\":\"demo_1792246174\",\"password\":\"pass-123456\",\"phone\":\"13800000000\"}'",
+   "benign": false
+  },
+  {
+   "path": "server/README.md",
+   "line": 285,
+   "kind": "凭据-JWT",
+   "frag": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJkZW1vXzE3OTIyNDYxNzQiLCJpYXQiOjE3OTIyNDYxNzQsImV4cCI6MTc5Mjg1MDk3NH0.gjNhkfdDfo22H5NLNJefmNfdG1RQxyIq07adTuqsUbM",
+   "text": "$ curl -s -X POST http://127.0.0.1:3000/api/devices/bind -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwidXNlcm5h",
+   "benign": false
+  },
+  {
+   "path": "server/tests/conftest.py",
+   "line": 33,
+   "kind": "凭据-口令赋值",
+   "frag": "PASSWORD = \"test-pass-123\"",
+   "text": "PASSWORD = \"test-pass-123\"",
+   "benign": true
+  },
+  {
+   "path": "server/tests/test_20_auth.py",
+   "line": 11,
+   "kind": "联系-手机号",
+   "frag": "13800000000",
+   "text": "resp = client.post(\"/api/auth/register\", json={\"username\": \"daughter01\", \"password\": PASSWORD, \"phone\": \"13800000000\"})",
+   "benign": false
+  },
+  {
+   "path": "server/tests/test_60_webhook.py",
+   "line": 44,
+   "kind": "凭据-口令赋值",
+   "frag": "token=\"wrong-token\"",
+   "text": "assert _post(client, body, token=\"wrong-token\").status_code == 401",
+   "benign": true
+  },
+  {
+   "path": "tools/test/mock_server.py",
+   "line": 362,
+   "kind": "凭据-口令赋值",
+   "frag": "token = \"tok-%d\"",
+   "text": "token = \"tok-%d\" % (len(st.tokens) + 1)",
+   "benign": false
+  },
+  {
+   "path": "tools/test/review/check_harmony_contract.py",
+   "line": 15,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "G. 敏感信息扫描（学校/团队/指导老师/联系方式）。",
+   "benign": false
+  },
+  {
+   "path": "tools/test/review/check_harmony_contract.py",
+   "line": 222,
+   "kind": "身份-院校/角色",
+   "frag": "大学",
+   "text": "PAT = re.compile(r\"(大学|学院|职业技术|指导教师|指导老师|辅导员|参赛队|队名|团队名称|学号|班级|\"",
+   "benign": false
+  },
+  {
+   "path": "tools/test/review/check_harmony_contract.py",
+   "line": 240,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "ok(\"harmony-app/ 全文（含 deliverables）无学校/团队/指导老师/联系方式命中\")",
+   "benign": false
+  },
+  {
+   "path": "tools/test/review/check_harmony_http.py",
+   "line": 99,
+   "kind": "联系-手机号",
+   "frag": "13800000001",
+   "text": "\"user\": {\"id\": 1, \"username\": \"daughter01\", \"phone\": \"13800000001\"}})),",
+   "benign": false
+  },
+  {
+   "path": "tools/test/review/repo_health.py",
+   "line": 14,
+   "kind": "联系-手机号",
+   "frag": "13800000000",
+   "text": "良性判定基于良性命中词表，避免把 `wrong-token`、`13800000000`、正则里的",
+   "benign": false
+  },
+  {
+   "path": "tools/test/review/repo_health.py",
+   "line": 15,
+   "kind": "身份-院校/角色",
+   "frag": "大学",
+   "text": "「大学」当成泄露。",
+   "benign": false
+  },
+  {
+   "path": "tools/test/review/repo_health.py",
+   "line": 187,
+   "kind": "身份-院校/角色",
+   "frag": "大学",
+   "text": "(\"身份-院校/角色\", re.compile(r\"大学|学院|学校|职业技术学院|指导老师|指导教师|辅导员|学号|团队名|队长|战队|身份证\")),",
+   "benign": false
+  },
+  {
+   "path": "tools/test/review/repo_health.py",
+   "line": 188,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "(\"身份-本机用户名\", re.compile(r\"qinyixiang|QinYixiang|QINYIXIANG\")),",
+   "benign": false
+  },
+  {
+   "path": "tools/test/suites/s03_iotda.py",
+   "line": 5,
+   "kind": "身份-院校/角色",
+   "frag": "队长",
+   "text": "重点回答队长点名的问题 ③：§4.1 的鉴权算法能不能落地、和「库里样例照抄」的坑有没有写清。",
+   "benign": false
+  },
+  {
+   "path": "tools/test/suites/s03_iotda.py",
+   "line": 30,
+   "kind": "凭据-口令赋值",
+   "frag": "SECRET = \"demo-secret-only-for-test\"",
+   "text": "SECRET = \"demo-secret-only-for-test\"",
+   "benign": true
+  },
+  {
+   "path": "ws63-firmware/doc/13-构建串行化.md",
+   "line": 189,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "…01:22:17Z pid=370800 等待中：同一棵 WS63 SDK 已被占用（锁 /tmp/hm-ws63-sdk.lock，等待上限 1800s，树 /home/qinyixiang/ws63/fbb_ws63-master）",
+   "benign": false
+  },
+  {
+   "path": "ws63-firmware/doc/13-构建串行化.md",
+   "line": 250,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "custom_dir=/home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom",
+   "benign": false
+  },
+  {
+   "path": "ws63-firmware/doc/13-构建串行化.md",
+   "line": 313,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "z = zipfile.ZipFile('/home/qinyixiang/ws63/fbb_gitee.zip')",
+   "benign": false
+  },
+  {
+   "path": "ws63-firmware/spike/out/build-evidence.txt",
+   "line": 3,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "SDK：/home/qinyixiang/ws63/fbb_ws63-master",
+   "benign": false
+  },
+  {
+   "path": "ws63-firmware/spike/out/build-evidence.txt",
+   "line": 16,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "[spike-build] 已暂存生产源文件 → /home/qinyixiang/ws63/fbb_ws63-master/.spike-stash",
+   "benign": false
+  },
+  {
+   "path": "ws63-firmware/spike/out/build-evidence.txt",
+   "line": 37,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "[spike-build] 已还原 /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom（生产固件源码与 CMakeLists 回到编译前状态）",
+   "benign": false
+  },
+  {
+   "path": "ws63-firmware/spike/out/build-evidence.txt",
+   "line": 76,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "diff -q /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom/$f ws63-firmware/src/$f; done",
+   "benign": false
+  },
+  {
+   "path": "ws63-firmware/spike/out/build-evidence.txt",
+   "line": 84,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "$ ls -la /home/qinyixiang/ws63/fbb_ws63-master/src/application/samples/custom/",
+   "benign": false
+  },
+  {
+   "path": "ws63-firmware/spike/out/build-evidence.txt",
+   "line": 92,
+   "kind": "身份-本机用户名",
+   "frag": "qinyixiang",
+   "text": "SDK：/home/qinyixiang/ws63/fbb_ws63-master",
+   "benign": false
+  },
+  {
+   "path": "赛题四-实施计划.md",
+   "line": 499,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "| W0.5 报名 | 10/12–10/25 | 报名表（EXCEL，组别 + 赛题下拉选择）+ **学校盖章后的扫描件**，**以二级学院为单位**统一报名至 mfjy2018@126.com；**现场另交盖章纸质版**；**截止 10/30，提前 5 天交** |",
+   "benign": false
+  },
+  {
+   "path": "赛题四-实施计划.md",
+   "line": 499,
+   "kind": "联系-邮箱",
+   "frag": "mfjy2018@126.com",
+   "text": "| W0.5 报名 | 10/12–10/25 | 报名表（EXCEL，组别 + 赛题下拉选择）+ **学校盖章后的扫描件**，**以二级学院为单位**统一报名至 mfjy2018@126.com；**现场另交盖章纸质版**；**截止 10/30，提前 5 天交** |",
+   "benign": false
+  },
+  {
+   "path": "赛题四-实施计划.md",
+   "line": 523,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- [ ] 代码截图里的**文件路径**（含用户名/学校名）",
+   "benign": false
+  },
+  {
+   "path": "赛题四-实施计划.md",
+   "line": 526,
+   "kind": "身份-院校/角色",
+   "frag": "学校",
+   "text": "- [ ] 打包：**rar**，命名「赛题序号 + 赛题名称 + XX学校团队名称」",
+   "benign": false
+  }
+ ]
+}
