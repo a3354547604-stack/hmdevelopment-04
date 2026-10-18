@@ -68,6 +68,21 @@ curl -s http://127.0.0.1:3000/api/health
 未绑定网关 `M0-9C2D4E`（用于走绑定流程）、最近 3 天读数（gateway 属性快照 / presence 活动 / gas 背景值 / 一组跌倒）、
 3 条不同状态的告警，并按 §7.9 归并出 `activity_hourly`/`activity_daily`。
 
+### 2.1 现场演示数据包（`--demo`）
+
+现场只有几分钟，不能现造数据，所以另有一份「七动作演示数据」——一条命令重置、一条命令自检：
+
+```bash
+docker compose exec api python -m app.seed --demo   # 清空业务表并灌成确定状态（幂等，可反复跑）
+bash tools/demo-check.sh                            # 逐条核对 D1–D7；全绿退出码 0，失败退出码 1
+```
+
+- 与上面 `app.seed`（幂等补齐、不清库）的区别：`--demo` **先 TRUNCATE 业务表**再灌 —— 60 天活动（月报有上月基线）、
+  10 条覆盖全部类型的告警（含已处置）、燃气/跌倒/门磁过程读数、断网窗口的补传样本。
+- **与运行时刻无关**：所有时刻锚定 CST 日历日的固定钟点，凌晨跑与晚上跑结果相同（报表数字可复算）。
+- 判据、失败对策、回滚与诚实边界见 `deploy/演示数据施工单.md`；自检判据源码在 `app/demo_check.py`。
+- `APP_ENV=prod` 下 `--demo` 与 `--reset` 一样被**拒绝**（隐含清库，防手滑）。
+
 ## 3. 环境变量
 
 完整清单与注释见 [`.env.example`](.env.example)。必须关注的几项：
