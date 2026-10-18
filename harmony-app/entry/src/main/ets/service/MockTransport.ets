@@ -19,8 +19,12 @@ import { MockData, MockStore, errorEnvelope } from './MockData';
 import { JsonObject, asObject, optStr } from '../common/JsonUtil';
 import { SettingSpec, SETTING_KEYS, specOf } from '../common/SettingsSchema';
 
-/** 故障注入模式：为了让「错误态 / 空态」在无服务器时也能被验收看到。 */
-export type FaultMode = 'none' | 'network' | 'unauthorized' | 'empty';
+/**
+ * 故障注入模式：为了让「错误态 / 空态」在无服务器时也能被验收看到。
+ * `no_baseline`（t62 夹具）：§6.17 返回「无昨日基线」形状（只有 title/today），
+ * 用来证明 App 在两种数据形态下都能解析 —— 真服务器在月初/新设备上就会这样回。
+ */
+export type FaultMode = 'none' | 'network' | 'unauthorized' | 'empty' | 'no_baseline';
 
 export class MockTransport implements HttpPort {
   private static fault: FaultMode = 'none';
@@ -45,11 +49,11 @@ export class MockTransport implements HttpPort {
     if (mode === 'unauthorized') {
       return new HttpResponse(401, errorEnvelope(1101, 'token expired'), '');
     }
-    return MockTransport.route(req, mode === 'empty');
+    return MockTransport.route(req, mode === 'empty', mode === 'no_baseline');
   }
 
   /** 按契约 §6.2 的接口表分发。 */
-  private static route(req: HttpRequest, emptyMode: boolean): HttpResponse {
+  private static route(req: HttpRequest, emptyMode: boolean, noBaselineTrend: boolean = false): HttpResponse {
     const seg: string[] = MockTransport.segments(req.url);
     const method: HttpMethod = req.method;
     const body: JsonObject = MockTransport.bodyOf(req.body);
@@ -147,7 +151,7 @@ export class MockTransport implements HttpPort {
         MockData.activityBody(MockTransport.queryOf(req.url, 'period'), MockData.today()));
     }
     if (seg[0] === 'reports' && seg[1] === 'trend' && method === 'GET') {
-      return MockTransport.json(200, MockData.trendBody(7));
+      return MockTransport.json(200, MockData.trendBody(7, noBaselineTrend));
     }
     if (seg[0] === 'reports' && seg[1] === 'summary' && method === 'GET') {
       return MockTransport.json(200, MockData.summaryBody(MockTransport.queryOf(req.url, 'period')));
@@ -177,11 +181,14 @@ export class MockTransport implements HttpPort {
     //   1104 非 owner（mock 里固定 owner，不模拟）。
     for (const key of keys) {
       if (SETTING_KEYS.indexOf(key) < 0) {
-        return MockTransport.json(400, errorEnvelope(1003, `unknown key: ${key}`));
+        // 与 1002 一样把 `field` 写进 message：真服务器把细节放在 data 里，而 App 的
+        // describe() 只拼 message（Result.ets），mock 若不带 field，用户在离线演示里看不到是哪个键。
+        return MockTransport.json(400, errorEnvelope(1003, `field=${key}（未知键名）`));
       }
       const value: Object | undefined = items[key];
       const spec: SettingSpec | undefined = specOf(key);
-      // alert_repush_s 是数组、gas_l1_to_l2_s 不在规格表里 → 只校验键名合法，不做范围判断
+      // alert_repush_s 是数组（不在规格表里）→ 只校验键名合法，不做范围判断；
+      // 契约外键（如 §8.2 的 gas_l1_to_l2_s）走上面的 1003 分支，与真服务器同口径。
       if (spec === undefined || typeof value !== 'number') {
         continue;
       }

@@ -147,9 +147,12 @@ export interface ReadingListResult {
 
 // ============================================================ §6.9 / §6.10 阈值配置
 /**
- * 阈值配置项。键名逐条来自 §6.9 示例，**另含 §8.2 列出但 §6.9 示例漏掉的
- * `gas_l1_to_l2_s`**（该不一致已记入「契约字段核对表」）。
+ * 阈值配置项。键名逐条来自 §6.9 示例，是**闭集（v1.2 口径：21 键）**。
  * 全部可选：契约 §6.10 规定 PUT 只提交要改的键，GET 也可能因版本差异少给键。
+ *
+ * **不得加入 `gas_l1_to_l2_s`**：契约 §6.9 注（PM 裁定 D-01）明确它是 §8.2 的算法参数、
+ * 不在本节 `items` 里；§6.10 的 1003 错误原文就把「含 `gas_l1_to_l2_s`」列为未知键的例子。
+ * 要开放运行时配置必须先改契约（App 侧曾误声明该键，t62 收口）。
  */
 export interface SettingsItems {
   no_motion_min?: number;
@@ -158,8 +161,6 @@ export interface SettingsItems {
   gas_t2_mv?: number;
   gas_l1_hold_s?: number;
   gas_l2_hold_s?: number;
-  /** §8.2 有、§6.9 示例无 → 待 PM/云端确认后启用（见核对表 D-01） */
-  gas_l1_to_l2_s?: number;
   gas_recover_mv?: number;
   gas_recover_hold_s?: number;
   away_after_open_s?: number;
@@ -286,12 +287,22 @@ export interface TrendPoint {
   count: number;
 }
 
+/**
+ * §6.17 的 `compare`。必现/可缺省按契约 v1.2 的字段表：
+ *  · `title` **必现**（固定文案「今日活动频次」，不参与趋势判断）；
+ *  · `today` 必现；
+ *  · `yesterday` / `delta_pct` / `text` **可缺省**——服务器在「无昨日基线」时三个键
+ *    全部省略（只回 title + today）。这里用 `?`，解析用 `optNum/optStr`：
+ *    写成必填会让整条 `trendReport` 解析抛错，周月报（D7）在月初/新设备上直接白屏。
+ */
 export interface TrendCompare {
+  title: string;
   today: number;
-  yesterday: number;
-  delta_pct: number;
-  /** 服务器生成的同比中文文案（§6.17 规则表） */
-  text: string;
+  yesterday?: number;
+  /** 整数百分比（四舍五入，-20 = 下降 20%）；无基线时省略 */
+  delta_pct?: number;
+  /** 服务器生成的同比中文文案（§6.17 规则表）；无基线时省略 */
+  text?: string;
 }
 
 export interface TrendReport {
@@ -499,7 +510,6 @@ export function parseSettingsItems(o: JsonObject): SettingsItems {
   s.gas_t2_mv = optNum(o, 'gas_t2_mv');
   s.gas_l1_hold_s = optNum(o, 'gas_l1_hold_s');
   s.gas_l2_hold_s = optNum(o, 'gas_l2_hold_s');
-  s.gas_l1_to_l2_s = optNum(o, 'gas_l1_to_l2_s');
   s.gas_recover_mv = optNum(o, 'gas_recover_mv');
   s.gas_recover_hold_s = optNum(o, 'gas_recover_hold_s');
   s.away_after_open_s = optNum(o, 'away_after_open_s');
@@ -660,10 +670,13 @@ export function parseTrendReport(o: JsonObject): TrendReport {
       return { date: str(e, 'date', 'series[]'), count: num(e, 'count', 'series[]') };
     }),
     compare: {
+      // title 是 v1.2 的必现键：缺了说明服务器不是 v1.2 形状，按必填抛错暴露出来
+      title: str(compare, 'title', 'compare'),
       today: num(compare, 'today', 'compare'),
-      yesterday: num(compare, 'yesterday', 'compare'),
-      delta_pct: num(compare, 'delta_pct', 'compare'),
-      text: str(compare, 'text', 'compare')
+      // 无昨日基线时服务器省略这三个键 → 必须用 opt*，缺键不得抛（D7 周月报）
+      yesterday: optNum(compare, 'yesterday'),
+      delta_pct: optNum(compare, 'delta_pct'),
+      text: optStr(compare, 'text')
     }
   };
 }

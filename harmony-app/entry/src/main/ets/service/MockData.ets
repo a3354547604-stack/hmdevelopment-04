@@ -227,7 +227,7 @@ export class MockData {
   }
 
   // ---------------------------------------------------------------- §6.9 阈值配置
-  /** 逐字取契约 §6.9 的 items 示例（21 键 + 我补的 gas_l1_to_l2_s，见核对表 D-03）。 */
+  /** 逐字取契约 §6.9 的 items 示例（21 键闭集；不含 §8.2 的 gas_l1_to_l2_s，见 D-01/t62）。 */
   static settingsBody(source: string, updatedAt: number): string {
     const items: JsonObject = copyOf(MockStore.settings());
     const data: JsonObject = { 'source': source, 'updated_at': updatedAt, 'items': items };
@@ -349,20 +349,25 @@ export class MockData {
     return envelope(data, 0, 'ok');
   }
 
-  /** §6.17 的 `text` 文案**照抄契约示例**（App 不自己拼同比文案）。 */
-  static trendBody(days: number): string {
+  /**
+   * §6.17 趋势。`title` 是 v1.2 的**必现键**（固定文案「今日活动频次」）；
+   * `noBaseline=true` 时只回 title/today —— 契约明文规定「无昨日基线 → 省略
+   * yesterday/delta_pct/text」，自检用它造负向夹具（t62）。
+   */
+  static trendBody(days: number, noBaseline: boolean = false): string {
     const series: JsonObject[] = [];
     let d: number = days - 1;
     while (d >= 0) {
       series.push({ 'date': MockData.shiftDate(MockData.today(), -d), 'count': 100 + d * 3 });
       d = d - 1;
     }
-    const compare: JsonObject = {
-      'today': 128,
-      'yesterday': 160,
-      'delta_pct': -20.0,
-      'text': '今日活动频次较昨日下降 20%'
-    };
+    const compare: JsonObject = { 'title': '今日活动频次', 'today': 128 };
+    if (!noBaseline) {
+      // delta_pct 是**整数百分比**、text 用契约规则行原文（标题另占 title，别揉进 text）
+      compare['yesterday'] = 160;
+      compare['delta_pct'] = -20;
+      compare['text'] = '较昨日下降 20%';
+    }
     const data: JsonObject = {
       'device_id': 1,
       'days': days,
@@ -505,10 +510,10 @@ export class MockStore {
         'note': '已让邻居上门查看，老人一切正常', 'ts': ago(150)
       }
     ];
-    // §6.9 的 21 个键逐字照抄；gas_l1_to_l2_s 取 §8.2 默认值 60（契约 §6.9 示例遗漏，见核对表 D-03）
+    // §6.9 的 21 个键逐字照抄（v1.2 闭集；gas_l1_to_l2_s 是 §8.2 算法参数，不进 items，见 D-01/t62）
     MockStore.settingsData = {
       'no_motion_min': 30, 'presence_hold_s': 60, 'gas_t1_mv': 1500, 'gas_t2_mv': 2500,
-      'gas_l1_hold_s': 10, 'gas_l2_hold_s': 6, 'gas_l1_to_l2_s': 60,
+      'gas_l1_hold_s': 10, 'gas_l2_hold_s': 6,
       'gas_recover_mv': 200, 'gas_recover_hold_s': 30,
       'away_after_open_s': 600, 'door_open_alarm_s': 180, 'report_interval_s': 60,
       'node_offline_timeout_s': 9, 'gateway_offline_timeout_s': 180,

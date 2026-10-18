@@ -100,8 +100,12 @@ export function emptyActivityReport(): ActivityReport {
   return { device_id: 0, period: 'day', from: 0, to: 0, total: 0, hourly: [], daily: [] };
 }
 
+/**
+ * 空趋势对比。`title` 是 §6.17 的必现键（固定文案），占位时也照契约给；
+ * `yesterday/delta_pct/text` 可缺省——空对象表示「还没取到数」，页面按「暂无对比数据」渲染。
+ */
 export function emptyTrendCompare(): TrendCompare {
-  return { today: 0, yesterday: 0, delta_pct: 0, text: '' };
+  return { title: '今日活动频次', today: 0 };
 }
 
 export function emptyTrendReport(): TrendReport {

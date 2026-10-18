@@ -21,8 +21,9 @@ import {
   DeviceListResult, DeviceSettings, DeviceStatus, GatewayProperties, HealthResult, LoginResult,
   NodeItem, PushRegisterResult, ReadingListResult, RegisterResult, SummaryReport, TrendReport
 } from '../ets/model/Types';
-import { SettingsItems } from '../ets/model/Types';
-import { DEMO_EVENTS } from '../ets/common/SettingsSchema';
+import { SettingsItems, TrendCompare } from '../ets/model/Types';
+import { DEMO_EVENTS, SETTING_SPECS } from '../ets/common/SettingsSchema';
+import { HttpRequest, HttpResponse } from '../ets/service/HttpClient';
 import { Formatter } from '../ets/common/Formatter';
 
 /**
@@ -153,7 +154,9 @@ class Runner {
       `period=${d.period} total=${d.total} hourly=${d.hourly.length} daily=${d.daily.length}`);
     const tr: ApiResult<TrendReport> = await this.api.trendReport(1, 7);
     this.note(15, 'GET /reports/trend', '§6.17', tr, (d: TrendReport) =>
-      `days=${d.days} points=${d.series.length} compare=${d.compare.today}/${d.compare.yesterday} ${d.compare.text}`);
+      `days=${d.days} points=${d.series.length} title=${d.compare.title}`
+      + ` compare=${d.compare.today}/${d.compare.yesterday === undefined ? '-' : d.compare.yesterday}`
+      + ` ${d.compare.text === undefined ? '-' : d.compare.text}`);
     const sm: ApiResult<SummaryReport> = await this.api.summaryReport(1, 'week');
     this.note(16, 'GET /reports/summary', '§6.18', sm, (d: SummaryReport) =>
       `activity.total=${d.activity.total} alerts.total=${d.alerts.total} env.humi_avg=${d.env.humi_avg}`);
@@ -238,9 +241,8 @@ class Runner {
         && oobText.indexOf('allowed') >= 0,
       code: oob.code, httpStatus: oob.httpStatus, detail: oobText
     });
-    // 注：§6.10 的 1003「未知键」无法从 App 侧触发 —— HttpApiService.settingsBody()
-    // 只序列化契约 §6.9 的 22 个键名，压根构造不出未知键的请求体（这是好事）。
-    // mock 仍保留该校验，用于将来手工构造请求体时的自证。
+    // §6.10 的 1003「未知键」：App 的类型上写不进契约外键（HttpApiService.settingsBody()
+    // 只序列化 §6.9 的 21 个键名），所以下面用**手工构造的原始体**喂真实 MockTransport 自证（#30）。
 
     // D8（t42）：演示事件必须**按类型渲染** —— 选 fall 就是跌倒、gas 就是燃气、
     // sos 就是紧急求助；任何类型都不得渲染成另一种（旧实现把未知事件默认当跌倒）。
@@ -297,6 +299,48 @@ class Runner {
       ok: illegalOk && beforeTotal === afterTotal && beforeTotal > 0,
       code: 1206, httpStatus: 400,
       detail: `${illegalCodes}告警条数 ${beforeTotal}→${afterTotal}`
+    });
+
+    // ---- t62 负向夹具 1（§6.17）：无昨日基线响应（只有 title/today）必须能完整解析。
+    // 修复前 Types.ets 把 yesterday/delta_pct/text 当必填 → 这里以 code=-2 变红。
+    MockTransport.setFault('no_baseline');
+    const nb: ApiResult<TrendReport> = await this.api.trendReport(1, 7);
+    MockTransport.setFault('none');
+    const nbc: TrendCompare | undefined = nb.data === undefined ? undefined : nb.data.compare;
+    this.cases.push({
+      seq: 29, name: '§6.17 无昨日基线可解析（t62 夹具1）', contract: '§6.17',
+      ok: nb.ok && nbc !== undefined && nbc.title === '今日活动频次' && nbc.today === 128
+        && nbc.yesterday === undefined && nbc.delta_pct === undefined && nbc.text === undefined,
+      code: nb.code, httpStatus: nb.httpStatus,
+      detail: nbc === undefined ? nb.message
+        : `title=${nbc.title} today=${nbc.today} yesterday=${nbc.yesterday}`
+          + ` delta_pct=${nbc.delta_pct} text=${nbc.text}`
+    });
+
+    // ---- t62 负向夹具 2（§6.10）：契约外键（D-01 排除的 gas_l1_to_l2_s）。
+    // ① 手工原始体喂真实 MockTransport → 必须回 1003（与真服务器同口径）；
+    // ② App 全字段补丁提交后，mock 里存的键集必须是 §6.9 的 21 键、不含该键。
+    const rawPort: MockTransport = new MockTransport();
+    const badResp: HttpResponse = await rawPort.request(new HttpRequest(
+      'http://127.0.0.1:80/api/devices/1/settings', 'PUT',
+      { 'Content-Type': 'application/json' }, '{"items":{"gas_l1_to_l2_s":60}}', 5000));
+    const badCode: number = JSON.parse(badResp.body)['code'] as number;
+    const badMsg: string = JSON.parse(badResp.body)['message'] as string;
+    const fullPatch: SettingsItems = {};
+    for (const sp of SETTING_SPECS) {
+      fullPatch[sp.key] = sp.defaultValue;
+    }
+    fullPatch.alert_repush_s = [0, 60, 300];
+    const sent: ApiResult<DeviceSettings> = await this.api.putSettings(1, fullPatch);
+    const stored: ApiResult<DeviceSettings> = await this.api.getSettings(1);
+    const storedKeys: string[] = stored.data === undefined ? [] : Object.keys(stored.data.items);
+    this.cases.push({
+      seq: 30, name: '§6.10 契约外键被拒 + 键集 21（t62 夹具2）', contract: '§6.10',
+      ok: badResp.status === 400 && badCode === 1003 && badMsg.indexOf('field=gas_l1_to_l2_s') >= 0
+        && sent.ok && storedKeys.length === 21 && storedKeys.indexOf('gas_l1_to_l2_s') < 0,
+      code: badCode, httpStatus: badResp.status,
+      detail: `原始体含 gas_l1_to_l2_s → code=${badCode} msg='${badMsg}'；全字段补丁 ok=${sent.ok}`
+        + ` 服务器键集=${storedKeys.length} 键`
     });
   }
 

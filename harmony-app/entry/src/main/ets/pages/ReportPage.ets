@@ -140,25 +140,47 @@ export struct ReportPage {
     return a.hourly.length === 0 ? 0 : a.hourly[best].hour;
   }
 
+  /**
+   * §6.17 趋势卡。
+   * v1.2 的 `compare` 里 `title` 必现、`yesterday/delta_pct/text` 可缺省（无昨日基线时
+   * 服务器三个键全省略）。所以：note 用 `text ?? title` 兜底，两个依赖基线的格子退化为
+   * 「—」并补一行说明——**不能让缺键把整页渲染打断**（D7 周月报演示依赖这条）。
+   */
   @Builder
   trendCard(t: TrendReport) {
     Column({ space: 4 }) {
-      SectionTitle({ text: `近 ${t.days} 天告警趋势`, note: t.compare.text })
+      SectionTitle({
+        text: `近 ${t.days} 天告警趋势`,
+        note: t.compare.text !== undefined && t.compare.text.length > 0 ? t.compare.text : t.compare.title
+      })
       Column({ space: 6 }) {
         Row({ space: AppTheme.CARD_GAP }) {
           StatTile({ value: `${t.compare.today}`, unit: '条', label: '今天' })
             .layoutWeight(1)
-          StatTile({ value: `${t.compare.yesterday}`, unit: '条', label: '昨天' })
+          StatTile({
+            value: t.compare.yesterday !== undefined ? `${t.compare.yesterday}` : '—',
+            unit: '条',
+            label: '昨天'
+          })
             .layoutWeight(1)
           StatTile({
-            value: t.compare.delta_pct > 0 ? `+${t.compare.delta_pct}` : `${t.compare.delta_pct}`,
+            value: t.compare.delta_pct !== undefined
+              ? (t.compare.delta_pct > 0 ? `+${t.compare.delta_pct}` : `${t.compare.delta_pct}`)
+              : '—',
             unit: '%',
             label: '变化',
-            valueColor: t.compare.delta_pct > 0 ? AppTheme.COLOR_LEVEL2 : AppTheme.COLOR_LEVEL0
+            valueColor: t.compare.delta_pct !== undefined && t.compare.delta_pct > 0
+              ? AppTheme.COLOR_LEVEL2 : AppTheme.COLOR_LEVEL0
           })
             .layoutWeight(1)
         }
         .width('100%')
+        if (t.compare.yesterday === undefined) {
+          Text('暂无对比数据（无昨日基线：新设备或统计首日）')
+            .fontSize(AppTheme.FONT_CAPTION - 1)
+            .fontColor(AppTheme.COLOR_TEXT_HINT)
+            .width('100%')
+        }
         HourlyBars({ buckets: this.trendToHours(t) })
         Text('按天统计的告警条数（横轴为最近 N 天）')
           .fontSize(AppTheme.FONT_CAPTION - 1)

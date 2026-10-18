@@ -1,5 +1,5 @@
 HMProgram 应用端（harmony-app）HAP 构建日志
-生成时间（UTC+8）：2026-10-18 08:43:59
+生成时间（UTC+8）：2026-10-18 09:37:07
 工具链：5.8.9　Node：v18.20.1
 SDK：12 default 
 
@@ -8,7 +8,7 @@ SDK：12 default
 ==============================================================
 [31m1 ERROR: [31mArkTS:ERROR File: /mnt/c/Users/Administrator/Desktop/HMProgram/harmony-app/entry/src/main/ets/pages/HomePage.ets:23:28
  Cannot find name 'NOT_DEFINED_CONST_FOR_GATE_PROBE'.
-> hvigor [91mERROR: BUILD FAILED in 21 s 267 ms [39m
+> hvigor [91mERROR: BUILD FAILED in 20 s 54 ms [39m
 回退注入：grep 计数 = 0（应为 0）
 
 ==============================================================
@@ -21,33 +21,33 @@ SDK：12 default
 > hvigor [32mUP-TO-DATE :entry:default@MergeProfile...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@CreateBuildProfile...  [39m
 > hvigor [32mFinished :entry:default@PreCheckSyscap... after 2 ms [39m
-> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 4 ms [39m
-> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 10 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 3 ms [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 8 ms [39m
 > hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 1 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@MakePackInfo...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessProfile...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@SyscapTransform...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessRouterMap...  [39m
-> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 7 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 8 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessResource...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@GenerateLoaderJson...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessLibs...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@CompileResource...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@DoNativeStrip...  [39m
-> hvigor [32mFinished :entry:default@BuildJS... after 61 ms [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 50 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@CacheNativeLibs...  [39m
-> hvigor [32mFinished :entry:default@CompileArkTS... after 15 s 12 ms [39m
-> hvigor [32mFinished :entry:default@GeneratePkgModuleJson... after 46 ms [39m
-> hvigor [32mFinished :entry:default@PackageHap... after 972 ms [39m
+> hvigor [32mFinished :entry:default@CompileArkTS... after 14 s 839 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgModuleJson... after 37 ms [39m
+> hvigor [32mFinished :entry:default@PackageHap... after 898 ms [39m
 > hvigor [33mWARN: No signingConfig found for product default[39m
-> hvigor [32mFinished :entry:default@SignHap... after 24 ms [39m
+> hvigor [32mFinished :entry:default@SignHap... after 16 ms [39m
 > hvigor [32mFinished :entry:assembleHap... after 1 ms [39m
-> hvigor [32mBUILD SUCCESSFUL in 19 s 106 ms [39m
+> hvigor [32mBUILD SUCCESSFUL in 18 s 827 ms [39m
 
 ==============================================================
 产物
 ==============================================================
--rwxrwxrwx 1 qinyixiang qinyixiang 961812 Oct 18 08:44 entry/build/default/outputs/default/entry-default-unsigned.hap
+-rwxrwxrwx 1 qinyixiang qinyixiang 965539 Oct 18 09:37 entry/build/default/outputs/default/entry-default-unsigned.hap
 
 说明：本机无 hdc 设备、CLT 内无模拟器、/dev/kvm 不可写，
       因此只做到「编译产 HAP」；安装/上架/真机运行标注为「待用户实测」。

@@ -271,9 +271,6 @@ export class HttpApiService implements ApiPort {
     if (patch.gas_l2_hold_s !== undefined) {
       items['gas_l2_hold_s'] = patch.gas_l2_hold_s;
     }
-    if (patch.gas_l1_to_l2_s !== undefined) {
-      items['gas_l1_to_l2_s'] = patch.gas_l1_to_l2_s;
-    }
     if (patch.gas_recover_mv !== undefined) {
       items['gas_recover_mv'] = patch.gas_recover_mv;
     }
