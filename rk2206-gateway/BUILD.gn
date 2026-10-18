@@ -28,6 +28,11 @@ static_library("gateway_app") {
         "gw_alarm.c",       # 声光与静音（§8.1/§4.5/§4.7）
         "gw_433.c",         # 433 求助输入：中断 + 200 ms 复查 + 3 s 去重
         "gw_plat.c",        # 引脚/外设适配（UART0、GPIO、PWM、Flash）
+        "gw_prov.c",        # 配网状态机 + 本地 API 逻辑（§12，纯逻辑可主机单测）
+        "gw_prov_route.c",  # HTTP 路由：5 个接口 + 内嵌 H5 页面（§12.11）
+        "gw_http.c",        # 最小 HTTP/1.1 服务端（单任务串行，socket 走 lwip/主机桩）
+        "gw_net.c",         # 板级 Wi-Fi：SoftAP / STA / 2.4 G 预检（wifi_lite）
+        "gw_store.c",       # 配网持久化：Wi-Fi 凭证 + 绑定白名单（Vendor Flash）
     ]
 
     include_dirs = [
@@ -43,6 +48,12 @@ static_library("gateway_app") {
         "//third_party/paho_mqtt/MQTTPacket/src",
         "//third_party/paho_mqtt/MQTTClient-C/src",
         "//third_party/lwip/src/include/lwip",
+        # ⚠ 不要在这里补 //third_party/lwip/src/include 或 wifiservice 等路径：
+        #   sdk_liteos/config.gni 的 board_include_dirs 已经全局带了它们，而 GN 会把我这份
+        #   排在 board 那份**前面**。重复的 -I 不只是冗余，它会改变头文件命中顺序：
+        #   实测加上 //third_party/lwip/src/include 后，gw_timesync.c 的 lwip/sockets.h
+        #   从 porting 版（musl 友好）变成 lwip 原版 → 拉进 arch/cc.h → 与 musl 头冲突，
+        #   整个 hb build 在 [845/867] 挂掉（见技术笔记 CAL-13）。
     ]
 
     deps = [

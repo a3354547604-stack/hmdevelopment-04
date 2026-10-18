@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# tools/gw-compile-check.sh — 网关 12 个源文件的「秒级」交叉编译自检
+# tools/gw-compile-check.sh — 网关全部源文件的「秒级」交叉编译自检（含 H5 生成物一致性）
 #
 # 为什么需要它：tools/gw-build.sh 每次都走完整 hb 流程（850+ 步、约 1 分钟），
 # 而修一个编译错误（少个参数、宏名写错）本来只需要看一眼 gcc 的输出。
@@ -92,5 +92,18 @@ if [ "$rc" != "0" ]; then
     echo "[gw-compile-check] 有编译错误（0 个错误才算过；能过也还要 gw-build.sh 断言链接）" >&2
     exit 1
 fi
-echo "[gw-compile-check] 12 个源文件全部编译通过（不含链接断言）"
+n_ok="$(sed -n 's/^RESULT ok=\([0-9]*\) err=.*/\1/p' "$OUT/gw-compile-check.log" | tail -1)"
+echo "[gw-compile-check] ${n_ok:-?} 个源文件全部编译通过（不含链接断言）"
+
+# H5 配网页：web/index.html 是唯一真源、src/gw_h5.h 是生成物。
+# 放在这里校验，是因为"改了页面忘了重新生成头文件"在板上只表现为
+# "手机看到的还是上一版"，最难查；编译自检是每个人都会跑的那一步。
+if [ -f "$ROOT/rk2206-gateway/web/gen-h5-header.py" ]; then
+    if python3 "$ROOT/rk2206-gateway/web/gen-h5-header.py" --check; then
+        :
+    else
+        echo "[gw-compile-check] ✗ H5 生成物与真源不一致（见上）" >&2
+        exit 1
+    fi
+fi
 exit 0

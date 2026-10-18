@@ -150,8 +150,11 @@ build_one() {
         cp "$ROOT/rk2206-gateway/BUILD.gn" "$STAGE/BUILD.gn"
         local n_c n_h
         n_c="$(ls "$STAGE"/*.c | wc -l)"; n_h="$(ls "$STAGE"/*.h | wc -l)"
-        [ "$n_c" = "12" ] || fail "暂存目录 .c 数量 $n_c（应为 12）"
-        [ "$n_h" = "12" ] || fail "暂存目录 .h 数量 $n_h（应为 12）"
+        # 下限断言而不是等号：源文件只会越加越多（t10 配网一次就加了 5 个 .c），
+        # 写死等号会让"加文件"这件事先撞检查器、而不是撞编译器（改者还得先改检查器）。
+        # 上限没有意义，真正防的是"暂存时漏拷"——文件比源目录少才会低于下限。
+        [ "$n_c" -ge 12 ] || fail "暂存目录 .c 数量 $n_c（至少 12）"
+        [ "$n_h" -ge 12 ] || fail "暂存目录 .h 数量 $n_h（至少 12）"
     fi
     enable_feature "$feat"
     set_app_libs "$lib"
@@ -185,11 +188,14 @@ build_one() {
 
     # 每个源文件都真的编了（防止"以为编了、其实是上次的 .o"）
     if [ "$target" = "gateway" ]; then
-        local miss="" src
-        for src in gw_main gw_proto gw_rules gw_iotda gw_cloud gw_cache gw_timesync gw_crypto gw_time gw_alarm gw_433 gw_plat; do
+        local miss="" src n_src=0
+        # 清单由暂存目录派生，不写死：写死清单每次加源文件都要记得回来补，
+        # 早晚会漏掉一个 —— 而漏掉的表现恰恰是"新文件没编进去却一路绿灯"。
+        for src in $(cd "$STAGE" && ls *.c 2>/dev/null | sed 's/\.c$//'); do
+            n_src=$((n_src + 1))
             grep -q "libgateway_app\.$src\.o" "$blog" || miss="$miss $src"
         done
-        if [ -z "$miss" ]; then printf '   ✓ 12 个源文件都有编译记录\n'; else bad=1; printf '   ✗ 这些源文件没编到:%s\n' "$miss"; fi
+        if [ -z "$miss" ]; then printf '   ✓ %s 个源文件都有编译记录\n' "$n_src"; else bad=1; printf '   ✗ 这些源文件没编到:%s\n' "$miss"; fi
     fi
 
     if dv "test -f $OBJDIR/libs/lib$lib.a"; then printf '   ✓ 产物 libs/lib%s.a 存在\n' "$lib"; else bad=1; printf '   ✗ 产物 libs/lib%s.a 不存在\n' "$lib"; fi

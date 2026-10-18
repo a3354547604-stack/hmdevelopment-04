@@ -23,6 +23,11 @@
 #include "gw_433.h"
 #include "gw_plat.h"
 #include "gw_timesync.h"
+#include "gw_prov.h"
+#include "gw_prov_route.h"
+#include "gw_http.h"
+#include "gw_net.h"
+#include "gw_store.h"
 
 #include "ohos_init.h"
 #include "los_task.h"
@@ -44,6 +49,14 @@ static gw_gas_state_t   s_gas;
 static gw_fall_state_t  s_fall;
 static gw_motion_state_t s_motion;
 static gw_dedup_table_t s_dedup;
+/* 配网（t10 / 契约 §12）：状态机在 gw_prov.c，这里只注入板级能力并编排任务 */
+static gw_prov_t        s_prov;
+static int              s_http_fd = -1;     /* 本地 HTTP 监听 fd；只在拿到 AP 口地址后打开一次 */
+static uint8_t          s_ap_ip_retry;      /* AP 口地址取不到时的重试计数（超限退化为绑 0.0.0.0） */
+static uint16_t         s_bind_seq = 1;     /* 0x22 的帧 SEQ（含 payload id；0x23 按它认领） */
+static volatile uint16_t s_bind_wait_seq;   /* 正在等 0x23 的 SEQ */
+static volatile uint8_t  s_bind_wait_active;
+static volatile int16_t  s_bind_ack_result;
 
 typedef struct {
     const char      *sn;
@@ -590,6 +603,7 @@ static void handle_hub_event(const gw_frame_t *f, uint32_t now)
     gw_refresh_alarm(now);
 }
 
+static void prov_note_bind_ack(const char *json, uint32_t len);
 static void handle_frame(const gw_frame_t *f, uint32_t now)
 {
     uint8_t ack[64];
@@ -622,6 +636,22 @@ static void handle_frame(const gw_frame_t *f, uint32_t now)
                         cJSON_Delete(root);
                     }
                 }
+            }
+            break;
+        case GW_T_SCAN_RSP:     /* 0x21 扫描结果 */
+        case GW_T_BIND_RSP:     /* 0x23 绑定应答 */
+        case GW_T_BIND_STATUS:  /* 0x24 周期绑定态/在线表 */
+            /* 契约 §3.4：0x21/0x24 网关只取 sn/mac/rssi/online，其余原样透传，
+             * 所以这里不做整段 NUL 结尾拷贝（uart_task 栈 4 KB，payload 最大 1 KB），
+             * 直接把 payload 指针 + 长度交给 cJSON_ParseWithLength。 */
+            gw_prov_on_hub_frame(&s_prov, now);
+            if (f->type == GW_T_SCAN_RSP) {
+                gw_prov_on_scan_rsp(&s_prov, (const char *)f->payload, f->len, now);
+            } else if (f->type == GW_T_BIND_RSP) {
+                prov_note_bind_ack((const char *)f->payload, f->len);
+                gw_prov_on_bind_ack(&s_prov, (const char *)f->payload, f->len, now);
+            } else {
+                gw_prov_on_node_list(&s_prov, (const char *)f->payload, f->len, now);
             }
             break;
         default:
@@ -706,6 +736,11 @@ static void gw_report_props(uint32_t now)
     st.smoke_mv = s_smoke_mv;
     st.battery = 255;                   /* 255 = 市电供电（契约 §4.3） */
     st.has = s_env_has;
+    /* v1.1 §4.3：bound_nodes（SN 数组文本 ["M1","M2"]）与 pair_state（idle/ap/sta/ap_sta）
+     * 搭在既有 60 s 属性报文里，不新增报文数（§4.3 注解）。mac 走 §4.3.1 的 nodes 明细。 */
+    st.has_bound_nodes = (gw_prov_bound_nodes_json(&s_prov, st.bound_nodes, sizeof(st.bound_nodes)) > 0u) ? 1u : 0u;
+    st.pair_state = gw_prov_pair_state(&s_prov);
+    st.has_pair_state = 1u;
     gw_build_nodes_online(st.nodes_online, sizeof(st.nodes_online));
 
     {
@@ -866,6 +901,204 @@ static void uart_task(void *arg)
     }
 }
 
+/* ============================== 配网：板级能力注入（t10 / 契约 §12） ============================== */
+/* gw_prov.c 不 include 任何 SDK 头（纯状态机），Wi-Fi/Flash/汇聚 UART 全部经下面这组
+ * 函数指针注入。主机模拟器（test/gw_prov_sim.c）换成假实现就能把整套 API 跑起来。 */
+static int prov_op_ap_start(const char *ssid, const char *psk, uint8_t channel)
+{
+    return gw_net_ap_start(ssid, psk, channel);
+}
+static int prov_op_ap_stop(void)                        { return gw_net_ap_stop(); }
+static int prov_op_ap_ip(char *out, uint32_t cap)       { return gw_net_ap_ip(out, cap); }
+static int prov_op_sta_start(const char *ssid, const char *psk) { return gw_net_sta_start(ssid, psk); }
+static int prov_op_sta_poll(char *reason, uint32_t cap)  { return gw_net_sta_poll(reason, cap); }
+static int prov_op_sta_ip(char *out, uint32_t cap)       { return gw_net_sta_ip(out, cap); }
+static int prov_op_sta_ssid(char *out, uint32_t cap)     { return gw_net_sta_ssid(out, cap); }
+static int prov_op_scan_ap(const char *ssid, int *rssi, int *ch) { return gw_net_scan_ap(ssid, rssi, ch); }
+static int prov_op_cred_save(const char *ssid, const char *psk) { return gw_store_cred_save(ssid, psk); }
+static int prov_op_bound_save(const gw_prov_bound_t *list, uint32_t n) { return gw_store_bound_save(list, n); }
+static int prov_op_bound_load(gw_prov_bound_t *list, uint32_t cap, uint32_t *n)
+{
+    return gw_store_bound_load(list, cap, n);
+}
+static uint32_t prov_op_now_ms(void)    { return gw_now_ms(); }
+/* unix 毫秒：未校时时 gw_time_ms 返回 0，契约 §12.8 的 scanned_at 就报 0（不编假时间） */
+static uint64_t prov_op_epoch_ms(void)  { return gw_time_ms(gw_now_ms()); }
+
+/* 0x20 SLE_SCAN_REQ（契约 §3.4）。帧 SEQ 与 payload 的 id 取同一个值——§3.9 示例里
+ * SEQ=21 / id=21，汇聚在 0x21 里回 ack_seq=21，网关据此认领这次扫描的结果。 */
+static int prov_op_hub_scan(uint16_t id, uint16_t duration_s, uint8_t include_bound,
+                            char *err, uint32_t cap)
+{
+    uint8_t frame[GW_FRAME_MAX];
+    char payload[128];
+    int l;
+    uint32_t n;
+
+    l = snprintf(payload, sizeof(payload),
+                 "{\"cmd\":\"sle_scan\",\"id\":%u,\"duration_s\":%u,\"include_bound\":%s}",
+                 (unsigned)id, (unsigned)duration_s, (include_bound != 0u) ? "true" : "false");
+    if (l <= 0 || (uint32_t)l >= sizeof(payload)) {
+        snprintf(err, cap, "payload_too_long");
+        return -1;
+    }
+    n = gw_frame_encode(frame, sizeof(frame), GW_T_SLE_SCAN, id, (const uint8_t *)payload, (uint16_t)l);
+    if (n == 0u) {
+        snprintf(err, cap, "encode_failed");
+        return -1;
+    }
+    if (gw_plat_uart0_write(frame, n) != 0) {
+        snprintf(err, cap, "uart_write_failed");
+        return -1;
+    }
+    printf("[%s] [PROV] → 0x20 扫描 id=%u duration=%us include_bound=%u\n",
+           GW_LOG_TAG, (unsigned)id, (unsigned)duration_s, (unsigned)include_bound);
+    return 0;
+}
+
+/* 0x23 到达时唤醒 prov_op_hub_bind 的等待（0x21/0x24 没有这个语义） */
+static void prov_note_bind_ack(const char *json, uint32_t len)
+{
+    cJSON *root;
+
+    if (!s_bind_wait_active) {
+        return;
+    }
+    root = cJSON_ParseWithLength(json, len);
+    if (root == NULL) {
+        return;
+    }
+    {
+        cJSON *as = cJSON_GetObjectItem(root, "ack_seq");
+        cJSON *r = cJSON_GetObjectItem(root, "result");
+        if (as != NULL && cJSON_IsNumber(as) && (uint16_t)as->valueint == s_bind_wait_seq) {
+            s_bind_ack_result = (r != NULL && cJSON_IsNumber(r)) ? (int16_t)r->valueint : -1;
+            s_bind_wait_active = 0u;
+        }
+    }
+    cJSON_Delete(root);
+}
+
+/* 0x22 PAIR_BIND（契约 §3.4）+ 等 0x23（§12.9：同步等 ≤3 s）。
+ * 为什么可以在这里阻塞：收帧的 uart_task 优先级最高、且是独立任务，
+ * 阻塞 HTTP 任务或 tick 任务不会丢帧；反过来在 uart_task 里等就会把收帧堵死。 */
+static int prov_op_hub_bind(const char *op, const char *sn, const char *mac,
+                            uint32_t wait_ms, char *err, uint32_t cap)
+{
+    uint8_t frame[GW_FRAME_MAX];
+    char payload[192];
+    uint16_t seq;
+    uint32_t n;
+    uint32_t t0;
+    int l;
+
+    if (op == NULL) {
+        snprintf(err, cap, "bad_op");
+        return -1;
+    }
+    seq = s_bind_seq++;
+    if (s_bind_seq == 0u) {
+        s_bind_seq = 1u;
+    }
+    if (strcmp(op, "add") == 0) {
+        l = snprintf(payload, sizeof(payload),
+                     "{\"cmd\":\"pair_bind\",\"id\":%u,\"op\":\"add\",\"sn\":\"%s\",\"mac\":\"%s\"}",
+                     (unsigned)seq, (sn != NULL) ? sn : "", (mac != NULL) ? mac : "");
+    } else if (strcmp(op, "del") == 0) {
+        l = snprintf(payload, sizeof(payload),
+                     "{\"cmd\":\"pair_bind\",\"id\":%u,\"op\":\"del\",\"sn\":\"%s\"}",
+                     (unsigned)seq, (sn != NULL) ? sn : "");
+    } else {
+        /* clear / list 不带 sn/mac（§3.4：op=list 让汇聚回它当前的绑定表） */
+        l = snprintf(payload, sizeof(payload),
+                     "{\"cmd\":\"pair_bind\",\"id\":%u,\"op\":\"%s\"}", (unsigned)seq, op);
+    }
+    if (l <= 0 || (uint32_t)l >= sizeof(payload)) {
+        snprintf(err, cap, "payload_too_long");
+        return -1;
+    }
+    n = gw_frame_encode(frame, sizeof(frame), GW_T_PAIR_BIND, seq, (const uint8_t *)payload, (uint16_t)l);
+    if (n == 0u) {
+        snprintf(err, cap, "encode_failed");
+        return -1;
+    }
+    s_bind_ack_result = -1;
+    s_bind_wait_seq = seq;
+    s_bind_wait_active = 1u;
+    if (gw_plat_uart0_write(frame, n) != 0) {
+        s_bind_wait_active = 0u;
+        snprintf(err, cap, "uart_write_failed");
+        return -1;
+    }
+    t0 = gw_now_ms();
+    while (s_bind_wait_active && (uint32_t)(gw_now_ms() - t0) < wait_ms) {
+        LOS_Msleep(20);
+    }
+    if (s_bind_wait_active) {
+        s_bind_wait_active = 0u;
+        snprintf(err, cap, "link_timeout");
+        printf("[%s] [PROV] → 0x22 %s 未等到 0x23（%ums）\n", GW_LOG_TAG, op, (unsigned)wait_ms);
+        return -1;
+    }
+    printf("[%s] [PROV] → 0x22 %s ← 0x23 result=%d\n", GW_LOG_TAG, op, (int)s_bind_ack_result);
+    return 0;
+}
+
+/* 静态存储：gw_prov_t 只存指针，指向栈上的 ops 会在函数返回后悬空
+ * （主机模拟器第一版就是这么崩的：ASAN 在 gw_prov_resync_step 报 ops=NULL 偏移 0x68） */
+static const gw_prov_ops_t s_prov_ops = {
+    prov_op_ap_start,
+    prov_op_ap_stop,
+    prov_op_ap_ip,
+    prov_op_sta_start,
+    prov_op_sta_poll,
+    prov_op_sta_ip,
+    prov_op_sta_ssid,
+    prov_op_scan_ap,
+    prov_op_cred_save,
+    prov_op_bound_save,
+    prov_op_bound_load,
+    prov_op_hub_scan,
+    prov_op_hub_bind,
+    prov_op_now_ms,
+    prov_op_epoch_ms,
+};
+
+/* 本地配网 HTTP 任务（§12.1：只绑 AP 口）。
+ * 监听 fd 打开一次就常驻，不随窗口开关反复关——关一个正被 accept 阻塞的 fd 是
+ * 跨任务竞争；而 AP 一停，这个地址本身就不可达（§12.1 第 3 条仍然成立）。
+ * 窗口是否有效由路由层判断（窗口外一律 409/1600，§12.4）。 */
+static void prov_http_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        if (s_http_fd < 0) {
+            char ip[24];
+            if (gw_net_ap_ip(ip, sizeof(ip)) == 0) {
+                s_http_fd = gw_http_listen((uint16_t)GW_PROV_HTTP_PORT, ip);
+                if (s_http_fd >= 0) {
+                    printf("[%s] [PROV] 本地配网服务就绪 http://%s/（H5 单页，契约 §12.11）\n",
+                           GW_LOG_TAG, ip);
+                }
+            } else if (++s_ap_ip_retry >= 20u) {
+                /* 拿不到 AP 口地址（不同 SDK 版本的 netif 名不一样）：退化为绑 0.0.0.0。
+                 * 取舍写在实现说明里——宁可服务可访问，也不让配网彻底打不开（CAL-12）。 */
+                s_http_fd = gw_http_listen((uint16_t)GW_PROV_HTTP_PORT, NULL);
+                if (s_http_fd >= 0) {
+                    printf("[%s] [PROV] ⚠ 取不到 AP 口地址，HTTP 已绑 0.0.0.0（STA 侧也可达，见 CAL-12）\n",
+                           GW_LOG_TAG);
+                }
+                s_ap_ip_retry = 0u;
+            }
+        }
+        if (s_http_fd >= 0) {
+            (void)gw_http_serve_once(s_http_fd, gw_prov_route, &s_prov);
+        } else {
+            LOS_Msleep(200);
+        }
+    }
+}
+
 static void tick_task(void *arg)
 {
     uint32_t now;
@@ -877,8 +1110,23 @@ static void tick_task(void *arg)
         gw_alarm_tick(&s_alarm, now);
         gw_433_poll(&s_433, now);
 
-        /* 配网键长按 3 s（契约 §12.2）——t10 负责完整配网流程，
-         * 这里只把"检测到长按"打印出来，避免网关侧静默丢事件、也避免与 t10 抢实现。 */
+        /* 配网状态机（契约 §12.2）：窗口/settle/扫描超时、STA 连接推进、指示灯节拍 */
+        gw_prov_tick(&s_prov, now);
+        if (gw_prov_active(&s_prov)) {
+            /* 配网期间 LED 让位给配网指示（同一 GPIO 两处写会互相打架）；
+             * 蜂鸣器只在"配网成功"时短响一次，且尊重 mute_alarm（§12.2 可静音）。 */
+            gw_plat_alarm_output((gw_prov_led_level(&s_prov, now) != 0) ? 1 : 0);
+            if (gw_prov_beep_active(&s_prov, now) && (s_alarm.muted == 0u)) {
+                (void)gw_plat_buzzer_start(GW_PWM_DUTY_PCT, GW_PWM_FREQ_HZ);
+            }
+        }
+        /* 汇聚回来后按网关白名单重建它那边的表（§12.9）：放 tick 任务里做，
+         * 每次最多一帧、短等待（GW_PROV_RESYNC_WAIT_MS），不会长时间卡住指示与按键。 */
+        if (s_prov.resync_wanted) {
+            (void)gw_prov_resync_step(&s_prov);
+        }
+
+        /* 配网键长按 3 s：未开窗则进入配网，已开窗则退出（§12.2 的"再长按一次退出"） */
         {
             static uint32_t press_start;
             uint8_t lvl = (uint8_t)gw_plat_pairkey_level();
@@ -886,7 +1134,7 @@ static void tick_task(void *arg)
                 press_start = now;
             } else if (lvl == 1 && pair_key == 0) {
                 if ((uint32_t)(now - press_start) >= GW_PAIRKEY_LONG_MS) {
-                    printf("[%s] [PROV] 检测到配网键长按 3 s（配网流程见 t10 / 契约 §12）\n", GW_LOG_TAG);
+                    (void)gw_prov_toggle(&s_prov, now);
                 }
             }
             pair_key = lvl;
@@ -1021,10 +1269,29 @@ static void on_cmd(void *arg, const char *request_id, const char *command_name, 
         } else {
             result_code = GW_RC_RANGE;
         }
-    } else if (strcmp(command_name, "pair_scan") == 0 || strcmp(command_name, "pair_bind") == 0) {
-        /* 配网命令的完整实现在 t10（契约 §12）；这里明确回"未支持"，不假装成功。 */
-        result_code = GW_RC_UNSUPPORTED;
-        printf("[%s] 收到 %s：网关骨架未实现配网（t10 负责，契约 §12）\n", GW_LOG_TAG, command_name);
+    } else if (strcmp(command_name, "pair_scan") == 0) {
+        /* §4.5：pair_scan 异步受理（先回 result_code=0，结果靠 bound_nodes 属性回流），
+         * 避免扫描最长 60 s 把 IoTDA 命令响应拖超时（§4.5 的取舍注解）。 */
+        uint16_t dur = GW_PROV_SCAN_DEFAULT_S;
+        uint8_t inc = 1u;
+        cJSON *d = (p != NULL) ? cJSON_GetObjectItem(p, "duration_s") : NULL;
+        cJSON *ib = (p != NULL) ? cJSON_GetObjectItem(p, "include_bound") : NULL;
+        if (d != NULL && cJSON_IsNumber(d)) {
+            dur = (uint16_t)d->valueint;
+        }
+        if (ib != NULL && cJSON_IsBool(ib)) {
+            inc = (uint8_t)(cJSON_IsTrue(ib) ? 1u : 0u);
+        }
+        result_code = gw_prov_cloud_scan(&s_prov, gw_now_ms(), dur, inc, paras, sizeof(paras));
+    } else if (strcmp(command_name, "pair_bind") == 0) {
+        cJSON *o = (p != NULL) ? cJSON_GetObjectItem(p, "op") : NULL;
+        cJSON *sn = (p != NULL) ? cJSON_GetObjectItem(p, "sn") : NULL;
+        cJSON *mc = (p != NULL) ? cJSON_GetObjectItem(p, "mac") : NULL;
+        result_code = gw_prov_cloud_bind(&s_prov, gw_now_ms(),
+                                         (o != NULL && cJSON_IsString(o)) ? o->valuestring : NULL,
+                                         (sn != NULL && cJSON_IsString(sn)) ? sn->valuestring : NULL,
+                                         (mc != NULL && cJSON_IsString(mc)) ? mc->valuestring : NULL,
+                                         paras, sizeof(paras));
     } else {
         result_code = GW_RC_UNSUPPORTED;
     }
@@ -1137,10 +1404,16 @@ static void gw_main_entry(void)
         printf("[%s] ⚠ 433 中断注册失败：仅剩 UART 链路\n", GW_LOG_TAG);
     }
 
-    /* 6) 上云会话（连接动作在 net_task 里，必须等校时） */
+    /* 6) 配网（t10 / 契约 §12）：白名单与 Wi-Fi 口令落 Vendor Flash，
+     * 配网状态本身不持久化（§12.2）。 */
+    (void)gw_store_init();
+    gw_prov_init(&s_prov, &s_prov_ops, GW_DEVICE_SN, GW_PROV_FIRMWARE,
+                 GW_PROV_AP_PSK, (uint8_t)GW_PROV_AP_CHANNEL);
+
+    /* 7) 上云会话（连接动作在 net_task 里，必须等校时） */
     (void)gw_cloud_init(&s_cloud, GW_MQTT_HOST, GW_MQTT_PORT, device_id, secret, on_cmd, NULL);
 
-    /* 7) 任务 */
+    /* 8) 任务 */
     if (task_create(uart_task, NULL, GW_TASK_STACK_UART, GW_TASK_PRIO_UART, "gwUart") != LOS_OK) {
         printf("[%s] uart 任务创建失败\n", GW_LOG_TAG);
     }
@@ -1149,6 +1422,9 @@ static void gw_main_entry(void)
     }
     if (task_create(net_task, NULL, GW_TASK_STACK_NET, GW_TASK_PRIO_NET, "gwNet") != LOS_OK) {
         printf("[%s] net 任务创建失败\n", GW_LOG_TAG);
+    }
+    if (task_create(prov_http_task, NULL, GW_PROV_HTTP_TASK_STACK, GW_PROV_HTTP_TASK_PRIO, "gwProv") != LOS_OK) {
+        printf("[%s] ⚠ 配网 HTTP 任务创建失败：本地配网 API 不可用\n", GW_LOG_TAG);
     }
     printf("[%s] 任务已启动：UART0=%u 8N1，等待汇聚帧…\n", GW_LOG_TAG, GW_UART_BAUD);
 }

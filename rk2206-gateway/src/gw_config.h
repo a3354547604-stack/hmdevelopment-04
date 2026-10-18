@@ -184,4 +184,52 @@
 #define GW_BUZZER_FREQ_L2       GW_PWM_FREQ_HZ
 #define GW_BUZZER_FREQ_OFFLINE  GW_PWM_FREQ_HZ
 
+/* ------------------------------------------------------------------ *
+ * 12. 配网模式与本地 API（契约 §12；t10）
+ *     这些数值全部来自契约，禁止在 gw_prov.c 里再写一遍字面量——
+ *     配网的 5 条规则（先扫后绑 300 s、窗口 600 s、settle 90 s、等 0x23 ≤3 s）
+ *     一旦两处分叉，表现是"现场偶发失败"，最难查。
+ * ------------------------------------------------------------------ */
+#define GW_PROV_WINDOW_S            600u    /* §12.2 窗口超时 provision_timeout_s 默认 600 */
+#define GW_PROV_SETTLE_S            90u     /* §12.2/§12.6 提交 Wi-Fi 后保持 SoftAP 的秒数 */
+#define GW_PROV_SCAN_FRESH_S        300u    /* §12.9 add 必须「先扫后绑」：扫描结果 300 s 内有效 */
+#define GW_PROV_HUB_ONLINE_S        40u     /* §12.5 hub_online = 最近 40 s 内收到过汇聚帧 */
+#define GW_PROV_SCAN_EXTRA_S        3u      /* §12.7 estimate_s = duration_s + 汇聚重扫开销 3 s */
+#define GW_PROV_SCAN_TIMEOUT_EXTRA_MS 2000u /* 扫描超时判定留的余量：回帧本身还要走串口+解析 */
+#define GW_PROV_SCAN_DEFAULT_S      15u     /* §12.7 duration_s 默认 15（3..60） */
+#define GW_PROV_SCAN_MIN_S          3u
+#define GW_PROV_SCAN_MAX_S          60u
+#define GW_PROV_WIFI_TIMEOUT_DEF_S  30u     /* §12.6 timeout_s 默认 30（10..60） */
+#define GW_PROV_WIFI_TIMEOUT_MIN_S  10u
+#define GW_PROV_WIFI_TIMEOUT_MAX_S  60u
+#define GW_PROV_PSK_MIN             8u      /* §12.6 WPA2-PSK 口令 8–63，不支持开放网络 */
+#define GW_PROV_PSK_MAX             63u
+#define GW_PROV_SSID_MAX            32u
+#define GW_PROV_ALIAS_MAX           16u     /* §12.9 alias ≤16 字符 */
+#define GW_PROV_BIND_WAIT_MS        3000u   /* §12.9 等 0x23 的同步等待上限 */
+/* 上电重建白名单（resync）走短等待：8 条 × 3 s 会把 tick 任务卡 24 s，
+ * 期间 LED 不闪、配对键读不到。300 ms 足够同一条 UART 上的一问一答。 */
+#define GW_PROV_RESYNC_WAIT_MS      300u
+/* 预检扫描最多看多少个热点（static 数组：32 × WifiScanInfo ≈ 1.8 KB .bss） */
+#define GW_NET_SCAN_MAX             32u
+/* STA 连接后第几次轮询才把驱动的 disconnectedReason 当成"认证失败"：
+ * 100 ms/tick × 30 ≈ 3 s。太快会把"刚发起时的 DISCONNECTED"误判成口令错。 */
+#define GW_NET_AUTH_FAIL_POLLS      30u
+#define GW_PROV_WIFI_BACK_AP_S      30u     /* §12.6 连接失败后 30 s 内退回 AP 并重置窗口 */
+#define GW_PROV_HTTP_PORT           80u     /* §12.1 域 http://<ap>/api（HTTP，不是 HTTPS） */
+#define GW_PROV_HTTP_MAX_REQ        512u    /* 请求体上限：最大是 bind 的 ~160 B，留 3 倍余量 */
+#define GW_PROV_HTTP_TASK_STACK  4096u     /* 本地 HTTP 服务：单请求串行，缓冲在静态区 */
+#define GW_PROV_HTTP_TASK_PRIO   28u        /* 比 tick(25)/net(26) 更低：配网不能抢告警与上报 */
+#define GW_PROV_TASK_STACK          6144u   /* HTTP 任务：socket + cJSON + 响应体都在这个栈上 */
+#define GW_PROV_TASK_PRIO           27u     /* 比联网更低：配网是人来点的，不抢 UART/声光 */
+#define GW_PROV_HTTP_SO_RCVTIMEO_MS 5000    /* 慢客户端不能把唯一一条连接占死 */
+/* ⚠ 占位：§12.3 要求 SoftAP 口令"值待用户确认（CAL-16）、仓库不写死真值"。
+ * 施工单第 2 步按现场要求改这一行即可；AP 口令可以打印（契约允许贴纸/串口给出），
+ * 家庭 Wi-Fi 口令则绝不允许打印/回显（§12.6）。 */
+#define GW_PROV_AP_PSK              "echub8888"
+#define GW_PROV_AP_CHANNEL          6u      /* §12.3 信道 1 或 6 */
+#define GW_PROV_FIRMWARE            "0.1.0" /* §12.5 firmware */
+/* §12.5 device_sn 占位：真实值优先取 Vendor Flash 里的 SN，取不到才用它。 */
+#define GW_DEVICE_SN                "M0-3F1A2B"
+
 #endif /* GW_CONFIG_H */
