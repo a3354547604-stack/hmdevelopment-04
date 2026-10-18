@@ -706,3 +706,39 @@ sha256 **完全一致**，指纹可复现。
 - **0x0E02 帧率的上板复测**：板权归 t70（`fw-ws63-op`），本卡不做；上板后的期望日志形状见 §5.10 的「新」示例。
 - **跌倒触发 / TX2(IO06) 硬件通道**：仍属 `待用户实测`（需真人躺 15–20 s）。两条留档里的 `[INFO] 跌倒触发`
   写的是「未观测到」，这是事实而不是失败。
+
+## 13. t73 记录：两处同源计时收口（radar_hub.c，仍无板验证）
+
+卡面（t73）来自 t57 的 §5.11 登记：同一个根因「把 `osal_msleep(50)` 当精确 50 ms 节拍」，两处都在 `radar_hub.c`。
+
+### 13.1 改了什么、为什么
+
+| # | 位置 | 改前 | 改后 | 为什么 |
+|---|---|---|---|---|
+| 1 | `#if RADAR_THR_TEST_ENABLE` 阈值回写 | `tick >= RADAR_THR_TEST_SEC * 20`（标称 75 s，实测节拍 ~60 ms ⇒ ~90 s） | `(uapi_tcxo_get_ms() - g_thr_t0_ms) >= RADAR_THR_TEST_SEC * 1000` | 与 t57/D13 同一口径：窗口按真实耗时；顺带把开关包进 `#ifndef`，让它**能从命令行覆盖**（否则这段代码在无板环境永远编不到） |
+| 2 | TX2(IO06) 去抖 | `g_tx2_settle_ms += 50`，数 3 拍累计 ≥150 | 记「当前电平起点毫秒」，差值 ≥ `RADAR_TX2_SETTLE_MS`(150) | 实测每轮 ~60 ms，数 3 拍实际是 ~180 ms（文档写 150）——改成时间戳后与节拍解耦 |
+
+二选一（改代码 / 改文档）选了**改代码**：150 ms 是设计意图，3 拍只是当年按 50 ms 节拍凑的实现手段；
+改成差值后任何节拍下都是 150 ms。残留如实写：受 ~60 ms 采样粒度影响，**实际生效延迟 150–210 ms**（原为固定 ~180 ms）。
+`tick` 删掉（改后无读者，留着是 `-Wall` 下的 unused-but-set 隐患）。
+
+### 13.2 无板验证（命令与结果，全部可复现）
+
+| 命令 | 结果 |
+|---|---|
+| `bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh m2`（连跑两次） | 两次都退出 0；角色断言通过、`custom/` 残留 0；两次产物**逐位同哈希** |
+| 同命令第 2 次（`node-build.sh` 自检） | 打印「m2 产物与编译前逐位相同（`d8324b9f…d8a005`）—— 可复现构建」 |
+| `python3 tools/radar-check.py ws63-firmware/out/radar-check-boot.txt ws63-firmware/out/radar-check-steady.txt` | 退出 0（t57 回归；两份留档重判 PASS 3/3，重写后字节不变） |
+| `python3 tools/radar-check.py --image ws63-firmware/out/NODE_M2.fwpkg` | PASS（5 必现 + 3 必无） |
+| 容器内同参数编三个变体（新+默认 / 新+`-DRADAR_THR_TEST_ENABLE=1` / 旧+同宏） | 目标文件里 `restore fall threshold`：无 / **有** / 编译失败（`error: "RADAR_THR_TEST_ENABLE" redefined [-Werror]`）——证明开关现在真的可覆盖、`#if` 内代码可无板编验 |
+| 容器内同参数编新旧 `radar_hub.c` | 旧 91064 B 含静态符号 `g_tx2_settle_ms`；新 90948 B 不含 |
+
+产物指纹：`ws63-firmware/out/NODE_M2.fwpkg` **1468072 B** / sha256 `d8324b9f8bf1b4654658009ee56c0b9e5115c5163c1136546cc9736028d8a005`
+（t57 版 1468072 B `f49549ea…be4e`：**同体积、不同哈希** ⇒ 改动进了镜像；两次新编同哈希 ⇒ 可复现）。
+生产镜像里 `restore fall threshold` / `lower fall threshold` 出现 **0 次**：试验钩子没进出厂固件。
+
+### 13.3 未做（按卡面要求标注）
+
+- **上板实测**：TX2(IO06) 通道需要真人躺 15–20 s 才产生边沿（`tx2_edges` 至今为 0）；阈值试验钩子的上板复跑也不做
+  （本次只在容器里编过 `-DRADAR_THR_TEST_ENABLE=1` 的变体，没有打这种包、也没有上板）。
+- 只重编了 `m2`（`radar_hub.c` 只在 m2 的源文件清单里）。

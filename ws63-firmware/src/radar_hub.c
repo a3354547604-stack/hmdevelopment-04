@@ -61,9 +61,13 @@
 #define TF_SOF                  0x01u
 #define TF_HDR_LEN              7u              /* SOF+ID+LEN+TYPE */
 #define TF_MIN_FRAME            9u              /* 7 + HEAD_CKSUM + DATA_CKSUM */
-/* 跌倒阈值一次性试验开关：1=开机把阈值压到 0.1m 让普通动作也能触发跌倒，75s 后自动写回 0.6m。
- * 验证已做完（模块回 result=1=成功，阈值已恢复），默认关闭。 */
+/* 跌倒阈值一次性试验开关：1=开机把阈值压到 0.1m 让普通动作也能触发跌倒，
+ * RADAR_THR_TEST_SEC 秒后自动写回 0.6m。验证已做完（模块回 result=1=成功，阈值已恢复），默认关闭。
+ * 为什么外面包一层 #ifndef：开关要能**从命令行覆盖**（build.py 的 -def 或 gcc -D），
+ * 否则 #if 里的代码在无板环境永远编不到 —— 改它等于没改（t73 的无板证据就是把这个分支编一遍）。 */
+#ifndef RADAR_THR_TEST_ENABLE
 #define RADAR_THR_TEST_ENABLE   0
+#endif
 #define TF_MAX_PAYLOAD          256u
 
 /* ---------------- 驱动自有接收缓冲 ---------------- */
@@ -94,6 +98,7 @@ static uint32_t g_dump_left = 24;     /* 头 24 个数据块做原始 HEX 转储
 static uint32_t g_verbose_left = 12;  /* 头 12 个完整帧逐帧打印，之后只打变化 */
 #if RADAR_THR_TEST_ENABLE
 static bool     g_thr_restored;       /* 跌倒阈值试验：是否已写回默认值 */
+static uint32_t g_thr_t0_ms;          /* 阈值被压低的时刻（真实毫秒）：回写窗口从它算起 */
 #endif
 
 /* ---- TX2 硬件冗余通道（IO06） ---- */
@@ -121,6 +126,12 @@ static volatile uint8_t  g_userlog_on;
  * 于是标称 10 s 的窗口被当成真实 10 s，0x0E02 帧率被算高约 20%（19.85 → 23.8）。
  * 现在窗口时长直接打进日志（win=%ums），判读脚本与文档都拿它当分母。 */
 #define RADAR_HB_PERIOD_MS      10000u
+/* TX2(IO06) 去抖窗口 = 150 ms，同样按**真实耗时**判定（t73）。
+ * 为什么不再「每拍 +50 ms 数 3 拍」：节拍是 osal_msleep(50) 但实测 ~60 ms/轮，
+ * 数 3 拍落出 ~180 ms，且随节拍漂移（文档写 150 ms，代码实际 180 ms）。
+ * 改成时间戳差值后，生效延迟 = 150 ms + 采样粒度内的等待（~0–60 ms）= 150–210 ms，
+ * 与「150 ms 去抖」的设计意图一致，且任何人拿日志都能复算。 */
+#define RADAR_TX2_SETTLE_MS     150u
 
 static volatile uint8_t  g_log_line[RADAR_LOG_LINE_MAX];
 static volatile uint16_t g_log_len;
@@ -131,7 +142,6 @@ static uint32_t g_log_print_cnt;            /* 本窗口已打印行数 */
 static uint32_t g_log_seen;                 /* 累计捕获行数 */
 static volatile int32_t  g_presence_state = -1;   /* -1 未知 0 无人 1 有人 */
 static volatile uint32_t g_presence_last_ms;      /* 最后一次「有人」关键字时刻 */
-static uint16_t g_tx2_settle_ms;            /* TX2 去抖：连续 N ms 同电平才改状态 */
 
 static void radar_fall_isr(pin_t pin, uintptr_t param)
 {
@@ -250,7 +260,9 @@ static void radar_send_frame(uint16_t type, const uint8_t *data, uint16_t len)
 /* ---- 一次性跌倒阈值试验（验证用，验完自动恢复） ----
  * 跌倒没法真摔，所以把 0x0E08 的跌倒阈值从默认 0.6 m 临时压到 0.1 m，
  * 让普通动作就能触发 is_fall=1，跑够 RADAR_THR_TEST_SEC 秒后自动写回 0.6 m，
- * 避免把模块的持久配置改坏。验证完毕后把 RADAR_THR_TEST_ENABLE 置 0 即可。 */
+ * 避免把模块的持久配置改坏。验证完毕后把 RADAR_THR_TEST_ENABLE 置 0 即可。
+ * 计时口径（t73）：窗口按 uapi_tcxo_get_ms() 的**真实耗时**判定，不再数 tick ——
+ * 节拍实测 ~60 ms，数 20 拍会把标称 75 s 拉成 ~90 s（与心跳窗口同源，D13 口径）。 */
 #define RADAR_THR_TEST_SEC      75
 
 #if RADAR_THR_TEST_ENABLE
@@ -541,7 +553,6 @@ static void *radar_task(const char *arg)
 {
     static uint8_t work[1024];
     uint16_t wlen = 0;
-    uint32_t tick = 0;
 
     unused(arg);
     osal_msleep(2500);              /* 等系统其它任务起来 */
@@ -560,8 +571,9 @@ static void *radar_task(const char *arg)
 #endif
 #if RADAR_THR_TEST_ENABLE
     osal_msleep(3000);
-    osal_printk("[RADAR] TEST: lower fall threshold 0.600 -> 0.100 m (restore after %u s)\r\n",
+    osal_printk("[RADAR] TEST: lower fall threshold 0.600 -> 0.100 m (restore after %u s, real ms)\r\n",
                 (unsigned)RADAR_THR_TEST_SEC);
+    g_thr_t0_ms = uapi_tcxo_get_ms();       /* 真实起点：回写窗口从这一毫秒算起 */
     radar_set_threshold(0.100f);
 #endif
 
@@ -616,17 +628,17 @@ static void *radar_task(const char *arg)
         /* 4) TX2 硬件冗余通道（IO06）去抖 + 状态更新
          * 为什么要去抖：TX2 与 UART 的 0x0E02 是同源信号，模块在判定边界上会抖，
          * 直接采电平会让 status 帧里的 fall 值来回跳，网关侧看到的就是「跌倒/恢复」刷屏。
-         * 连续 150 ms（3 个 50 ms 节拍）同电平才认一次变化；去抖必须**每拍都跑**，
-         * 不能只在边沿中断里跑 —— 否则中断过后计数器永远停在 0。 */
+         * 窗口 RADAR_TX2_SETTLE_MS = 150 ms 按**真实耗时**判定（t73）：记「当前电平从哪一
+         * 毫秒开始」再比差值，而不是数 50 ms 节拍 —— 节拍实测 ~60 ms，数 3 拍会变成 ~180 ms。
+         * 去抖必须**每拍都跑**，不能只在边沿中断里跑 —— 否则中断过后计时永远停在起点。 */
         {
-            static uint8_t last_lv = 0xFFu;
+            static uint8_t  last_lv = 0xFFu;
+            static uint32_t lv_t0_ms;                  /* 当前电平的起点（真实毫秒） */
+            uint32_t tx2_now_ms = uapi_tcxo_get_ms();
             if (last_lv != g_tx2_level) {
                 last_lv = g_tx2_level;
-                g_tx2_settle_ms = 0u;
-            } else if (g_tx2_settle_ms < 150u) {
-                g_tx2_settle_ms = (uint16_t)(g_tx2_settle_ms + 50u);
-            }
-            if (g_tx2_settle_ms >= 150u) {
+                lv_t0_ms = tx2_now_ms;                 /* 电平一变就重新起算 */
+            } else if ((uint32_t)(tx2_now_ms - lv_t0_ms) >= RADAR_TX2_SETTLE_MS) {
                 uint8_t new_fall = (g_tx2_level != 0u) ? 1u : 0u;
                 if (new_fall != g_tx2_hw_fall) {
                     g_tx2_hw_fall = new_fall;
@@ -639,11 +651,11 @@ static void *radar_task(const char *arg)
         }
 
 #if RADAR_THR_TEST_ENABLE
-        /* 4.5) 到点把跌倒阈值写回默认 0.6 m */
-        if (!g_thr_restored && tick >= (RADAR_THR_TEST_SEC * 20u)) {   /* tick 标称 50ms/拍，实测 ~60ms/拍
-                                                                        * ⇒ 本试验窗口实际比 RADAR_THR_TEST_SEC 长约 20%；
-                                                                        * 这是只读回默认值的试验钩子（默认 0=关闭），未随 t57 改成计时器，
-                                                                        * 已记在 t57 报告里与心跳窗口同源。 */
+        /* 4.5) 到点把跌倒阈值写回默认 0.6 m
+         *      窗口按**真实耗时**判定（t73）：原来数 tick（标称 50 ms/拍、实测 ~60 ms/拍），
+         *      标称 75 s 会跑成 ~90 s；用 uapi_tcxo_get_ms() 差值后与节拍无关。 */
+        if (!g_thr_restored &&
+            (uint32_t)(uapi_tcxo_get_ms() - g_thr_t0_ms) >= (RADAR_THR_TEST_SEC * 1000u)) {
             g_thr_restored = true;
             osal_printk("[RADAR] TEST: restore fall threshold -> 0.600 m\r\n");
             radar_set_threshold(0.600f);
@@ -653,7 +665,6 @@ static void *radar_task(const char *arg)
         /* 5) 统计心跳：窗口按 uapi_tcxo_get_ms() 的**真实耗时**判定（t57/D13，见 RADAR_HB_PERIOD_MS）
          *    并把窗口时长打进日志，任何人拿日志都能复算速率，不再依赖「标称 10 s」的假设。
          *    单位口径也一并改对：rx_bytes = 字节（流健康度），rx_frames = 帧（解析量）。 */
-        tick++;
         {
             static uint32_t hb_last_ms;
             static uint8_t  hb_primed;
