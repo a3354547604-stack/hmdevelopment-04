@@ -218,8 +218,8 @@ grep -c "packet success" build-*.log
 3. **`set` / `set_threshold` 的 `result` 码与 §2.5 码表一致**（t55 复核）：契约 v1.2 §2.5 已给码表
    ——成功=0、越界=1002（带 `field`/`allowed`）、未知键=1003、设备内部错误=7。固件实现
    `0/1002/1003`，**从不回 `7`**：P0 的阈值只写内存、掉电复位（PM 裁定 ①，Flash 持久化是 P1），
-   没有「Flash 写失败」这条路径。⚠️ 契约 §2.5 正文目前仍写「`set_threshold` → 落 Flash」，
-   与 P0 口径不一致，已报 PM（不在本卡范围内，见 §11）。
+   没有「Flash 写失败」这条路径。契约 v1.3（**t69 契约 r3**）已把 §2.5 改成同一口径
+   「P0 只改内存、掉电回默认 ⇒ 从不回 `7`」，**本节与契约现已一致**（t55 时不一致曾报 PM，t69 收口；见契约 §14.1）。
    另：两种拼写（`set` / `set_threshold`）都按 §2.5 的别名口径接受，见 §11。
 4. **`sensor_hub.c` / `wifi_hub.c` 暂不进任何节点固件**：两者各自带 `app_run`，编进来会多起两个任务
    刷 ADC/WiFi 日志（SLE 链路的噪声）。文件保留、全局变量保留（`sle_hub.c` 的压测线程用 `extern` 引它们，
@@ -595,11 +595,11 @@ tools/build-lock.sh python3 tools/node-json-check.py --sample > ws63-firmware/ou
 
 ### 11.3 两件不在本卡、但必须说清的事
 
-1. **F-03（阈值持久化）走契约侧，且契约正文还没改。** PM 裁定 ①：P0 阈值**内存生效、掉电复位**，
+1. **F-03（阈值持久化）已由 t69 契约 r3 收口。** PM 裁定 ①：P0 阈值**内存生效、掉电复位**，
    Flash 持久化降到 P1（`result=7` 保留码位但在 P0 不可达）。固件本来就是这个行为（`node_sensor_apply_set()`
-   只写内存），所以代码侧无需改动；**但契约 §2.5 正文现在仍写着「`set_threshold` → 落 Flash」**，
-   与裁定不一致 —— 契约不在本卡 inScope（本卡 inScope 只含 `ws63-firmware/` 下四类文件与 doc/11），
-   已按流程报 PM，请由契约侧开卡收口。
+   只写内存），代码侧无需改动；**契约 §2.5 原写「`set_threshold` → 落 Flash`」，t55 时不在本卡
+   inScope、按流程报 PM**；**t69（契约 v1.3）已改成同一口径**（P0 只改内存、掉电回默认、从不回 `7`），
+   映射见契约 §14.1 的 F-03 行。
 2. **`NODE_ROLE_NAME "door+presence"` 这个角色标签暂不改。** 它是 `node-build.sh` 角色断言的
    grep 锚点、也已写进 `out/NODE_M4.fwpkg`/`m4.info.txt` 与历次复核报告。改成 `"door"` 会让
    「同一次构建的产物指纹表」全部对不上，收益只是字面好看；真机报文的 `type` 由
