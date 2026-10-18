@@ -154,7 +154,7 @@
 **P0 演示不需要这一步**——默认 mock 模式就够了。要做的话，三个前提缺一不可：
 
 1. 电脑上服务器已起来（`server/` 的 compose，端口 `127.0.0.1:3000`）。
-2. `AppConfig.ets` 改两处：`MOCK_MODE = false`，`SERVER_BASE_URL = 'http://<电脑局域网IP>:3000/api'`，然后重新 Run。
+2. `entry/src/main/ets/common/AppConfig.ets` 改两处：`MOCK_MODE = false`，`SERVER_BASE_URL = 'http://<电脑局域网IP>:3000/api'`，然后重新 Run。
 3. 模拟器/手机与电脑在同一网段。
 
 ⚠️ **一个已知限制**：`server/docker-compose.yml` 按项目规约把端口**绑在 `127.0.0.1`**（不对局域网开放），所以手机/模拟器**直接连会被拒**。可行做法是端口转发（`hdc` 的端口转发，或安卓侧 `adb reverse tcp:3000 tcp:3000`），**本机无设备，这一段待用户实测**。
@@ -181,10 +181,11 @@ bash tools/build-hap.sh      # ① 先"门禁自证"（必须 BUILD FAILED）再
 bash tools/run-selfcheck.sh  # ② 无设备自检：真实 HttpApiService + Mock 传输层 → 28/28 PASS
 ```
 
-- 产物：`entry/build/default/outputs/default/entry-default-unsigned.hap`（**未签名**）
+- 产物：`entry/build/default/outputs/default/entry-default-unsigned.hap`（**未签名**；t42 提交 `94d3c59` 与 t47 重跑均为 **961812 B**——体积随源码变动，重跑后以实际输出为准）。⚠️ **sha256 每次构建都不同**（HAP 内含构建时间戳），材料里引用时写**体积 + 提交号**，不要写 sha256 当作可复现指纹。
 - 日志产物：`deliverables/01-HAP构建日志.txt`、`deliverables/02-无设备自检日志.txt`
-- **这条路线能证明**：代码能编译（且编译门禁真实有效——脚本会先注入一个未定义常量，确认真的报 `ArkTS:ERROR` + `BUILD FAILED` 再回退）、18 个接口的 URL/鉴权头/字段解析正确。
+- **这条路线能证明**：代码能编译（且编译门禁真实有效——脚本会先注入一个未定义常量，确认真的报 `ArkTS:ERROR` + `BUILD FAILED` 再回退）、18 个接口的 URL/鉴权头/字段解析正确（自检 **28/28**，t42 提交 `94d3c59` 口径）。
 - **这条路线不能证明**：界面在设备上的真实渲染与交互；未签名 HAP 也装不进设备。
+- **材料里引用数字的规矩**：自检计数与 HAP 尺寸都要**带对应提交号**（见 `07-截图与录屏清单.md` §7.2 的「数字-提交」自检脚本），避免材料与实物对不上。
 
 ---
 
@@ -205,6 +206,7 @@ bash tools/run-selfcheck.sh  # ② 无设备自检：真实 HttpApiService + Moc
 1. ~~设置页「演示事件」选项比契约多两个~~ **已收口（t42）**：选项现为 **燃气 / 跌倒 / 紧急求助** 三项，与契约 §6.12 的 `fall`/`gas`/`sos` 逐字一致；契约外事件被 mock 按 **1206** 拒绝，不再冒充「跌倒」（自检 #27/#28 覆盖）。**门磁没有演示事件**（PM 裁定 D8 不放宽契约），现场门磁走真实干簧管。
 2. ~~阈值下发响应字段类型仍在收口~~ **已收口（t30）**：服务器已按 PM 裁定 D-05 返回 `data` 内两个字符串数组 `accepted`/`rejected`，与 App 解析一致。
 3. ~~`harmony-app/README.md` §1 的自检数字写的是 23/23~~ **已同步（t42）**：README 与本文档均已改为 **28/28**（t22 加 3 项、t42 加 2 项）。
+4. **语音播报与 4G 回传不是本原型的功能**（PM 裁定 D9）：语音播报为**扩展设计**（设计上可接 DFPlayer TF 卡模块，本原型以声光 + App 推送替代）；4G 为**扩展设计**（可选 Cat.1 模组回传，本原型走 Wi-Fi 上云）。材料里**不得**写「已实现/待实测」，详见 `06-现场演示脚本.md` §6 第 8–10 条。
 
 ---
 
