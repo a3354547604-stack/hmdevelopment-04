@@ -31,6 +31,22 @@ GAP = re.compile(r"\[SPIKE-CLI\] !! GAP")
 OOO = re.compile(r"\[SPIKE-CLI\] !! OUT-OF-ORDER")
 LOST_FIELD = re.compile(r"lost=(\d+)")
 DONE = re.compile(r"\[SPIKE-CLI\] structure discovery DONE type=(\d+)")
+# 冷启动横幅：-Reset 复位后 ROM 必打这一行。判读只认**最后一次复位之后**的日志——
+# 抓取脚本先打开串口再拉复位，所以抓到的头几毫秒里可能还夹着上一轮的残余帧
+# （t16 复跑实测：主端第 1 行是上一轮的 tx seq=46，紧跟着才是 boot.）。不裁掉的话
+# 会被判成“seq 断档 46 → 0”，那是抓取窗口的边界，不是丢包。
+BOOT = re.compile(r"^boot\.?\s*$")
+
+
+def trim_to_boot(lines):
+    """裁到最后一次冷启动横幅之后；返回 (裁剪后行, 裁掉的行数)。没有横幅则原样返回。"""
+    idx = None
+    for i, (_, t) in enumerate(lines):
+        if BOOT.match(t.strip()):
+            idx = i
+    if idx is None:
+        return lines, 0
+    return lines[idx:], idx
 
 
 def load(path):
@@ -57,6 +73,8 @@ def monotonic_by_one(seqs):
 
 def check(path_master, path_slave, seconds):
     lines_m, lines_s = load(path_master), load(path_slave)
+    lines_m, drop_m = trim_to_boot(lines_m)
+    lines_s, drop_s = trim_to_boot(lines_s)
     text_m = "\n".join(t for _, t in lines_m)
     text_s = "\n".join(t for _, t in lines_s)
     results = []          # (ok, 项目, 说明)
@@ -94,9 +112,12 @@ def check(path_master, path_slave, seconds):
     n_attempt = text_s.count("subscribe: write CCCD")
     n_cccd_fail = text_s.count("CCCD write failed")
     n_done = DONE.findall(text_s)
+    # 对端（服务端）侧的独立证据：write_request_cb 真的收到了 CCCD 写。
+    peer_cccd = text_m.count("CCCD written by client")
     results.append((sub, "从端出现 SUBSCRIBED",
                     f"CCCD 写尝试={n_attempt} 次、失败={n_cccd_fail} 次、"
-                    f"discovery DONE={len(n_done)} 次（type 序列前 6 个={n_done[:6]}）"))
+                    f"discovery DONE={len(n_done)} 次（type 序列前 6 个={n_done[:6]}）；"
+                    f"对端收到 CCCD 写={peer_cccd} 次（服务端 write_request_cb）"))
     if not sub:
         fatal.append("从端从未订阅成功（SUBSCRIBED 缺失）")
 
@@ -140,8 +161,8 @@ def check(path_master, path_slave, seconds):
     else:
         results.append((False, "从端收包速率 ≈1 帧/秒", "无时间戳或帧数不足，无法算速率"))
 
-    print(f"主端日志：{path_master}（{len(lines_m)} 行）")
-    print(f"从端日志：{path_slave}（{len(lines_s)} 行）")
+    print(f"主端日志：{path_master}（{len(lines_m)} 行，冷启动横幅前裁掉 {drop_m} 行）")
+    print(f"从端日志：{path_slave}（{len(lines_s)} 行，冷启动横幅前裁掉 {drop_s} 行）")
     print("-" * 78)
     for ok, item, detail in results:
         print(f"[{'PASS' if ok else 'FAIL'}] {item}")

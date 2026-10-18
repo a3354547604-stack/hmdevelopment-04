@@ -54,6 +54,11 @@ static uint16_t g_conn_hdl = 0;         /* 对端句柄；**0 是合法值**，�
  * 为什么：本 SDK 给第一条连接的 conn_id 就是 0x0（实测两端日志都打 conn_id:00），
  * 所以 `g_conn_hdl == 0` 表达不了「无连接」——t12 上板实测时它让发包线程 90 秒一帧未发。 */
 static volatile uint8_t g_connected = 0;
+/* 对端写过 CCCD（type=0x02）= 它订阅了通知。把它带进每帧载荷（sub=0/1），
+ * 让从端能**自己**看到「订阅已被对端接受」——本 SDK 里从端写 CCCD 拿不到成功的
+ * write cfm（实测恒为 0x7，见 t16 笔记），单看从端日志无法自证订阅；对端回带
+ * sub=1 才是端到端证据。 */
+static volatile uint8_t g_peer_subscribed = 0;
 static uint8_t  g_server_id = 0;
 static uint16_t g_service_handle = 0;
 static uint16_t g_property_handle = 0;
@@ -121,8 +126,8 @@ static void spike_srv_notify_thread(void)
             continue;
         }
         t10 = spike_temp_d10(g_tx_seq);
-        n = snprintf((char *)payload, sizeof(payload), SPIKE_PAYLOAD_FMT,
-            (unsigned)g_tx_seq, t10 / 10, t10 % 10);
+        n = snprintf((char *)payload, sizeof(payload), SPIKE_PAYLOAD_FMT " sub=%u",
+            (unsigned)g_tx_seq, t10 / 10, t10 % 10, (unsigned)g_peer_subscribed);
         if (n < 0) {
             n = 0;
         } else if ((unsigned)n >= sizeof(payload)) {
@@ -169,8 +174,29 @@ static void spike_srv_read_request_cbk(uint8_t server_id, uint16_t conn_id,
 static void spike_srv_write_request_cbk(uint8_t server_id, uint16_t conn_id,
     ssaps_req_write_cb_t *write_cb_para, errcode_t status)
 {
-    osal_printk(SPIKE_TAG_SRV "WRITE req from client: server=%d conn=0x%x handle=0x%x status=0x%x\r\n",
-        server_id, conn_id, write_cb_para->handle, status);
+    osal_printk(SPIKE_TAG_SRV "WRITE req from client: server=%d conn=0x%x handle=0x%x type=0x%02x "
+        "need_rsp=%d len=%d status=0x%x\r\n",
+        server_id, conn_id, write_cb_para->handle, write_cb_para->type,
+        write_cb_para->need_rsp, write_cb_para->length, status);
+
+    /* 必须回响应。t16 上板实测：从端写 CCCD 时本回调确实收到请求（handle=0x11
+     * type=0x02 status=0x0），但服务端不回响应 → 从端的 write cfm 只拿到 status=0x7，
+     * 日志里永远出不来 SUBSCRIBED。read 路径本来就是「need_rsp 就回」，write 漏了。 */
+    if (write_cb_para->need_rsp) {
+        ssaps_send_rsp_t rsp = {0};
+        rsp.request_id = write_cb_para->request_id;
+        rsp.status = ERRCODE_SLE_SUCCESS;
+        rsp.value_len = 0;      /* 写响应只带状态，不带数据 */
+        (void)ssaps_send_response(server_id, conn_id, &rsp);
+    }
+    /* CCCD 写 = 从端订阅通知。服务端独立记一行，作为「订阅已建立」的对端证据
+     * （不改发送行为：主端仍是连上就发，订阅与否都能收到），并让后续每帧载荷
+     * 带 sub=1，使从端也能自行判定订阅生效。 */
+    if (write_cb_para->type == SSAP_DESCRIPTOR_CLIENT_CONFIGURATION) {
+        g_peer_subscribed = 1;
+        osal_printk(SPIKE_TAG_SRV "CCCD written by client: conn=0x%x handle=0x%x value_len=%d -> subscribed\r\n",
+            conn_id, write_cb_para->handle, write_cb_para->length);
+    }
 }
 
 static void spike_srv_mtu_changed_cbk(uint8_t server_id, uint16_t conn_id,

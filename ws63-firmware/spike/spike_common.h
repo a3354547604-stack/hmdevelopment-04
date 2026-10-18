@@ -137,4 +137,34 @@ static inline int spike_adv_has_marker(const unsigned char *data, unsigned int l
     return 0;
 }
 
+/* 载荷里是否带 "sub=1"（服务端收到 CCCD 写之后的订阅确认标记）。
+ * 为什么用标记而不是 write cfm：本 SDK 里从端写 CCCD 的 cfm 恒为 0x7（t16 实测，
+ * 对端 write_request_cb 确实收到了 type=0x02、need_rsp=0 的写），所以「订阅是否生效」
+ * 只能由服务端回带、从端自行判定。要求 "sub=" 后紧跟 '1' 且 1 后面不是数字，
+ * 避免以后出现 sub=10 之类的字段被误判。 */
+static inline int spike_payload_has_sub1(const char *text, unsigned int len)
+{
+    static const char key[] = "sub=";
+    const unsigned int klen = sizeof(key) - 1;
+    unsigned int i, k;
+
+    if (text == 0 || len < klen + 1u) {
+        return 0;
+    }
+    for (i = 0; i + klen + 1u <= len; i++) {
+        for (k = 0; k < klen; k++) {
+            if ((unsigned char)text[i + k] != (unsigned char)key[k]) {
+                break;
+            }
+        }
+        if (k == klen && text[i + klen] == '1') {
+            char after = (i + klen + 1u < len) ? text[i + klen + 1u] : '\0';
+            if (after < '0' || after > '9') {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 #endif /* SPIKE_COMMON_H */

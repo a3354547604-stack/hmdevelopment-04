@@ -1,6 +1,6 @@
 file=slave
 extra_build_args=-def=SPIKE_ROLE=2
-bytes=1458984
-sha256=366797aeb09bde309efbe47b28d7ec310cd70aeec0dff05beae4d686edc47301
-built_at=2026-10-17T23:35:58+08:00
+bytes=1459432
+sha256=dd392b04effcfd516b7d0ba7c073bfbeea937d77882e835b316bbeb986e619e1
+built_at=2026-10-18T08:49:17+08:00
 role_marker=SPIKE-ROLE=SLAVE count=1

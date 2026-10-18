@@ -214,6 +214,16 @@ static void spike_cli_notification_cb(uint8_t client_id, uint16_t conn_id, ssapc
     osal_printk(SPIKE_TAG_CLI "rx #%u seq=%d dt=%ums len=%u payload=\"%s\"\r\n",
         (unsigned)g_rx, seq, (unsigned)off, data->data_len, text);
 
+    /* 订阅生效的**端到端**证据：服务端在收到 CCCD 写之后，会在每帧载荷里带 sub=1。
+     * 为什么不能靠 write cfm：本 SDK 从端写 CCCD 的 cfm 恒为 0x7（对端实测已收到，
+     * 且 need_rsp=0），所以从端只能靠对端回带的标记自证。 */
+    if (g_subscribe_attempts > 0 && !g_subscribed && spike_payload_has_sub1(text, len)) {
+        g_subscribed = 1;
+        /* 只打 ASCII：osal_printk 到串口不认 UTF-8 中文，会全变 '?'。 */
+        osal_printk(SPIKE_TAG_CLI "SUBSCRIBED: peer confirmed CCCD (notify payload sub=1, "
+            "i.e. server write_request_cb got a type=0x02 CCCD write) - subscription done\r\n");
+    }
+
     if ((g_rx % SPIKE_STAT_EVERY_N) == 0) {
         spike_cli_print_stats("periodic");
     }
@@ -414,14 +424,45 @@ static void spike_cli_find_structure_cbk(uint8_t client_id, uint16_t conn_id,
     g_svc_end_hdl = service->end_hdl;
 }
 
+/* CCCD 写入目标 (句柄偏移, 属性类型) 的候选表。
+ *
+ * 为什么不是写死一个组合：t16 实测「prop+1 + type=CCCD」（BLE 惯例）被本机协议栈
+ * 直接拒掉——write cfm status=0x4 且 result->handle=0x0，服务端一侧**根本没收到**
+ * WRITE 请求（主端日志无 "WRITE req" 行），说明是本地校验失败而不是对端拒绝。
+ * 线索是本 SDK 的 ssaps_add_descriptor_sync(server_id, svc_hdl, prop_hdl, &desc)
+ * **没有输出描述符句柄**，且属性发现结果里只给 descriptors_count/descriptors_type[]
+ * （类型表，不给句柄）——即描述符很可能是用「(属性句柄, 描述符类型)」定位的，
+ * 而不是像 BLE 那样自带独立句柄。官方 sle_speed_client 又从未写过描述符
+ * （它写的是 service_hdl + type=VALUE），所以没有可照抄的样例。
+ * 与其继续猜，这里把 4 个组合按顺序试，日志打出哪一个成功，一次上板就能定性。 */
+typedef struct {
+    uint16_t handle_off;    /* 相对属性句柄的偏移 */
+    uint8_t  type;
+    const char *why;
+} spike_cccd_cand_t;
+
+static const spike_cccd_cand_t g_cccd_cand[] = {
+    /* 首选：t16 上板实测唯一「服务端确实收到」的组合（主端日志 handle=0x11 type=0x02
+     * status=0x0）——本 SDK 的描述符是用 (属性句柄, 描述符类型) 定位的，不像 BLE
+     * 那样自带独立句柄（写 0x12 在本机就被拒，从端根本没有 0x12 这个句柄）。 */
+    { 0, SSAP_DESCRIPTOR_CLIENT_CONFIGURATION, "prop/CCCD" },
+    { 1, SSAP_DESCRIPTOR_CLIENT_CONFIGURATION, "prop+1/CCCD(BLE惯例)" },
+    { 0, SSAP_PROPERTY_TYPE_VALUE,             "prop/VALUE" },
+    { 1, SSAP_PROPERTY_TYPE_VALUE,             "prop+1/VALUE" },
+};
+#define SPIKE_CCCD_CAND_N ((uint8_t)(sizeof(g_cccd_cand) / sizeof(g_cccd_cand[0])))
+
+static uint8_t g_cand_inflight = 0;   /* 正在等 cfm 的候选序号，供 write_cfm 打印 */
+
 /* 写 CCCD 订阅通知。属于「尽力而为」：本包主端是连上就发、不看订阅状态，
  * 所以这步失败也照样能收到通知——施工单据此判读，别把它当失败标志。
  * 只在「属性轮发现结束」之后调用（发现进行中写会被协议栈拒，t12 实测 status=0x4），
- * 未成功时由心跳线程每 5 秒重试，最多 SPIKE_SUBSCRIBE_MAX_TRIES 次。 */
+ * 未成功时由心跳线程每 5 秒重试，每次换下一个候选，共 4 个候选。 */
 static void spike_cli_subscribe(uint16_t conn_id)
 {
     uint8_t cccd[2] = {0x01, 0x00};     /* 0x0001 = 打开通知 */
     ssapc_write_param_t param = {0};
+    uint8_t idx;
 
     if (g_subscribed) {
         return;
@@ -431,12 +472,15 @@ static void spike_cli_subscribe(uint16_t conn_id)
         return;
     }
     g_subscribe_attempts++;
-    param.handle = (uint16_t)(g_prop_handle + 1);       /* CCCD 紧跟属性句柄 */
-    param.type = SSAP_DESCRIPTOR_CLIENT_CONFIGURATION;
+    idx = (uint8_t)((g_subscribe_attempts - 1) % SPIKE_CCCD_CAND_N);
+    g_cand_inflight = idx;
+    param.handle = (uint16_t)(g_prop_handle + g_cccd_cand[idx].handle_off);
+    param.type = g_cccd_cand[idx].type;
     param.data_len = sizeof(cccd);
     param.data = cccd;
-    osal_printk(SPIKE_TAG_CLI "subscribe: write CCCD handle=0x%x value=0x0001 attempt=%u\r\n",
-        param.handle, (unsigned)g_subscribe_attempts);
+    osal_printk(SPIKE_TAG_CLI "subscribe: write CCCD try#%u/%u handle=0x%x type=0x%02x (%s) value=0x0001\r\n",
+        (unsigned)(idx + 1), (unsigned)SPIKE_CCCD_CAND_N, param.handle, param.type,
+        g_cccd_cand[idx].why);
     (void)ssapc_write_req(0, conn_id, &param);
 }
 
@@ -465,13 +509,16 @@ static void spike_cli_write_cfm_cbk(uint8_t client_id, uint16_t conn_id, ssapc_w
     errcode_t status)
 {
     unused(conn_id);
-    osal_printk(SPIKE_TAG_CLI "write cfm: client=%d handle=0x%x status=0x%x (0x0=订阅写成功)\r\n",
-        client_id, result->handle, status);
+    osal_printk(SPIKE_TAG_CLI "write cfm: client=%d handle=0x%x status=0x%x (try#%u %s)\r\n",
+        client_id, result->handle, status, (unsigned)(g_cand_inflight + 1),
+        g_cccd_cand[g_cand_inflight].why);
     if (status == ERRCODE_SLE_SUCCESS) {
         g_subscribed = 1;
-        osal_printk(SPIKE_TAG_CLI "SUBSCRIBED ready, waiting for notify ...\r\n");
+        osal_printk(SPIKE_TAG_CLI "SUBSCRIBED ready (handle=0x%x type=0x%02x %s), waiting for notify ...\r\n",
+            (uint16_t)(g_prop_handle + g_cccd_cand[g_cand_inflight].handle_off),
+            g_cccd_cand[g_cand_inflight].type, g_cccd_cand[g_cand_inflight].why);
     } else {
-        osal_printk(SPIKE_TAG_CLI "CCCD write failed (不影响收包，主端连上就会发)\r\n");
+        osal_printk(SPIKE_TAG_CLI "CCCD write failed (does not affect rx: server notifies as soon as connected)\r\n");
     }
 }
 
@@ -551,7 +598,7 @@ static void spike_cli_alive_thread(void)
             spike_cli_subscribe(g_conn_id);
         }
         if (g_cli_connected && g_rx == 0) {
-            osal_printk(SPIKE_TAG_CLI "WARN: 已连接但 5s 内一帧都没收到 —— 先看主端 [SPIKE-SRV] tx 有没有在发\r\n");
+            osal_printk(SPIKE_TAG_CLI "WARN: connected but no frame within 5s - check master [SPIKE-SRV] tx\r\n");
         }
     }
 }
