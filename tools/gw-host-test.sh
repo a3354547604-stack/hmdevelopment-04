@@ -3,7 +3,7 @@
 # tools/gw-host-test.sh — 网关纯逻辑离线自测（不需要板子、不需要串口）
 #
 # 编进自测的源码（能离开硬件跑的那部分）：
-#   src/  : gw_proto / gw_rules / gw_crypto / gw_time / gw_iotda / gw_cache / gw_alarm / gw_433 / gw_timesync
+#   src/  : gw_proto / gw_rules / gw_crypto / gw_time / gw_iotda / gw_cache / gw_alarm / gw_433 / gw_timesync / gw_kvcfg
 #   test/ : gw_host_plat.c（把 gpio/uart/flash 换内存桩）+ gw_selftest.c（断言）
 #   不编  : gw_main.c（板级入口）、gw_plat.c（真外设）、gw_cloud.c（要 paho MQTT，只能上板验）
 # 依赖：cJSON 直接用 SDK 里那份 third_party/cJSON/cJSON.c —— 与上板同版本，
@@ -38,7 +38,10 @@ mkdir -p "$OUT"
 [ -f "$CJSON_SRC" ] || { echo "找不到 $CJSON_SRC（cJSON 随 SDK 提供；用 GW_SDK=<SDK 路径> 指定）" >&2; exit 2; }
 
 CFLAGS='-std=c99 -O1 -g -Wall -Wextra -Wno-unused-parameter'
-OBJS='gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c'
+OBJS='gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c gw_kvcfg.c'
+# ↑ t34 起多一个 gw_kvcfg.c（凭证 Flash KV 的编解码与串口命令本体：纯逻辑、不碰 SDK）。
+#   它必须在这份清单里，否则 test/gw_selftest.c 的 test_kvcfg() 会因缺符号编译不过。
+#   gw_kvcfg_shell.c（osCmdReg 那层）是板级，主机刻意不编 —— 与 gw_plat.c/gw_main.c 同理。
 
 run_host() {
     echo "[gw-host-test] 模式：主机编译器 $CC"

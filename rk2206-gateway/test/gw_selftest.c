@@ -22,6 +22,7 @@
 #include "gw_alarm.h"
 #include "gw_433.h"
 #include "gw_plat.h"
+#include "gw_kvcfg.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -1263,12 +1264,287 @@ static void test_set_threshold(void)
          "report_interval_s=30 → 0 并落 settings（gw_main 据此改上报周期）");
 }
 
+/* -------------------- t34：凭证 Flash KV（布局 / 落盘 / 命令 / 负向） --------------------
+ *
+ * 期望值来源不是"跑一遍看输出"：
+ *   - test/gw_kvcfg_vectors.inc：由 tools/gw-kvcfg.py（Python 侧**独立**实现）生成的 256 字节块，
+ *     这里用 C 的 gw_kvcfg_encode 复算并逐字节比对 —— 两种实现谁也不能夹带自己的假设。
+ *   - gw_config.h 的编译期占位值：作为"没有 KV 时板子该用什么"的判据。
+ * 负向三条（缺凭证 / 写失败 / 读回不符）用注入式 flash ops 造，真 Flash 上没法稳定复现。
+ */
+#include "gw_kvcfg_vectors.inc"
+
+static int s_kv_fail_write;
+static int s_kv_corrupt_write;
+
+static int kvf_erase(uint32_t off, uint32_t len) { return gw_plat_flash_erase(off, len); }
+static int kvf_read(uint32_t off, void *buf, uint32_t len) { return gw_plat_flash_read(off, buf, len); }
+
+static int kvf_write(uint32_t off, const void *buf, uint32_t len)
+{
+    uint8_t tmp[GW_KVCFG_BLOCK_SIZE];
+
+    if (s_kv_fail_write) {
+        return -1;                                  /* 造"擦成功、写失败"（掉电/坏块） */
+    }
+    if (s_kv_corrupt_write) {
+        memset(tmp, 0, sizeof(tmp));
+        memcpy(tmp, buf, (len <= sizeof(tmp)) ? len : sizeof(tmp));
+        tmp[GW_KVCFG_HOST_OFF] ^= 0x01u;            /* 造"写进去的与读回来的不一致" */
+        return gw_plat_flash_write(off, tmp, len);
+    }
+    return gw_plat_flash_write(off, buf, len);
+}
+
+static const gw_kvcfg_flash_ops_t kvf_ops = { kvf_erase, kvf_write, kvf_read };
+
+static void put_le16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+}
+
+static void put_le32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+    p[2] = (uint8_t)((v >> 16) & 0xFFu);
+    p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+static void kvcfg_from_vector(gw_kvcfg_t *c, const gw_kvcfg_vector_t *v)
+{
+    memset(c, 0, sizeof(*c));
+    snprintf(c->mqtt_host, sizeof(c->mqtt_host), "%s", v->host);
+    snprintf(c->device_id, sizeof(c->device_id), "%s", v->device_id);
+    snprintf(c->secret, sizeof(c->secret), "%s", v->secret);
+    snprintf(c->time_host, sizeof(c->time_host), "%s", v->time_host);
+    c->mqtt_port = v->mqtt_port;
+    c->time_port = v->time_port;
+}
+
+static void test_kvcfg(void)
+{
+    gw_kvcfg_t cfg;
+    gw_kvcfg_t rt;
+    char err[160];
+    char out[1200];
+    char hexbuf[GW_KVCFG_DUMP_HEX_LEN];
+    uint8_t blk[GW_KVCFG_BLOCK_SIZE];
+    uint8_t back[GW_KVCFG_BLOCK_SIZE];
+    char label[96];
+    uint32_t i;
+    int rc;
+    int n;
+
+    t_start("t34 凭证 KV：布局 / CRC / 落盘 / 串口命令 / 负向");
+
+    /* ① 与 Python 生成器的 4 条向量逐字节比对（含 63 字节边界值） */
+    for (i = 0; i < GW_KVCFG_VECTOR_COUNT; i++) {
+        const gw_kvcfg_vector_t *v = &k_kvcfg_vectors[i];
+
+        kvcfg_from_vector(&cfg, v);
+        n = gw_kvcfg_encode(&cfg, blk, sizeof(blk));
+        snprintf(label, sizeof(label), "[%u %s] encode", (unsigned)i, v->name);
+        t_ok(n == (int)GW_KVCFG_BLOCK_SIZE, label);
+        gw_kvcfg_block_hex(blk, sizeof(blk), hexbuf, sizeof(hexbuf));
+        snprintf(label, sizeof(label), "[%u %s] 256 B 与 Python 侧逐字节一致", (unsigned)i, v->name);
+        t_ok(strcmp(hexbuf, v->block_hex) == 0, label);
+        snprintf(label, sizeof(label), "[%u %s] CRC", (unsigned)i, v->name);
+        t_ok(gw_kvcfg_crc(blk, GW_KVCFG_CRC_OFF) == v->crc, label);
+        snprintf(label, sizeof(label), "[%u %s] decode 往返", (unsigned)i, v->name);
+        rc = gw_kvcfg_decode(blk, sizeof(blk), &rt, err, sizeof(err));
+        t_ok(rc == GW_KVCFG_OK && strcmp(rt.mqtt_host, cfg.mqtt_host) == 0 &&
+             strcmp(rt.device_id, cfg.device_id) == 0 && strcmp(rt.secret, cfg.secret) == 0 &&
+             strcmp(rt.time_host, cfg.time_host) == 0 && rt.mqtt_port == cfg.mqtt_port &&
+             rt.time_port == cfg.time_port, label);
+    }
+
+    /* ② 坏块识别：CRC 篡改 / 全 0xFF / magic / 版本 / 长度 / "CRC 对但内容空" */
+    kvcfg_from_vector(&cfg, &k_kvcfg_vectors[0]);
+    n = gw_kvcfg_encode(&cfg, blk, sizeof(blk));
+    t_ok(n == (int)GW_KVCFG_BLOCK_SIZE, "基线块可编码");
+
+    memcpy(back, blk, sizeof(blk));
+    back[GW_KVCFG_SECRET_OFF] ^= 0x01u;
+    t_ok(gw_kvcfg_decode(back, sizeof(back), &rt, err, sizeof(err)) == GW_KVCFG_E_CRC,
+         "密钥区被改一个 bit → E_CRC（不会被当成有效凭证）");
+
+    memset(back, 0xFF, sizeof(back));
+    t_ok(gw_kvcfg_decode(back, sizeof(back), &rt, err, sizeof(err)) == GW_KVCFG_E_EMPTY,
+         "全 0xFF → E_EMPTY（从未写入/已 clear）");
+
+    memcpy(back, blk, sizeof(blk));
+    back[0] ^= 0xFFu;
+    t_ok(gw_kvcfg_decode(back, sizeof(back), &rt, err, sizeof(err)) == GW_KVCFG_E_VER,
+         "magic 不符 → E_VER（别的工具的块）");
+    memcpy(back, blk, sizeof(back));
+    put_le16(back + 4u, 3u);
+    t_ok(gw_kvcfg_decode(back, sizeof(back), &rt, err, sizeof(err)) == GW_KVCFG_E_VER,
+         "版本不符 → E_VER（旧固件写的块）");
+    memcpy(back, blk, sizeof(blk));
+    put_le16(back + 6u, 128u);
+    t_ok(gw_kvcfg_decode(back, sizeof(back), &rt, err, sizeof(err)) == GW_KVCFG_E_VER,
+         "块长不符 → E_VER");
+
+    /* CRC 正确但内容为空（手写半块）：CRC 过、validate 必须挡住 */
+    memset(back, 0, sizeof(back));
+    put_le32(back, GW_KVCFG_MAGIC);
+    put_le16(back + 4u, GW_KVCFG_VERSION);
+    put_le16(back + 6u, GW_KVCFG_BLOCK_SIZE);
+    put_le32(back + GW_KVCFG_CRC_OFF, gw_kvcfg_crc(back, GW_KVCFG_CRC_OFF));
+    t_ok(gw_kvcfg_decode(back, sizeof(back), &rt, err, sizeof(err)) == GW_KVCFG_E_PARAM,
+         "CRC 对但 host/secret 为空 → E_PARAM（半截凭证不许混进连接流程）");
+
+    /* ③ 落盘 → 读回：store 自己已经做了读回逐字节比对 */
+    gw_host_flash_reset();
+    gw_kvcfg_set_flash_ops(NULL);
+    kvcfg_from_vector(&cfg, &k_kvcfg_vectors[1]);
+    rc = gw_kvcfg_store(&cfg, err, sizeof(err));
+    t_ok(rc == GW_KVCFG_OK, "store：擦 4 KB → 写 256 B → 读回逐字节一致 → 解码通过");
+    rc = gw_kvcfg_load(&rt, err, sizeof(err));
+    t_ok(rc == GW_KVCFG_OK && strcmp(rt.mqtt_host, cfg.mqtt_host) == 0 &&
+         strcmp(rt.device_id, cfg.device_id) == 0 && strcmp(rt.secret, cfg.secret) == 0 &&
+         rt.mqtt_port == cfg.mqtt_port, "load：读回同一份凭证（含密钥，板内自己用）");
+    t_ok(gw_host_flash_errors() == 0, "全程没有越界访问 Flash（宿主替身记账为 0）");
+
+    /* ④ 负向三条：缺凭证 / 写失败 / 读回不符 */
+    rc = gw_kvcfg_clear(err, sizeof(err));
+    t_ok(rc == GW_KVCFG_OK, "clear：擦成 0xFF");
+    rc = gw_kvcfg_load(&rt, err, sizeof(err));
+    t_ok(rc == GW_KVCFG_E_EMPTY && strcmp(rt.mqtt_host, GW_MQTT_HOST) == 0 &&
+         strcmp(rt.device_id, GW_MQTT_DEVICE_ID) == 0 && rt.mqtt_port == GW_MQTT_PORT,
+         "负向1 缺凭证：load 返回 E_EMPTY 且**整份**回落编译期默认值（不是半截）");
+
+    gw_kvcfg_set_flash_ops(&kvf_ops);
+    s_kv_fail_write = 1;
+    s_kv_corrupt_write = 0;
+    rc = gw_kvcfg_store(&cfg, err, sizeof(err));
+    t_ok(rc == GW_KVCFG_E_FLASH && strstr(err, "写入失败") != NULL,
+         "负向2 写失败：E_FLASH，且报错说清是 Flash 写失败");
+    s_kv_fail_write = 0;
+    s_kv_corrupt_write = 1;
+    rc = gw_kvcfg_store(&cfg, err, sizeof(err));
+    t_ok(rc == GW_KVCFG_E_VERIFY && strstr(err, "读回校验不符") != NULL,
+         "负向3 读回不符：E_VERIFY（介质坏/扇区被别的分区占用）");
+    s_kv_corrupt_write = 0;
+    gw_kvcfg_set_flash_ops(NULL);
+
+    /* ⑤ 参数校验负向（用户从控制台复制粘贴，错字符必须当场挡住） */
+    memset(&cfg, 0, sizeof(cfg));
+    gw_kvcfg_defaults(&cfg);
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_OK, "默认值本身合法");
+    t_ok(gw_kvcfg_encode(NULL, blk, sizeof(blk)) == -GW_KVCFG_E_PARAM, "空指针 → -E_PARAM");
+    t_ok(gw_kvcfg_encode(&cfg, NULL, 0) == -GW_KVCFG_E_FLASH, "输出缓冲不足 → -E_FLASH");
+
+    cfg.mqtt_host[0] = '\0';
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_PARAM, "缺 host → E_PARAM");
+    gw_kvcfg_defaults(&cfg);
+    cfg.device_id[0] = '\0';
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_PARAM, "缺 device → E_PARAM");
+    gw_kvcfg_defaults(&cfg);
+    cfg.secret[0] = '\0';
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_PARAM, "缺 secret → E_PARAM");
+
+    gw_kvcfg_defaults(&cfg);
+    memset(cfg.mqtt_host, 'a', GW_KVCFG_HOST_LEN - 1u);
+    cfg.mqtt_host[GW_KVCFG_HOST_LEN - 1u] = '\0';
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_OK, "host 63 字节合法（正好到边界）");
+    /* 64 字节：字段里塞满没有 NUL（后随的 mqtt_port 置 0 让它在此处终止），必须判超长 */
+    gw_kvcfg_defaults(&cfg);
+    memset(cfg.mqtt_host, 'a', sizeof(cfg.mqtt_host));
+    cfg.mqtt_port = 0u;
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_LEN, "host 64 字节 → E_LEN（缓冲区会截断）");
+
+    gw_kvcfg_defaults(&cfg);
+    snprintf(cfg.mqtt_host, sizeof(cfg.mqtt_host), "bad host");
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_CHAR, "host 带空格 → E_CHAR（串口会切错词）");
+    gw_kvcfg_defaults(&cfg);
+    snprintf(cfg.time_host, sizeof(cfg.time_host), "bad time");
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_CHAR, "time 带空格 → E_CHAR");
+    gw_kvcfg_defaults(&cfg);
+    snprintf(cfg.secret, sizeof(cfg.secret), "short");
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_SECRET, "secret 5 字节 → E_SECRET（要求 ≥8）");
+    gw_kvcfg_defaults(&cfg);
+    snprintf(cfg.secret, sizeof(cfg.secret), "has space 123456");
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_CHAR, "secret 带空格 → E_CHAR");
+    gw_kvcfg_defaults(&cfg);
+    cfg.mqtt_port = 0u;
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_PORT, "port=0 → E_PORT");
+    gw_kvcfg_defaults(&cfg);
+    cfg.time_port = 0u;
+    t_ok(gw_kvcfg_validate(&cfg, err, sizeof(err)) == GW_KVCFG_E_PORT, "timeport=0 → E_PORT");
+
+    /* ⑥ 串口命令本体（shell 那层只把 argv 拼回一行） */
+    gw_host_flash_reset();
+    rc = gw_kvcfg_cmd("gwkv show", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "编译期默认值") != NULL && strstr(out, "E_EMPTY") != NULL,
+         "show（无 KV）：说明来源=编译期默认值 + 原因码");
+    rc = gw_kvcfg_cmd("gwkv set host=demo.iot-mqtts.cn-north-4.myhuaweicloud.com device=DEV-0001 "
+                      "secret=s3cret-0123456789 time=192.168.1.50", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "已写入 Flash KV") != NULL && strstr(out, "读回逐字节一致") != NULL,
+         "set：一行命令完成擦写 + 读回校验");
+    t_ok(strstr(out, "不回显") != NULL && strstr(out, "s3cret-0123456789") == NULL,
+         "set 摘要只给密钥长度+指纹，不回显密钥原文");
+    rc = gw_kvcfg_cmd("gwkv show", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "凭证来源：Flash KV") != NULL &&
+         strstr(out, "s3cret-0123456789") == NULL, "show（有 KV）：来源=Flash KV，密钥原文不出现");
+
+    /* 部分更新：只改 device，host/secret/time 沿用 KV 里的值（现场改一台设备不用重敲密钥） */
+    rc = gw_kvcfg_cmd("gwkv set device=DEV-0002", out, sizeof(out));
+    t_ok(rc == 0, "set 部分更新：只给 device");
+    rc = gw_kvcfg_cmd("gwkv show", out, sizeof(out));
+    /* 断言写到 `\n` 为止（不是子串包含）：这里挡住的是一个真踩过的 bug ——
+     * 基线字段旧值尾巴残留时，设备 ID 会读成 `DEV-00024e5f`（旧默认为 6a1b2c3d4e5f），
+     * 时间服务器会读成 `192.168.1.500`。用 strstr("DEV-0002") 是**抓不到**的。 */
+    t_ok(strstr(out, "设备 ID   : DEV-0002\n") != NULL &&
+         strstr(out, "接入地址  : demo.iot-mqtts.cn-north-4.myhuaweicloud.com:1883\n") != NULL &&
+         strstr(out, "时间服务器: 192.168.1.50:8000\n") != NULL && strstr(out, "17 字节") != NULL,
+         "部分更新：host/secret/time 沿用 KV 里的值，且**旧值尾巴不残留**（DEV-0002 而非 DEV-00024e5f）");
+
+    /* dump：256 B 十六进制，给主机工具逐字节核对 */
+    rc = gw_kvcfg_cmd("gwkv dump", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "KV 块 0x6FF000") != NULL && strstr(out, "564B5747") != NULL,
+         "dump：打印 256 B 十六进制（以 GWKV magic 开头）");
+    rc = gw_kvcfg_cmd("gwkv dump", out, 128u);
+    t_ok(rc == -1 && strstr(out, "需要更大的输出缓冲") != NULL, "dump 输出缓冲太小 → 明确报错（不截断）");
+
+    /* 拒绝类 */
+    rc = gw_kvcfg_cmd("gwkv set nokey=1", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "不认识的键") != NULL && strstr(out, "E_PARAM") != NULL,
+         "未知键 → E_PARAM 并拒绝写入");
+    rc = gw_kvcfg_cmd("gwkv set hostonly", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "不是 key=value") != NULL, "参数缺 `=` → E_PARAM");
+    rc = gw_kvcfg_cmd("gwkv set port=0", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "E_PORT") != NULL, "port=0 → E_PORT（拒绝写入）");
+    rc = gw_kvcfg_cmd("gwkv set host=ok.example.com device=D secret=password1 port=70000", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "E_PORT") != NULL, "port=70000 → E_PORT");
+    rc = gw_kvcfg_cmd("gwkv set", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "没有给任何 key=value") != NULL, "`set` 不带参数 → E_PARAM");
+    rc = gw_kvcfg_cmd("gwkv nosuch", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "不认识的子命令") != NULL, "未知子命令 → 用法提示");
+    rc = gw_kvcfg_cmd("gwkv help", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "gwkv set host=") != NULL, "help：给出可直接照抄的用法");
+    rc = gw_kvcfg_cmd("show", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "[kvcfg]") != NULL, "不带 `gwkv` 前缀也认（shell argv 形态）");
+
+    /* clear：擦掉后回落默认值 */
+    rc = gw_kvcfg_cmd("gwkv clear", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "已擦除 KV 扇区") != NULL, "clear：擦除并提示回落默认值");
+    rc = gw_kvcfg_cmd("gwkv show", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "编译期默认值") != NULL, "clear 后 show 回落编译期默认值");
+
+    t_ok(gw_host_flash_errors() == 0, "命令层全程没有越界访问 Flash");
+    gw_host_flash_reset();
+}
+
 int main(void)
 {
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
     test_crc_and_encode();
     test_contract_frames();          /* §3.7 六条样例帧：解析 + 重编 */
     test_set_threshold();            /* §4.5 set_threshold：21 键校验 + 生效 + 0x11 payload */
+    test_kvcfg();                    /* t34 凭证 KV：布局 + 落盘 + 串口命令 + 负向 */
     test_parser();
     test_crypto_auth();
     test_time();

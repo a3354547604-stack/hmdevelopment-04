@@ -33,6 +33,8 @@ static_library("gateway_app") {
         "gw_http.c",        # 最小 HTTP/1.1 服务端（单任务串行，socket 走 lwip/主机桩）
         "gw_net.c",         # 板级 Wi-Fi：SoftAP / STA / 2.4 G 预检（wifi_lite）
         "gw_store.c",       # 配网持久化：Wi-Fi 凭证 + 绑定白名单（Vendor Flash）
+        "gw_kvcfg.c",       # 设备凭证 KV：编解码 + 写入/读回校验 + 串口命令本体（纯逻辑）
+        "gw_kvcfg_shell.c", # 把 `gwkv` 挂到 SDK 自带 shell（板级，主机自测不编）
     ]
 
     include_dirs = [
@@ -48,6 +50,9 @@ static_library("gateway_app") {
         "//third_party/paho_mqtt/MQTTPacket/src",
         "//third_party/paho_mqtt/MQTTClient-C/src",
         "//third_party/lwip/src/include/lwip",
+        # 串口 shell（osCmdReg / CMD_TYPE_STD）：这条**不是** board_include_dirs 里已有的路径
+        # （已核对 sdk_liteos/config.gni），所以补它不会造成 CAL-13 那种重复 -I 改命中顺序的问题。
+        "//kernel/liteos_m/components/shell/include",
         # ⚠ 不要在这里补 //third_party/lwip/src/include 或 wifiservice 等路径：
         #   sdk_liteos/config.gni 的 board_include_dirs 已经全局带了它们，而 GN 会把我这份
         #   排在 board 那份**前面**。重复的 -I 不只是冗余，它会改变头文件命中顺序：

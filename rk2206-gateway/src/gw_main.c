@@ -28,6 +28,7 @@
 #include "gw_http.h"
 #include "gw_net.h"
 #include "gw_store.h"
+#include "gw_kvcfg.h"
 
 #include "ohos_init.h"
 #include "los_task.h"
@@ -148,49 +149,31 @@ static int dec_u64(uint64_t v, char *out, int cap)
     return n;
 }
 
-/* ============================== Flash KV ============================== */
-/* 一机一密的三要素（device_id / secret）不写进仓库，用施工单在首次上电时写入 Flash。
- * 结构很土但够用：magic + 长度 + 内容 + crc；坏了一律回落到编译期占位值并打警告。 */
-typedef struct {
-    uint32_t magic;
-    char     device_id[64];
-    char     secret[48];
-    uint32_t crc;
-} gw_kv_t;
+/* ============================== 凭证（Flash KV） ============================== */
+/* 布局 / 校验 / CRC 全在 gw_kvcfg.{h,c}：那块是纯逻辑，主机自测能穷举"没写过 / 写坏 / 读回不符"。
+ * 这里只做两件事：启动时读一次（失败由 gw_kvcfg_load 自动回落编译期默认值），并把"来源"打进日志。
+ * 换凭证不再需要改头文件重编：串口 `gwkv set host=... device=... secret=...`（见施工单-凭证写入Flash-KV.md）。 */
+static gw_kvcfg_t s_creds;
+static int s_creds_from_kv;            /* 1 = 来自 Flash KV；0 = 编译期默认值 */
+static char s_creds_reason[96];
 
-#define GW_KV_MAGIC 0x47574B56u     /* "GWKV" */
-
-static uint32_t kv_crc(const gw_kv_t *kv)
+static void creds_init(void)
 {
-    const uint8_t *p = (const uint8_t *)kv;
-    uint32_t crc = 0x811C9DC5u;     /* FNV-1a：只需要"变了就能发现"，不追求密码学强度 */
-    uint32_t i;
+    char err[96] = { 0 };
+    int rc = gw_kvcfg_load(&s_creds, err, sizeof(err));   /* 失败时已自动填默认值 */
 
-    for (i = 0; i < sizeof(*kv) - sizeof(uint32_t); i++) {
-        crc ^= p[i];
-        crc *= 0x01000193u;
+    s_creds_from_kv = (rc == GW_KVCFG_OK) ? 1 : 0;
+    (void)snprintf(s_creds_reason, sizeof(s_creds_reason), "%s", err);
+    if (s_creds_from_kv != 0) {
+        printf("[%s] 凭证来源=Flash KV：host=%s:%u device=%s time=%s:%u（改凭证用串口 `gwkv set`）\n",
+               GW_LOG_TAG, s_creds.mqtt_host, (unsigned)s_creds.mqtt_port, s_creds.device_id,
+               s_creds.time_host, (unsigned)s_creds.time_port);
+    } else {
+        printf("[%s] ⚠ 凭证来源=编译期默认值（KV 不可用：%s(%d) %s）\n",
+               GW_LOG_TAG, gw_kvcfg_errname(rc), rc, s_creds_reason);
+        printf("[%s]    现场写凭证：串口输入 `gwkv set host=<地址> device=<ID> secret=<密钥>` 后按复位键\n",
+               GW_LOG_TAG);
     }
-    return crc;
-}
-
-static int kv_load(char *device_id, uint32_t id_cap, char *secret, uint32_t sec_cap)
-{
-    gw_kv_t kv;
-
-    if (gw_plat_flash_read(GW_KV_FLASH_OFFSET, &kv, sizeof(kv)) != 0) {
-        return -1;
-    }
-    if (kv.magic != GW_KV_MAGIC || kv.crc != kv_crc(&kv)) {
-        return -1;
-    }
-    if (kv.device_id[0] == '\0' || kv.secret[0] == '\0') {
-        return -1;
-    }
-    strncpy(device_id, kv.device_id, id_cap - 1);
-    device_id[id_cap - 1] = '\0';
-    strncpy(secret, kv.secret, sec_cap - 1);
-    secret[sec_cap - 1] = '\0';
-    return 0;
 }
 
 /* ============================== 上云发送 ============================== */
@@ -867,7 +850,9 @@ static int gw_try_timesync(void)
     uint64_t epoch = 0;
 
     /* 顺序固定：先自建服务器（服务器与我们同一时间源，误差最小），失败再 NTP */
-    if (gw_timesync_http(GW_TIME_HOST, GW_TIME_PORT, GW_TIME_PATH, 5000, &epoch) == 0) {
+    /* 时间服务器地址可被凭证 KV 改写（t34）；显式留空 = 只用 NTP */
+    if (s_creds.time_host[0] != '\0' &&
+        gw_timesync_http(s_creds.time_host, s_creds.time_port, GW_TIME_PATH, 5000, &epoch) == 0) {
         gw_time_set_epoch(epoch, LOS_TickCountGet());
         printf("[%s] 取时成功(HTTP) epoch=%llu\n", GW_LOG_TAG, (unsigned long long)epoch);
         return 0;
@@ -1501,9 +1486,6 @@ static UINT32 task_create(TSK_ENTRY_FUNC fn, void *arg, UINT32 stack, UINT16 pri
 
 static void gw_main_entry(void)
 {
-    char device_id[64] = GW_MQTT_DEVICE_ID;
-    char secret[48] = GW_MQTT_DEVICE_SECRET;
-
     /* 这行里的 GW_IMAGE_TAG 是构建脚本的断言锚点：tools/gw-build.sh 会在
      * images/Firmware.img 里 grep 它，证明"编出来的固件真的含网关代码"。
      * 不要改成变量拼接，否则字符串会散成多段而 grep 不到。 */
@@ -1534,10 +1516,8 @@ static void gw_main_entry(void)
         }
     }
 
-    /* 3) 一机一密：Flash KV 优先，读不到用编译期占位值并明确警告 */
-    if (kv_load(device_id, sizeof(device_id), secret, sizeof(secret)) != 0) {
-        printf("[%s] ⚠ Flash 无设备凭证，使用编译期占位值（施工单要求烧录后写入 KV）\n", GW_LOG_TAG);
-    }
+    /* 3) 一机一密：Flash KV 优先，读不到自动回落编译期占位值（creds_init 里打来源与原因） */
+    creds_init();
 
     /* 4) 断网缓存：契约 §4.7 的 2000 条 */
     if (gw_cache_init(&s_cache) == 0) {
@@ -1558,9 +1538,14 @@ static void gw_main_entry(void)
                  GW_PROV_AP_PSK, (uint8_t)GW_PROV_AP_CHANNEL);
 
     /* 7) 上云会话（连接动作在 net_task 里，必须等校时） */
-    (void)gw_cloud_init(&s_cloud, GW_MQTT_HOST, GW_MQTT_PORT, device_id, secret, on_cmd, NULL);
+    (void)gw_cloud_init(&s_cloud, s_creds.mqtt_host, s_creds.mqtt_port, s_creds.device_id,
+                        s_creds.secret, on_cmd, NULL);
 
-    /* 8) 任务 */
+    /* 8) 串口凭证工具（t34）：`gwkv ...` 挂在 SDK 自带 shell 上。
+     * 走调试串口（与 [gw] 日志同口），**不动**契约 §3 的汇聚 UART0 二进制链路。 */
+    gw_kvcfg_shell_register();
+
+    /* 9) 任务 */
     if (task_create(uart_task, NULL, GW_TASK_STACK_UART, GW_TASK_PRIO_UART, "gwUart") != LOS_OK) {
         printf("[%s] uart 任务创建失败\n", GW_LOG_TAG);
     }
