@@ -1,0 +1,25 @@
+# t39 E2E 节点 JSON 样本：前 8 行来自 ws63-firmware/out/node-uplink-sample.txt，其后为场景帧
+{"sn":"M1","ts":1760000000000,"type":"gas","payload":{"smoke":300,"temp":25.0,"humi":45.0,"adc_mv":[150],"warmup":true},"seq":10,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000002000,"type":"gas","payload":{"smoke":340,"temp":25.1,"humi":46.0,"adc_mv":[170],"warmup":true},"seq":11,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000004000,"type":"gas","payload":{"smoke":380,"temp":25.2,"humi":47.0,"adc_mv":[190],"warmup":true},"seq":12,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000006000,"type":"gas","payload":{"smoke":420,"temp":25.3,"humi":48.0,"adc_mv":[210],"warmup":false},"seq":13,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000008000,"type":"gas","payload":{"smoke":460,"temp":25.4,"humi":49.0,"adc_mv":[230],"warmup":false},"seq":14,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000008000,"type":"status","payload":{"uptime_s":20,"rssi":-58,"power_src":"usb","battery":255,"warmup":false},"seq":204,"req_id":204,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000008000,"type":"gas","payload":{"smoke":1180,"temp":26.8,"humi":52.1,"adc_mv":[590],"warmup":false},"seq":205,"req_id":204,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000010000,"type":"gas","payload":{"smoke":500,"temp":25.5,"humi":50.0,"adc_mv":[250],"warmup":false},"seq":15,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000020000,"type":"gas","payload":{"smoke":2600,"temp":30.0,"humi":50.0,"adc_mv":[1300]},"seq":300,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000025000,"type":"gas","payload":{"smoke":2600,"temp":30.0,"humi":50.0,"adc_mv":[1300]},"seq":301,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000030000,"type":"gas","payload":{"smoke":2600,"temp":30.0,"humi":50.0,"adc_mv":[1300]},"seq":302,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000035000,"type":"gas","payload":{"smoke":2600,"temp":30.0,"humi":50.0,"adc_mv":[1300]},"seq":303,"fw":"0.1.0"}
+{"sn":"M2","ts":1760000040000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":400,"fw":"0.1.0"}
+{"sn":"M2","ts":1760000045000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":401,"fw":"0.1.0"}
+{"sn":"M2","ts":1760000050000,"type":"fall","payload":{"fall":1,"src":"uart"},"seq":402,"fw":"0.1.0"}
+{"sn":"M4","ts":1760000055000,"type":"door","payload":{"door":true,"window":false},"seq":500,"fw":"0.1.0"}
+{"sn":"M4","ts":1760000060000,"type":"door","payload":{"door":true,"window":false},"seq":501,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000065000,"type":"gas","payload":{"smoke":300,"temp":26.0,"humi":46.0,"adc_mv":[150]},"seq":600,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000070000,"type":"gas","payload":{"smoke":300,"temp":26.0,"humi":46.0,"adc_mv":[150]},"seq":601,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000075000,"type":"gas","payload":{"smoke":300,"temp":26.0,"humi":46.0,"adc_mv":[150]},"seq":602,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000080000,"type":"gas","payload":{"smoke":300,"temp":26.0,"humi":46.0,"adc_mv":[150]},"seq":603,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000085000,"type":"gas","payload":{"smoke":300,"temp":26.0,"humi":46.0,"adc_mv":[150]},"seq":604,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000090000,"type":"gas","payload":{"smoke":300,"temp":26.0,"humi":46.0,"adc_mv":[150]},"seq":605,"fw":"0.1.0"}
+{"sn":"M1","ts":1760000095000,"type":"gas","payload":{"smoke":300,"temp":26.0,"humi":46.0,"adc_mv":[150]},"seq":606,"fw":"0.1.0"}

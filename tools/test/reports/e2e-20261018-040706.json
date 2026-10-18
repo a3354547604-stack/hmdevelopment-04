@@ -1,0 +1,702 @@
+{
+  "rows": [
+    {
+      "seg": "段0",
+      "what": "样本文件生成",
+      "expected": ">=10 行",
+      "actual": "24 行（产物 8 + 场景 16）",
+      "ok": true
+    },
+    {
+      "seg": "段0-漂移守卫",
+      "what": "gw_e2e.c k_fall == gw_main.c k_fall",
+      "expected": [
+        "fall",
+        "value",
+        "state"
+      ],
+      "actual": [
+        "fall",
+        "value",
+        "state"
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段0-漂移守卫",
+      "what": "gw_e2e.c k_mv == gw_main.c k_mv",
+      "expected": [
+        "mv",
+        "value",
+        "smoke",
+        "gas"
+      ],
+      "actual": [
+        "mv",
+        "value",
+        "smoke",
+        "gas"
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段0-漂移守卫",
+      "what": "gw_e2e.c k_door == gw_main.c k_door",
+      "expected": [
+        "door",
+        "open",
+        "state"
+      ],
+      "actual": [
+        "door",
+        "open",
+        "state"
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段0-漂移守卫",
+      "what": "gw_e2e.c k_pir == gw_main.c k_pir",
+      "expected": [
+        "presence",
+        "activity",
+        "motion"
+      ],
+      "actual": [
+        "presence",
+        "activity",
+        "motion"
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段0-漂移守卫",
+      "what": "gw_e2e.c k_temp == gw_main.c k_temp",
+      "expected": [
+        "temp",
+        "temperature"
+      ],
+      "actual": [
+        "temp",
+        "temperature"
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段0-漂移守卫",
+      "what": "gw_e2e.c k_humi == gw_main.c k_humi",
+      "expected": [
+        "humi",
+        "humidity"
+      ],
+      "actual": [
+        "humi",
+        "humidity"
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段0-API核对",
+      "what": "hub_e2e.c 引用的符号/常量都在仓库源码里",
+      "expected": "0 缺失",
+      "actual": "0 缺失",
+      "ok": true
+    },
+    {
+      "seg": "段0-API核对",
+      "what": "hub_e2e.c 的调用实参个数与头文件原型一致",
+      "expected": "0 处不符",
+      "actual": "0 处不符",
+      "ok": true
+    },
+    {
+      "seg": "段0-API核对",
+      "what": "gw_e2e.c 引用的符号/常量都在仓库源码里",
+      "expected": "0 缺失",
+      "actual": "0 缺失",
+      "ok": true
+    },
+    {
+      "seg": "段0-API核对",
+      "what": "gw_e2e.c 的调用实参个数与头文件原型一致",
+      "expected": "0 处不符",
+      "actual": "0 处不符",
+      "ok": true
+    },
+    {
+      "seg": "段1",
+      "what": "节点 JSON 条数 → 帧条数",
+      "expected": 24,
+      "actual": 24,
+      "ok": true
+    },
+    {
+      "seg": "段1",
+      "what": "全部节点帧 roundtrip（编出来能解开且正文逐字节相同）",
+      "expected": "全 1",
+      "actual": "否 0 条",
+      "ok": true
+    },
+    {
+      "seg": "段1",
+      "what": "全部节点帧 parse_ok（sn/type 能被真实聚合解析器取到）",
+      "expected": "全 1",
+      "actual": "否 0 条",
+      "ok": true
+    },
+    {
+      "seg": "段1",
+      "what": "帧长 == 10 + LEN（§3.4 固定开销）",
+      "expected": "全等",
+      "actual": "不符 0 条",
+      "ok": true
+    },
+    {
+      "seg": "段1",
+      "what": "帧示例（第 1 条）",
+      "expected": "0x01 NODE_DATA",
+      "actual": "AA55010101008E007B22736E…（152 B）",
+      "ok": true,
+      "note": true
+    },
+    {
+      "seg": "段2-负向",
+      "what": "N1 坏 CRC → parse_error reason=4",
+      "expected": [
+        4
+      ],
+      "actual": [
+        4
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段2-负向",
+      "what": "N2 LEN 越界 >1024 → parse_error reason=5",
+      "expected": [
+        5
+      ],
+      "actual": [
+        5
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段2-负向",
+      "what": "N3 未知 TYPE 0x99（CRC 正确） → nack reason=6",
+      "expected": [
+        6
+      ],
+      "actual": [
+        6
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "api 健康检查",
+      "expected": "db=ok",
+      "actual": "db=ok",
+      "ok": true,
+      "note": true
+    },
+    {
+      "seg": "段3",
+      "what": "POST /api/auth/login",
+      "expected": "200/code=0",
+      "actual": "200/code=0",
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "GET /api/devices 找到绑定网关 M0-3F1A2B",
+      "expected": true,
+      "actual": true,
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "webhook 属性上报",
+      "expected": "200/code=0",
+      "actual": "200/code=0",
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "webhook 事件 gas",
+      "expected": "200/code=0",
+      "actual": "code=0 handled=1",
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "webhook 事件 fall",
+      "expected": "200/code=0",
+      "actual": "code=0 handled=0",
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "webhook 事件 gas",
+      "expected": "200/code=0",
+      "actual": "code=0 handled=1",
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "§4.6 原文报文直投服务器（已登记缺陷 F-01，本次按 --accept-known 降级）",
+      "expected": "修复前恒为 handled=0",
+      "actual": "code=[0] handled=[0] ← messages/up 裸 service 对象不被 server 解析（节点明细不落库）",
+      "ok": true,
+      "note": true
+    },
+    {
+      "seg": "段3",
+      "what": "补 services 外层后（§5.2 信封）落库",
+      "expected": "code=0 且 handled>0",
+      "actual": "code=[0] handled=[8]",
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "GET /api/alerts 含气体告警",
+      "expected": "含 gas",
+      "actual": [
+        "fall",
+        "gas",
+        "no_motion"
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "GET /api/alerts 含跌倒告警",
+      "expected": "含 fall",
+      "actual": [
+        "fall",
+        "gas",
+        "no_motion"
+      ],
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "webhook handled 计数 > 0",
+      "expected": true,
+      "actual": true,
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "事件 handled=0 可解释（§8.8 去重窗口命中或同类型未恢复）",
+      "expected": "handled=0 的事件都能在告警表指出来源",
+      "actual": "fall(ts=1760000040000) ← alert#1 ts=1792202845827 status=resolved",
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "GET readings(node_sn=M1,type=gas) 有新数据",
+      "expected": "count>0",
+      "actual": 19,
+      "ok": true
+    },
+    {
+      "seg": "段3",
+      "what": "读数内容与样本一致（样本 smoke 值出现在落库读数里）",
+      "expected": "样本 [300, 340, 380, 420] 至少 1 个命中",
+      "actual": "命中 [300, 340, 380, 420, 460, 1180, 500] / 最近读数 [500, 1180, 460, 420, 380, 340, 300, 258]",
+      "ok": true
+    },
+    {
+      "seg": "段3-N4",
+      "what": "未知 device_id：传输层仍 200（§5.2 宽容），但不建告警",
+      "expected": "200 且 code=0 且告警数不变",
+      "actual": "200/code=0 handled=0",
+      "ok": true
+    },
+    {
+      "seg": "段3-N4",
+      "what": "未知设备不足以伪造出告警行",
+      "expected": 4,
+      "actual": 4,
+      "ok": true
+    },
+    {
+      "seg": "段3-N5",
+      "what": "错误 token 必须被拒",
+      "expected": "401 或 1502",
+      "actual": "401/1502",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/devices 契约字段都出现在响应里（§6.5 / field_table）",
+      "expected": "0 缺失",
+      "actual": "0 缺失",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/devices 响应里契约本节没列的键（可能是上一层的包装键）",
+      "expected": "—",
+      "actual": [
+        "items",
+        "total"
+      ],
+      "ok": true,
+      "note": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/devices/{id}/status 契约字段都出现在响应里（§6.7 / field_table）",
+      "expected": "0 缺失",
+      "actual": "0 缺失",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/devices/{id}/status 响应里契约本节没列的键（可能是上一层的包装键）",
+      "expected": "—",
+      "actual": [
+        "battery",
+        "bound_nodes",
+        "door",
+        "humi",
+        "last_motion_ts",
+        "last_seen",
+        "location",
+        "nodes_online"
+      ],
+      "ok": true,
+      "note": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/devices/{id}/readings 契约字段都出现在响应里（§6.8 / fixed）",
+      "expected": "0 缺失",
+      "actual": "0 缺失",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/devices/{id}/readings 响应里契约本节没列的键（可能是上一层的包装键）",
+      "expected": "—",
+      "actual": [
+        "adc_mv",
+        "humi",
+        "items",
+        "smoke",
+        "temp",
+        "total",
+        "warmup"
+      ],
+      "ok": true,
+      "note": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/alerts §6.13 条件省略的键（§0.4）",
+      "expected": "—",
+      "actual": "['next_push_at']（下面另证只在停推时缺席）",
+      "ok": true,
+      "note": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/alerts 契约字段都出现在响应里（§6.13 / json_block）",
+      "expected": "0 缺失",
+      "actual": "0 缺失",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/alerts 响应里契约本节没列的键（可能是上一层的包装键）",
+      "expected": "—",
+      "actual": [
+        "recovered_at"
+      ],
+      "ok": true,
+      "note": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/reports/activity 契约字段都出现在响应里（§6.16 / json_block）",
+      "expected": "0 缺失",
+      "actual": "0 缺失",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "GET /api/reports/trend 契约字段都出现在响应里（§6.17 / json_block）",
+      "expected": "0 缺失",
+      "actual": "0 缺失",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "§7.7 专项：刚入库（push_count=0）的 pending 告警必须带非空 next_push_at",
+      "expected": "push_count=0 的全部带非空 next_push_at",
+      "actual": "pending=2 其中 push_count=0 有 0 条；违规 无",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "§6.17 compare.title 必现且为固定文案",
+      "expected": "今日活动频次",
+      "actual": "今日活动频次",
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "§6.17 compare.today 必现",
+      "expected": true,
+      "actual": true,
+      "ok": true
+    },
+    {
+      "seg": "段4",
+      "what": "tools/test/review/check_harmony_contract.py（App 侧静态）",
+      "expected": "记录不判红",
+      "actual": "exit=1 DIFF=4",
+      "ok": true,
+      "note": true
+    }
+  ],
+  "fails": [],
+  "log": {
+    "root": "/mnt/c/Users/Administrator/Desktop/HMProgram",
+    "base_ms": 1792296426937,
+    "run_id": "20261018-040706",
+    "samples": {
+      "file": "tools/test/e2e/samples/uplink.jsonl",
+      "from_artifact": 8,
+      "scenario_frames": 16,
+      "origin": "ws63-firmware/out/node-uplink-sample.txt"
+    },
+    "stage1_cmd": "docker run --rm -v <ROOT>:/w ws63wsl:latest bash -lc '<gcc hub_e2e.c hub_json.c hub_frame.c>'",
+    "stage1_out": "{\"i\":1,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000000000,\"json_seq\":10,\"seq\":1,\"parse_ok\":1,\"frame_len\":152,\"roundtrip\":1,\"frame_hex\":\"AA55010101008E007B22736E223A224D31222C227473223A313736303030303030303030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3330302C2274656D70223A32352E302C2268756D69223A34352E302C226164635F6D76223A5B3135305D2C227761726D7570223A747275657D2C22736571223A31302C226677223A22302E312E30227D8EC4\"}\n{\"i\":2,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000002000,\"json_seq\":11,\"seq\":2,\"parse_ok\":1,\"frame_len\":152,\"roundtrip\":1,\"frame_hex\":\"AA55010102008E007B22736E223A224D31222C227473223A313736303030303030323030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3334302C2274656D70223A32352E312C2268756D69223A34362E302C226164635F6D76223A5B3137305D2C227761726D7570223A747275657D2C22736571223A31312C226677223A22302E312E30227D5119\"}\n{\"i\":3,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000004000,\"json_seq\":12,\"seq\":3,\"parse_ok\":1,\"frame_len\":152,\"roundtrip\":1,\"frame_hex\":\"AA55010103008E007B22736E223A224D31222C227473223A313736303030303030343030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3338302C2274656D70223A32352E322C2268756D69223A34372E302C226164635F6D76223A5B3139305D2C227761726D7570223A747275657D2C22736571223A31322C226677223A22302E312E30227D0C23\"}\n{\"i\":4,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000006000,\"json_seq\":13,\"seq\":4,\"parse_ok\":1,\"frame_len\":153,\"roundtrip\":1,\"frame_hex\":\"AA55010104008F007B22736E223A224D31222C227473223A313736303030303030363030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3432302C2274656D70223A32352E332C2268756D69223A34382E302C226164635F6D76223A5B3231305D2C227761726D7570223A66616C73657D2C22736571223A31332C226677223A22302E312E30227D7317\"}\n{\"i\":5,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000008000,\"json_seq\":14,\"seq\":5,\"parse_ok\":1,\"frame_len\":153,\"roundtrip\":1,\"frame_hex\":\"AA55010105008F007B22736E223A224D31222C227473223A313736303030303030383030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3436302C2274656D70223A32352E342C2268756D69223A34392E302C226164635F6D76223A5B3233305D2C227761726D7570223A66616C73657D2C22736571223A31342C226677223A22302E312E30227DDB5A\"}\n{\"i\":6,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"status\",\"ts_ms\":1760000008000,\"json_seq\":204,\"seq\":6,\"parse_ok\":1,\"frame_len\":176,\"roundtrip\":1,\"frame_hex\":\"AA5501010600A6007B22736E223A224D31222C227473223A313736303030303030383030302C2274797065223A22737461747573222C227061796C6F6164223A7B22757074696D655F73223A32302C2272737369223A2D35382C22706F7765725F737263223A22757362222C2262617474657279223A3235352C227761726D7570223A66616C73657D2C22736571223A3230342C227265715F6964223A3230342C226677223A22302E312E30227D0C5C\"}\n{\"i\":7,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000008000,\"json_seq\":205,\"seq\":7,\"parse_ok\":1,\"frame_len\":168,\"roundtrip\":1,\"frame_hex\":\"AA55010107009E007B22736E223A224D31222C227473223A313736303030303030383030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A313138302C2274656D70223A32362E382C2268756D69223A35322E312C226164635F6D76223A5B3539305D2C227761726D7570223A66616C73657D2C22736571223A3230352C227265715F6964223A3230342C226677223A22302E312E30227D06DE\"}\n{\"i\":8,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000010000,\"json_seq\":15,\"seq\":8,\"parse_ok\":1,\"frame_len\":153,\"roundtrip\":1,\"frame_hex\":\"AA55010108008F007B22736E223A224D31222C227473223A313736303030303031303030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3530302C2274656D70223A32352E352C2268756D69223A35302E302C226164635F6D76223A5B3235305D2C227761726D7570223A66616C73657D2C22736571223A31352C226677223A22302E312E30227DC405\"}\n{\"i\":9,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000020000,\"json_seq\":300,\"seq\":9,\"parse_ok\":1,\"frame_len\":141,\"roundtrip\":1,\"frame_hex\":\"AA550101090083007B22736E223A224D31222C227473223A313736303030303032303030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A323630302C2274656D70223A33302E302C2268756D69223A35302E302C226164635F6D76223A5B313330305D7D2C22736571223A3330302C226677223A22302E312E30227DF01E\"}\n{\"i\":10,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000025000,\"json_seq\":301,\"seq\":10,\"parse_ok\":1,\"frame_len\":141,\"roundtrip\":1,\"frame_hex\":\"AA5501010A0083007B22736E223A224D31222C227473223A313736303030303032353030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A323630302C2274656D70223A33302E302C2268756D69223A35302E302C226164635F6D76223A5B313330305D7D2C22736571223A3330312C226677223A22302E312E30227DAC0E\"}\n{\"i\":11,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000030000,\"json_seq\":302,\"seq\":11,\"parse_ok\":1,\"frame_len\":141,\"roundtrip\":1,\"frame_hex\":\"AA5501010B0083007B22736E223A224D31222C227473223A313736303030303033303030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A323630302C2274656D70223A33302E302C2268756D69223A35302E302C226164635F6D76223A5B313330305D7D2C22736571223A3330322C226677223A22302E312E30227DD846\"}\n{\"i\":12,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000035000,\"json_seq\":303,\"seq\":12,\"parse_ok\":1,\"frame_len\":141,\"roundtrip\":1,\"frame_hex\":\"AA5501010C0083007B22736E223A224D31222C227473223A313736303030303033353030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A323630302C2274656D70223A33302E302C2268756D69223A35302E302C226164635F6D76223A5B313330305D7D2C22736571223A3330332C226677223A22302E312E30227DB366\"}\n{\"i\":13,\"kind\":\"node\",\"sn\":\"M2\",\"type\":\"fall\",\"ts_ms\":1760000040000,\"json_seq\":400,\"seq\":13,\"parse_ok\":1,\"frame_len\":111,\"roundtrip\":1,\"frame_hex\":\"AA5501010D0065007B22736E223A224D32222C227473223A313736303030303034303030302C2274797065223A2266616C6C222C227061796C6F6164223A7B2266616C6C223A312C22737263223A2275617274227D2C22736571223A3430302C226677223A22302E312E30227DB0CB\"}\n{\"i\":14,\"kind\":\"node\",\"sn\":\"M2\",\"type\":\"fall\",\"ts_ms\":1760000045000,\"json_seq\":401,\"seq\":14,\"parse_ok\":1,\"frame_len\":111,\"roundtrip\":1,\"frame_hex\":\"AA5501010E0065007B22736E223A224D32222C227473223A313736303030303034353030302C2274797065223A2266616C6C222C227061796C6F6164223A7B2266616C6C223A312C22737263223A2275617274227D2C22736571223A3430312C226677223A22302E312E30227DBA4B\"}\n{\"i\":15,\"kind\":\"node\",\"sn\":\"M2\",\"type\":\"fall\",\"ts_ms\":1760000050000,\"json_seq\":402,\"seq\":15,\"parse_ok\":1,\"frame_len\":111,\"roundtrip\":1,\"frame_hex\":\"AA5501010F0065007B22736E223A224D32222C227473223A313736303030303035303030302C2274797065223A2266616C6C222C227061796C6F6164223A7B2266616C6C223A312C22737263223A2275617274227D2C22736571223A3430322C226677223A22302E312E30227D0AB0\"}\n{\"i\":16,\"kind\":\"node\",\"sn\":\"M4\",\"type\":\"door\",\"ts_ms\":1760000055000,\"json_seq\":500,\"seq\":16,\"parse_ok\":1,\"frame_len\":116,\"roundtrip\":1,\"frame_hex\":\"AA55010110006A007B22736E223A224D34222C227473223A313736303030303035353030302C2274797065223A22646F6F72222C227061796C6F6164223A7B22646F6F72223A747275652C2277696E646F77223A66616C73657D2C22736571223A3530302C226677223A22302E312E30227D0007\"}\n{\"i\":17,\"kind\":\"node\",\"sn\":\"M4\",\"type\":\"door\",\"ts_ms\":1760000060000,\"json_seq\":501,\"seq\":17,\"parse_ok\":1,\"frame_len\":116,\"roundtrip\":1,\"frame_hex\":\"AA55010111006A007B22736E223A224D34222C227473223A313736303030303036303030302C2274797065223A22646F6F72222C227061796C6F6164223A7B22646F6F72223A747275652C2277696E646F77223A66616C73657D2C22736571223A3530312C226677223A22302E312E30227DA46C\"}\n{\"i\":18,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000065000,\"json_seq\":600,\"seq\":18,\"parse_ok\":1,\"frame_len\":139,\"roundtrip\":1,\"frame_hex\":\"AA550101120081007B22736E223A224D31222C227473223A313736303030303036353030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3330302C2274656D70223A32362E302C2268756D69223A34362E302C226164635F6D76223A5B3135305D7D2C22736571223A3630302C226677223A22302E312E30227D112F\"}\n{\"i\":19,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000070000,\"json_seq\":601,\"seq\":19,\"parse_ok\":1,\"frame_len\":139,\"roundtrip\":1,\"frame_hex\":\"AA550101130081007B22736E223A224D31222C227473223A313736303030303037303030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3330302C2274656D70223A32362E302C2268756D69223A34362E302C226164635F6D76223A5B3135305D7D2C22736571223A3630312C226677223A22302E312E30227D650C\"}\n{\"i\":20,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000075000,\"json_seq\":602,\"seq\":20,\"parse_ok\":1,\"frame_len\":139,\"roundtrip\":1,\"frame_hex\":\"AA550101140081007B22736E223A224D31222C227473223A313736303030303037353030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3330302C2274656D70223A32362E302C2268756D69223A34362E302C226164635F6D76223A5B3135305D7D2C22736571223A3630322C226677223A22302E312E30227D40F3\"}\n{\"i\":21,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000080000,\"json_seq\":603,\"seq\":21,\"parse_ok\":1,\"frame_len\":139,\"roundtrip\":1,\"frame_hex\":\"AA550101150081007B22736E223A224D31222C227473223A313736303030303038303030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3330302C2274656D70223A32362E302C2268756D69223A34362E302C226164635F6D76223A5B3135305D7D2C22736571223A3630332C226677223A22302E312E30227D5AB0\"}\n{\"i\":22,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000085000,\"json_seq\":604,\"seq\":22,\"parse_ok\":1,\"frame_len\":139,\"roundtrip\":1,\"frame_hex\":\"AA550101160081007B22736E223A224D31222C227473223A313736303030303038353030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3330302C2274656D70223A32362E302C2268756D69223A34362E302C226164635F6D76223A5B3135305D7D2C22736571223A3630342C226677223A22302E312E30227D318C\"}\n{\"i\":23,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000090000,\"json_seq\":605,\"seq\":23,\"parse_ok\":1,\"frame_len\":139,\"roundtrip\":1,\"frame_hex\":\"AA550101170081007B22736E223A224D31222C227473223A313736303030303039303030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3330302C2274656D70223A32362E302C2268756D69223A34362E302C226164635F6D76223A5B3135305D7D2C22736571223A3630352C226677223A22302E312E30227D45AF\"}\n{\"i\":24,\"kind\":\"node\",\"sn\":\"M1\",\"type\":\"gas\",\"ts_ms\":1760000095000,\"json_seq\":606,\"seq\":24,\"parse_ok\":1,\"frame_len\":139,\"roundtrip\":1,\"frame_hex\":\"AA550101180081007B22736E223A224D31222C227473223A313736303030303039353030302C2274797065223A22676173222C227061796C6F6164223A7B22736D6F6B65223A3330302C2274656D70223A32362E302C2268756D69223A34362E302C226164635F6D76223A5B3135305D7D2C22736571223A3630362C226677223A22302E312E30227DF790\"}\n{\"kind\":\"hub_status\",\"sn\":\"H1\",\"type\":\"status\",\"seq\":25,\"frame_len\":245,\"frame_hex\":\"AA5501021900EB007B22736E223A224831222C227473223A313736303030303031303030302C22757074696D655F73223A333630302C226E6F646573223A5B7B22736E223A224D31222C226F6E6C696E65223A747275652C226C6173745F7365656E223A313736303030303031303030302C2272737369223A2D35387D2C7B22736E223A224D32222C226F6E6C696E65223A747275652C226C6173745F7365656E223A313736303030303031303030302C2272737369223A2D36317D2C7B22736E223A224D34222C226F6E6C696E65223A66616C73652C226C6173745F7365656E223A313735393939393938303030307D5D7DB9D9\"}\n{\"kind\":\"hub_event\",\"sn\":\"M2\",\"type\":\"fall\",\"seq\":26,\"frame_len\":63,\"frame_hex\":\"AA5501031A0035007B22736E223A224D32222C227473223A313736303030303031303030302C2274797065223A2266616C6C222C2266616C6C223A317DDF33\"}\n{\"kind\":\"node_list\",\"sn\":\"H1\",\"type\":\"node_list\",\"seq\":27,\"frame_len\":424,\"frame_hex\":\"AA5501241B009E017B22736E223A224831222C227473223A313736303030303031303030302C226E6F646573223A5B7B22736E223A224D31222C226D6163223A2231313A32323A33333A34343A35353A3031222C2272737369223A2D35382C226F6E6C696E65223A747275652C22636F6E6E223A747275652C226C6173745F7365656E223A313736303030303031303030302C227274745F6D73223A3132307D2C7B22736E223A224D32222C226D6163223A2231313A32323A33333A34343A35353A3032222C2272737369223A2D36312C226F6E6C696E65223A747275652C22636F6E6E223A747275652C226C6173745F7365656E223A313736303030303031303030302C227274745F6D73223A3133307D2C7B22736E223A224D34222C226D6163223A2231313A32323A33333A34343A35353A3034222C226F6E6C696E65223A66616C73652C22636F6E6E223A66616C73652C226C6173745F7365656E223A313735393939393938303030302C227274745F6D73223A307D5D2C22626F756E645F736E223A5B224D31222C224D32222C224D34225D2C22736C6F74735F66726565223A357D9DB2\"}\n",
+    "stage2_cmd_clean": "docker exec hmprogram-rk2206-build bash -lc '<gcc gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c … gw_e2e.c …> && gw_e2e frames.hex 1792296426937'",
+    "stage2_out_clean": "BUILD_RC=0\nIn file included from /usr/include/string.h:495,\n                 from /tmp/gw-e2e/src/gw_iotda.c:17:\nIn function ‘strncat’,\n    inlined from ‘gw_iotda_auth_build’ at /tmp/gw-e2e/src/gw_iotda.c:174:5:\n/usr/include/x86_64-linux-gnu/bits/string_fortified.h:136:10: warning: ‘__builtin___strncat_chk’ accessing 1 byte at offsets 0 and 225 may overlap 1 byte at offset 225 [-Wrestrict]\n  136 |   return __builtin___strncat_chk (__dest, __src, __len, __bos (__dest));\n      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"alert\\\",\\\"event_time\\\":\\\"20251009T085350Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"gas\\\",\\\"level\\\":2,\\\"node_sn\\\":\\\"M1\\\",\\\"ts\\\":1760000030000,\\\"event_id\\\":\\\"M0-3F1A2B-gas-1760000030000\\\"}}]}\",\"event_type\":\"gas\",\"level\":2,\"recover\":0,\"node_sn\":\"M1\",\"event_id\":\"M0-3F1A2B-gas-1760000030000\"}\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"alert\\\",\\\"event_time\\\":\\\"20251009T085400Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"fall\\\",\\\"level\\\":2,\\\"node_sn\\\":\\\"M2\\\",\\\"ts\\\":1760000040000,\\\"event_id\\\":\\\"M0-3F1A2B-fall-1760000040000\\\"}}]}\",\"event_type\":\"fall\",\"level\":2,\"recover\":0,\"node_sn\":\"M2\",\"event_id\":\"M0-3F1A2B-fall-1760000040000\"}\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"recover\\\",\\\"event_time\\\":\\\"20251009T085455Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"gas\\\",\\\"node_sn\\\":\\\"M1\\\",\\\"ts\\\":1760000095000,\\\"event_id\\\":\\\"M0-3F1A2B-gas-1760000095000\\\"}}]}\",\"event_type\":\"gas\",\"level\":0,\"recover\":1,\"node_sn\":\"M1\",\"event_id\":\"M0-3F1A2B-gas-1760000095000\"}\n{\"kind\":\"props\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_time\\\":\\\"20261018T040706Z\\\",\\\"properties\\\":{\\\"presence\\\":true,\\\"last_motion_ts\\\":1792296426937,\\\"door\\\":true,\\\"window\\\":false,\\\"temp\\\":26.0,\\\"humi\\\":46.0,\\\"smoke\\\":300,\\\"nodes_online\\\":\\\"{\\\\\\\"M1\\\\\\\":true,\\\\\\\"M2\\\\\\\":true,\\\\\\\"M4\\\\\\\":false}\\\",\\\"battery\\\":255,\\\"alarm_state\\\":2,\\\"bound_nodes\\\":\\\"[\\\\\\\"M1\\\\\\\",\\\\\\\"M2\\\\\\\",\\\\\\\"M4\\\\\\\"]\\\",\\\"pair_state\\\":\\\"idle\\\"}}]}\",\"alarm_state\":2,\"smoke_mv\":300,\"gas_level\":0,\"fall_alarm\":1}\n{\"kind\":\"samples\",\"service_json\":\"{\\\"name\\\":\\\"node_samples\\\",\\\"id\\\":\\\"M0-3F1A2B-samples-1792296426937\\\",\\\"content\\\":\\\"[{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000000000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":300,\\\\\\\"temp\\\\\\\":25.0,\\\\\\\"humi\\\\\\\":45.0,\\\\\\\"adc_mv\\\\\\\":[150],\\\\\\\"warmup\\\\\\\":true},\\\\\\\"seq\\\\\\\":10,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000002000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":340,\\\\\\\"temp\\\\\\\":25.1,\\\\\\\"humi\\\\\\\":46.0,\\\\\\\"adc_mv\\\\\\\":[170],\\\\\\\"warmup\\\\\\\":true},\\\\\\\"seq\\\\\\\":11,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000004000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":380,\\\\\\\"temp\\\\\\\":25.2,\\\\\\\"humi\\\\\\\":47.0,\\\\\\\"adc_mv\\\\\\\":[190],\\\\\\\"warmup\\\\\\\":true},\\\\\\\"seq\\\\\\\":12,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000006000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":420,\\\\\\\"temp\\\\\\\":25.3,\\\\\\\"humi\\\\\\\":48.0,\\\\\\\"adc_mv\\\\\\\":[210],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":13,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":460,\\\\\\\"temp\\\\\\\":25.4,\\\\\\\"humi\\\\\\\":49.0,\\\\\\\"adc_mv\\\\\\\":[230],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":14,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"status\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"uptime_s\\\\\\\":20,\\\\\\\"rssi\\\\\\\":-58,\\\\\\\"power_src\\\\\\\":\\\\\\\"usb\\\\\\\",\\\\\\\"battery\\\\\\\":255,\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":204,\\\\\\\"req_id\\\\\\\":204,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":1180,\\\\\\\"temp\\\\\\\":26.8,\\\\\\\"humi\\\\\\\":52.1,\\\\\\\"adc_mv\\\\\\\":[590],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":205,\\\\\\\"req_id\\\\\\\":204,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000010000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":500,\\\\\\\"temp\\\\\\\":25.5,\\\\\\\"humi\\\\\\\":50.0,\\\\\\\"adc_mv\\\\\\\":[250],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":15,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"}]\\\"}\"}\n{\"kind\":\"summary\",\"frames_in\":27,\"frames_ok\":27,\"parse_errors\":0,\"samples\":8}\nRUN_RC=0\n",
+    "stage2_kinds_clean": {
+      "event": 3,
+      "props": 1,
+      "samples": 1,
+      "summary": 1
+    },
+    "stage2_cmd_neg1": "docker exec hmprogram-rk2206-build bash -lc '<gcc gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c … gw_e2e.c …> && gw_e2e frames.hex 1792296426937'",
+    "stage2_out_neg1": "BUILD_RC=0\nIn file included from /usr/include/string.h:495,\n                 from /tmp/gw-e2e/src/gw_iotda.c:17:\nIn function ‘strncat’,\n    inlined from ‘gw_iotda_auth_build’ at /tmp/gw-e2e/src/gw_iotda.c:174:5:\n/usr/include/x86_64-linux-gnu/bits/string_fortified.h:136:10: warning: ‘__builtin___strncat_chk’ accessing 1 byte at offsets 0 and 225 may overlap 1 byte at offset 225 [-Wrestrict]\n  136 |   return __builtin___strncat_chk (__dest, __src, __len, __bos (__dest));\n      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n{\"kind\":\"parse_error\",\"seq\":1,\"reason\":4,\"suppressed\":0}\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"alert\\\",\\\"event_time\\\":\\\"20251009T085350Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"gas\\\",\\\"level\\\":2,\\\"node_sn\\\":\\\"M1\\\",\\\"ts\\\":1760000030000,\\\"event_id\\\":\\\"M0-3F1A2B-gas-1760000030000\\\"}}]}\",\"event_type\":\"gas\",\"level\":2,\"recover\":0,\"node_sn\":\"M1\",\"event_id\":\"M0-3F1A2B-gas-1760000030000\"}\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"alert\\\",\\\"event_time\\\":\\\"20251009T085400Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"fall\\\",\\\"level\\\":2,\\\"node_sn\\\":\\\"M2\\\",\\\"ts\\\":1760000040000,\\\"event_id\\\":\\\"M0-3F1A2B-fall-1760000040000\\\"}}]}\",\"event_type\":\"fall\",\"level\":2,\"recover\":0,\"node_sn\":\"M2\",\"event_id\":\"M0-3F1A2B-fall-1760000040000\"}\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"recover\\\",\\\"event_time\\\":\\\"20251009T085455Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"gas\\\",\\\"node_sn\\\":\\\"M1\\\",\\\"ts\\\":1760000095000,\\\"event_id\\\":\\\"M0-3F1A2B-gas-1760000095000\\\"}}]}\",\"event_type\":\"gas\",\"level\":0,\"recover\":1,\"node_sn\":\"M1\",\"event_id\":\"M0-3F1A2B-gas-1760000095000\"}\n{\"kind\":\"props\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_time\\\":\\\"20261018T040706Z\\\",\\\"properties\\\":{\\\"presence\\\":true,\\\"last_motion_ts\\\":1792296426937,\\\"door\\\":true,\\\"window\\\":false,\\\"temp\\\":26.0,\\\"humi\\\":46.0,\\\"smoke\\\":300,\\\"nodes_online\\\":\\\"{\\\\\\\"M1\\\\\\\":true,\\\\\\\"M2\\\\\\\":true,\\\\\\\"M4\\\\\\\":false}\\\",\\\"battery\\\":255,\\\"alarm_state\\\":2,\\\"bound_nodes\\\":\\\"[\\\\\\\"M1\\\\\\\",\\\\\\\"M2\\\\\\\",\\\\\\\"M4\\\\\\\"]\\\",\\\"pair_state\\\":\\\"idle\\\"}}]}\",\"alarm_state\":2,\"smoke_mv\":300,\"gas_level\":0,\"fall_alarm\":1}\n{\"kind\":\"samples\",\"service_json\":\"{\\\"name\\\":\\\"node_samples\\\",\\\"id\\\":\\\"M0-3F1A2B-samples-1792296426937\\\",\\\"content\\\":\\\"[{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000002000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":340,\\\\\\\"temp\\\\\\\":25.1,\\\\\\\"humi\\\\\\\":46.0,\\\\\\\"adc_mv\\\\\\\":[170],\\\\\\\"warmup\\\\\\\":true},\\\\\\\"seq\\\\\\\":11,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000004000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":380,\\\\\\\"temp\\\\\\\":25.2,\\\\\\\"humi\\\\\\\":47.0,\\\\\\\"adc_mv\\\\\\\":[190],\\\\\\\"warmup\\\\\\\":true},\\\\\\\"seq\\\\\\\":12,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000006000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":420,\\\\\\\"temp\\\\\\\":25.3,\\\\\\\"humi\\\\\\\":48.0,\\\\\\\"adc_mv\\\\\\\":[210],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":13,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":460,\\\\\\\"temp\\\\\\\":25.4,\\\\\\\"humi\\\\\\\":49.0,\\\\\\\"adc_mv\\\\\\\":[230],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":14,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"status\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"uptime_s\\\\\\\":20,\\\\\\\"rssi\\\\\\\":-58,\\\\\\\"power_src\\\\\\\":\\\\\\\"usb\\\\\\\",\\\\\\\"battery\\\\\\\":255,\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":204,\\\\\\\"req_id\\\\\\\":204,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":1180,\\\\\\\"temp\\\\\\\":26.8,\\\\\\\"humi\\\\\\\":52.1,\\\\\\\"adc_mv\\\\\\\":[590],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":205,\\\\\\\"req_id\\\\\\\":204,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000010000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":500,\\\\\\\"temp\\\\\\\":25.5,\\\\\\\"humi\\\\\\\":50.0,\\\\\\\"adc_mv\\\\\\\":[250],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":15,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000020000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":2600,\\\\\\\"temp\\\\\\\":30.0,\\\\\\\"humi\\\\\\\":50.0,\\\\\\\"adc_mv\\\\\\\":[1300]},\\\\\\\"seq\\\\\\\":300,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"}]\\\"}\"}\n{\"kind\":\"summary\",\"frames_in\":27,\"frames_ok\":26,\"parse_errors\":1,\"samples\":8}\nRUN_RC=0\n",
+    "stage2_kinds_neg1": {
+      "parse_error": 1,
+      "event": 3,
+      "props": 1,
+      "samples": 1,
+      "summary": 1
+    },
+    "negatives": {
+      "N1 坏 CRC": [
+        4
+      ],
+      "N2 LEN 越界 >1024": [
+        5
+      ],
+      "N3 未知 TYPE 0x99（CRC 正确）": [
+        6
+      ]
+    },
+    "stage2_cmd_neg2": "docker exec hmprogram-rk2206-build bash -lc '<gcc gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c … gw_e2e.c …> && gw_e2e frames.hex 1792296426937'",
+    "stage2_out_neg2": "BUILD_RC=0\nIn file included from /usr/include/string.h:495,\n                 from /tmp/gw-e2e/src/gw_iotda.c:17:\nIn function ‘strncat’,\n    inlined from ‘gw_iotda_auth_build’ at /tmp/gw-e2e/src/gw_iotda.c:174:5:\n/usr/include/x86_64-linux-gnu/bits/string_fortified.h:136:10: warning: ‘__builtin___strncat_chk’ accessing 1 byte at offsets 0 and 225 may overlap 1 byte at offset 225 [-Wrestrict]\n  136 |   return __builtin___strncat_chk (__dest, __src, __len, __bos (__dest));\n      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n{\"kind\":\"parse_error\",\"seq\":1,\"reason\":5,\"suppressed\":0}\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"alert\\\",\\\"event_time\\\":\\\"20251009T085350Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"gas\\\",\\\"level\\\":2,\\\"node_sn\\\":\\\"M1\\\",\\\"ts\\\":1760000030000,\\\"event_id\\\":\\\"M0-3F1A2B-gas-1760000030000\\\"}}]}\",\"event_type\":\"gas\",\"level\":2,\"recover\":0,\"node_sn\":\"M1\",\"event_id\":\"M0-3F1A2B-gas-1760000030000\"}\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"alert\\\",\\\"event_time\\\":\\\"20251009T085400Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"fall\\\",\\\"level\\\":2,\\\"node_sn\\\":\\\"M2\\\",\\\"ts\\\":1760000040000,\\\"event_id\\\":\\\"M0-3F1A2B-fall-1760000040000\\\"}}]}\",\"event_type\":\"fall\",\"level\":2,\"recover\":0,\"node_sn\":\"M2\",\"event_id\":\"M0-3F1A2B-fall-1760000040000\"}\n{\"kind\":\"event\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_type\\\":\\\"recover\\\",\\\"event_time\\\":\\\"20251009T085455Z\\\",\\\"paras\\\":{\\\"type\\\":\\\"gas\\\",\\\"node_sn\\\":\\\"M1\\\",\\\"ts\\\":1760000095000,\\\"event_id\\\":\\\"M0-3F1A2B-gas-1760000095000\\\"}}]}\",\"event_type\":\"gas\",\"level\":0,\"recover\":1,\"node_sn\":\"M1\",\"event_id\":\"M0-3F1A2B-gas-1760000095000\"}\n{\"kind\":\"props\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_time\\\":\\\"20261018T040706Z\\\",\\\"properties\\\":{\\\"presence\\\":true,\\\"last_motion_ts\\\":1792296426937,\\\"door\\\":true,\\\"window\\\":false,\\\"temp\\\":26.0,\\\"humi\\\":46.0,\\\"smoke\\\":300,\\\"nodes_online\\\":\\\"{\\\\\\\"M1\\\\\\\":true,\\\\\\\"M2\\\\\\\":true,\\\\\\\"M4\\\\\\\":false}\\\",\\\"battery\\\":255,\\\"alarm_state\\\":2,\\\"bound_nodes\\\":\\\"[\\\\\\\"M1\\\\\\\",\\\\\\\"M2\\\\\\\",\\\\\\\"M4\\\\\\\"]\\\",\\\"pair_state\\\":\\\"idle\\\"}}]}\",\"alarm_state\":2,\"smoke_mv\":300,\"gas_level\":0,\"fall_alarm\":1}\n{\"kind\":\"samples\",\"service_json\":\"{\\\"name\\\":\\\"node_samples\\\",\\\"id\\\":\\\"M0-3F1A2B-samples-1792296426937\\\",\\\"content\\\":\\\"[{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000002000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":340,\\\\\\\"temp\\\\\\\":25.1,\\\\\\\"humi\\\\\\\":46.0,\\\\\\\"adc_mv\\\\\\\":[170],\\\\\\\"warmup\\\\\\\":true},\\\\\\\"seq\\\\\\\":11,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000004000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":380,\\\\\\\"temp\\\\\\\":25.2,\\\\\\\"humi\\\\\\\":47.0,\\\\\\\"adc_mv\\\\\\\":[190],\\\\\\\"warmup\\\\\\\":true},\\\\\\\"seq\\\\\\\":12,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000006000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":420,\\\\\\\"temp\\\\\\\":25.3,\\\\\\\"humi\\\\\\\":48.0,\\\\\\\"adc_mv\\\\\\\":[210],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":13,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":460,\\\\\\\"temp\\\\\\\":25.4,\\\\\\\"humi\\\\\\\":49.0,\\\\\\\"adc_mv\\\\\\\":[230],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":14,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"status\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"uptime_s\\\\\\\":20,\\\\\\\"rssi\\\\\\\":-58,\\\\\\\"power_src\\\\\\\":\\\\\\\"usb\\\\\\\",\\\\\\\"battery\\\\\\\":255,\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":204,\\\\\\\"req_id\\\\\\\":204,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000008000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":1180,\\\\\\\"temp\\\\\\\":26.8,\\\\\\\"humi\\\\\\\":52.1,\\\\\\\"adc_mv\\\\\\\":[590],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":205,\\\\\\\"req_id\\\\\\\":204,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000010000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":500,\\\\\\\"temp\\\\\\\":25.5,\\\\\\\"humi\\\\\\\":50.0,\\\\\\\"adc_mv\\\\\\\":[250],\\\\\\\"warmup\\\\\\\":false},\\\\\\\"seq\\\\\\\":15,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"},{\\\\\\\"sn\\\\\\\":\\\\\\\"M1\\\\\\\",\\\\\\\"ts\\\\\\\":1760000020000,\\\\\\\"type\\\\\\\":\\\\\\\"gas\\\\\\\",\\\\\\\"payload\\\\\\\":{\\\\\\\"smoke\\\\\\\":2600,\\\\\\\"temp\\\\\\\":30.0,\\\\\\\"humi\\\\\\\":50.0,\\\\\\\"adc_mv\\\\\\\":[1300]},\\\\\\\"seq\\\\\\\":300,\\\\\\\"fw\\\\\\\":\\\\\\\"0.1.0\\\\\\\"}]\\\"}\"}\n{\"kind\":\"summary\",\"frames_in\":27,\"frames_ok\":26,\"parse_errors\":1,\"samples\":8}\nRUN_RC=0\n",
+    "stage2_kinds_neg2": {
+      "parse_error": 1,
+      "event": 3,
+      "props": 1,
+      "samples": 1,
+      "summary": 1
+    },
+    "stage2_cmd_neg3": "docker exec hmprogram-rk2206-build bash -lc '<gcc gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c … gw_e2e.c …> && gw_e2e frames.hex 1792296426937'",
+    "stage2_out_neg3": "BUILD_RC=0\nIn file included from /usr/include/string.h:495,\n                 from /tmp/gw-e2e/src/gw_iotda.c:17:\nIn function ‘strncat’,\n    inlined from ‘gw_iotda_auth_build’ at /tmp/gw-e2e/src/gw_iotda.c:174:5:\n/usr/include/x86_64-linux-gnu/bits/string_fortified.h:136:10: warning: ‘__builtin___strncat_chk’ accessing 1 byte at offsets 0 and 225 may overlap 1 byte at offset 225 [-Wrestrict]\n  136 |   return __builtin___strncat_chk (__dest, __src, __len, __bos (__dest));\n      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n{\"kind\":\"nack\",\"seq\":2,\"nack_seq\":2,\"reason\":6,\"type_hex\":153}\n{\"kind\":\"props\",\"service_json\":\"{\\\"services\\\":[{\\\"service_id\\\":\\\"gateway\\\",\\\"event_time\\\":\\\"20261018T040706Z\\\",\\\"properties\\\":{\\\"presence\\\":true,\\\"last_motion_ts\\\":1792296426937,\\\"door\\\":false,\\\"window\\\":false,\\\"nodes_online\\\":\\\"{}\\\",\\\"battery\\\":255,\\\"alarm_state\\\":0,\\\"bound_nodes\\\":\\\"[\\\\\\\"M1\\\\\\\",\\\\\\\"M2\\\\\\\",\\\\\\\"M4\\\\\\\"]\\\",\\\"pair_state\\\":\\\"idle\\\"}}]}\",\"alarm_state\":0,\"smoke_mv\":0,\"gas_level\":0,\"fall_alarm\":0}\n{\"kind\":\"summary\",\"frames_in\":1,\"frames_ok\":1,\"parse_errors\":0,\"samples\":0}\nRUN_RC=0\n",
+    "stage2_kinds_neg3": {
+      "nack": 1,
+      "props": 1,
+      "summary": 1
+    },
+    "seed_out": "INFO app.db | schema.sql 已执行：11 条语句（幂等）\nWARNING app.seed | 已清空业务表：alert_dispositions, alerts, sensor_readings, activity_hourly, activity_daily, device_online, nodes, user_devices, push_tokens, devices, users\nINFO app.seed | 已创建演示账号 demo（id=1）\nINFO app.seed | 已创建设备 M0-3F1A2B（id=1）\nINFO app.seed | 已创建设备 M0-9C2D4E（id=2）\n[bind-code] sn=M0-9C2D4E code=100485 有效期=10 分钟\nseed 完成：user_id=1, device_id=1, unbound_device_id=2, readings={'gateway': 243, 'presence': 88, 'gas': 31, 'fall': 2}, activity={'day': '2026-10-16', 'hourly': 17, 'daily': 1}, alerts=3\n",
+    "accepted_known": [
+      "F-01"
+    ],
+    "samples_bare_code": [
+      0
+    ],
+    "samples_bare_handled": [
+      0
+    ],
+    "samples_wrapped_code": [
+      0
+    ],
+    "samples_wrapped_handled": [
+      8
+    ],
+    "alert_types": [
+      "fall",
+      "gas",
+      "no_motion"
+    ],
+    "zero_handled_explain": [
+      "fall(ts=1760000040000) ← alert#1 ts=1792202845827 status=resolved"
+    ],
+    "m1_smoke": [
+      500,
+      1180,
+      460,
+      420,
+      380,
+      340,
+      300,
+      258,
+      215,
+      155,
+      129,
+      134,
+      126,
+      246,
+      254,
+      129,
+      131,
+      218,
+      165
+    ],
+    "sample_smoke": [
+      300,
+      340,
+      380,
+      420,
+      460,
+      1180,
+      500
+    ],
+    "stage4": {
+      "6.5": {
+        "status": 200,
+        "missing": [],
+        "contract_fields": [
+          "alarm_state",
+          "id",
+          "last_heartbeat",
+          "name",
+          "online",
+          "role",
+          "sn",
+          "unread_alerts"
+        ],
+        "extra": [
+          "items",
+          "total"
+        ]
+      },
+      "6.7": {
+        "status": 200,
+        "missing": [],
+        "contract_fields": [
+          "alarm_state",
+          "device_id",
+          "last_heartbeat",
+          "nodes",
+          "online",
+          "pending_alerts",
+          "properties",
+          "server_ts"
+        ],
+        "extra": [
+          "battery",
+          "bound_nodes",
+          "door",
+          "humi",
+          "last_motion_ts",
+          "last_seen",
+          "location",
+          "nodes_online"
+        ]
+      },
+      "6.8": {
+        "status": 200,
+        "missing": [],
+        "contract_fields": [
+          "id",
+          "node_sn",
+          "payload",
+          "ts",
+          "type"
+        ],
+        "extra": [
+          "adc_mv",
+          "humi",
+          "items",
+          "smoke",
+          "temp",
+          "total",
+          "warmup"
+        ]
+      },
+      "6.13": {
+        "status": 200,
+        "missing": [],
+        "contract_fields": [
+          "device_id",
+          "id",
+          "items",
+          "last_push_at",
+          "level",
+          "next_push_at",
+          "node_sn",
+          "push_count",
+          "status",
+          "summary",
+          "total",
+          "ts",
+          "type"
+        ],
+        "extra": [
+          "recovered_at"
+        ]
+      },
+      "6.16": {
+        "status": 200,
+        "missing": [],
+        "contract_fields": [
+          "count",
+          "daily",
+          "date",
+          "device_id",
+          "from",
+          "hour",
+          "hourly",
+          "period",
+          "to",
+          "total"
+        ],
+        "extra": []
+      },
+      "6.17": {
+        "status": 200,
+        "missing": [],
+        "contract_fields": [
+          "compare",
+          "count",
+          "date",
+          "days",
+          "delta_pct",
+          "device_id",
+          "series",
+          "text",
+          "title",
+          "today",
+          "yesterday"
+        ],
+        "extra": []
+      }
+    },
+    "harmony_contract": {
+      "exit": 1,
+      "diffs": 4
+    }
+  }
+}
