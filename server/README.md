@@ -937,6 +937,8 @@ curl -s http://127.0.0.1:3000/api/health        # {"code":0,... "db":"ok"}
 | [`tools/db-backup.sh`](tools/db-backup.sh) / [`tools/db-restore.sh`](tools/db-restore.sh) / [`tools/db-rows.sh`](tools/db-rows.sh) | 备份（mysqldump 在 db 容器内执行）→ 清库恢复 → 逐表行数比对一致；产物落 `server/backups/`（已 gitignore） |
 
 - 与开发 compose **同项目名 `hmprogram`**（同一套容器名与数据卷）：切换时先 `docker compose down` 再起另一份，不要同时跑。
+- 验证「MySQL 没暴露」：`docker compose -f docker-compose.prod.yml port db 3306` → 输出 `:0`（= 没有宿主机映射）；`ss -ltn | grep 3306` 无输出。
+- db 的健康检查是**带鉴权**的（root 与 `DB_USER` 两个账号都要能 `SELECT 1`）：口令不对会直接体现为 `unhealthy`（api 因此不会被启动），不再出现「db healthy 但 api 反复 1045」的假象。
 - 脚本用 `bash tools/db-backup.sh` 调用（仓库里模式位 644，克隆后没有执行权限）；备份产物在 `server/backups/`，默认留 14 份。
 - 硬约束：只动本项目容器；不 `docker system prune`、不改系统自带 nginx、不用 host 网络。
 - 真实公网部署需要用户确认（Q8）后再做；本机只做本地实测。

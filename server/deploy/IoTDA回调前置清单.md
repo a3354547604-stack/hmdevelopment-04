@@ -13,7 +13,7 @@
 | 公网 IP 或域名 | 云服务器有公网 IP（NAT/EIP） | 控制台能看到；外部 `curl` 打得到 |
 | 端口放通 | 云安全组 + 系统防火墙放通 `<PUBLIC_HTTP_PORT>`（默认 80；被占用就 8080） | 在家用手机热点：`curl -s -o /dev/null -w '%{http_code}' http://<公网IP>:<端口>/api/health` → `200` |
 | 入口进程 | nginx 反代（compose 里的 `proxy`）唯一对外；api 只绑 `127.0.0.1` | `docker compose -f docker-compose.prod.yml ps` 中 proxy 有 `0.0.0.0:<端口>->80`，api 是 `127.0.0.1:3000->3000` |
-| MySQL 不外露 | db 不发布端口 | `docker compose -f docker-compose.prod.yml port db` 无输出；`ss -ltn \| grep 3306` 无输出 |
+| MySQL 不外露 | db 不发布端口 | `docker compose -f docker-compose.prod.yml port db 3306` → 输出 `:0`（= 没有宿主机映射）；`ss -ltn \| grep 3306` 无输出 |
 | HTTPS（可选） | 平台允许 HTTP 转发即可；若要求 HTTPS，需要域名 + 证书（见 `deploy/nginx.prod.conf` 末尾注释） | `curl -I https://<域名>/api/health` |
 
 - 回调地址固定为：`http(s)://<公网IP或域名>[:端口]/api/iotda/webhook?token=<WEBHOOK_TOKEN>`
