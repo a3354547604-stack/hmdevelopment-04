@@ -127,7 +127,7 @@
 
 **要点**
 1. 本地规则引擎：离家模式、门久开、无活动（门磁 + 心跳为唯一数据源）、燃气越限
-2. 断网本地报警 + 恢复后补传；主机侧自测 **259 通过 / 0 失败**、配网 API 模拟 **100 用例 0 失败**
+2. 断网本地报警 + 恢复后补传；主机侧自测 **322 通过 / 0 失败**、配网 API 模拟 **100 用例 0 失败**
 3. 配网走网关自带 H5 页面（`http://192.168.4.1/`，手机浏览器打开即用，单文件离线）
 
 **配图**：图 3-2 数据流 + 配网页截图（V01 静帧）
@@ -141,9 +141,9 @@
 **标题**：云端：服务器与数据契约
 
 **要点**
-1. **契约先行**：`docs/技术/接口契约.md` v1.2 是唯一技术事实源（18 个 App REST 端点 + webhook + 取时接口；33 条错误码）
+1. **契约先行**：`docs/技术/接口契约.md` v1.3（r4）是唯一技术事实源（18 个 App REST 端点 + webhook + 取时接口；33 条错误码）
 2. 告警送达：未确认队列 + 分级重推（`retry_count` / `next_retry_at`），webhook 按 `event_id` 幂等
-3. 部署与隔离：Docker Compose（db + api，仅绑 `127.0.0.1`）；测试库强制 `_test` 后缀；真 MySQL 全量 pytest **112 passed / 0 failed**（t49，server 提交 `6befd5e`）
+3. 部署与隔离：Docker Compose（db + api，仅绑 `127.0.0.1`）；测试库强制 `_test` 后缀；真 MySQL 全量 pytest **116 passed / 0 failed**（HEAD `f2c1e6b` 实测；t49 时点 112）
 
 **配图**：图 3-4 状态机 + 契约端点精简表
 
@@ -216,8 +216,8 @@
 **标题**：测试与验证（含诚实边界）
 
 **要点**
-1. 本机已实测：HAP 构建门禁真实有效（注入未定义常量必 `BUILD FAILED`，产物 **971362 B**，提交 `4424608`）；App 无设备自检 **34/34（exit 0）**；HTTP 契约探针 **32/32**；云端真 MySQL pytest **112 passed / 0 failed**（t49，server 提交 `6befd5e`）；契约套件 **95 通过 / 0 失败**
-2. 独立复核：15 份复核报告在 `docs/评审与验证/`，**含一轮未通过（needs_revision）与后续修复**
+1. 本机已实测：HAP 构建门禁真实有效（注入未定义常量必 `BUILD FAILED`，产物 **971362 B**，提交 `4424608`）；App 无设备自检 **34/34（exit 0）**；HTTP 契约探针 **32/32**；云端真 MySQL pytest **116 passed / 0 failed**（HEAD `f2c1e6b` 实测；t49 时点 112）；契约套件 **103 通过 / 0 失败 / 1 跳过**
+2. 独立复核：27 份复核报告在 `docs/评审与验证/`，**含一轮未通过（needs_revision）与后续修复**
 3. 未验证项如实列出：真机界面渲染、真机联网、AGC 推送送达、1 主 3 从并发、燃气数值标定、SoftAP 实际网段——**待实测**；**语音播报与 4G 为扩展设计，本原型未实现**（D9）
 
 **配图**：E01、E02、E03 + 表 5-1 验证矩阵
@@ -299,16 +299,16 @@
 | HAP **971362 B**、提交 `4424608`、证据日志 `e0fa17b`；门禁自证 BUILD FAILED → SUCCESSFUL | `harmony-app/deliverables/01-HAP构建日志.txt` |
 | 无设备自检 **34/34（exit 0）**（含失败路径 exit=1 的负向证明） | `harmony-app/deliverables/02-无设备自检日志.txt` |
 | HTTP 契约探针 **32/32** | `tools/test/review/check_harmony_http.py`；独立证据 `docs/评审与验证/复核-t6-鸿蒙App骨架-2026-10-17.md:33`（32/32 CHECK PASS） |
-| 契约套件 **95 通过 / 0 失败 / 7 跳过**；解析口径 `endpoints=20`、`biz_codes=33`、`db_tables=11`、`device_codes=13` | `tools/test/reports/latest.md`（git `deca36a`） |
-| 云端真 MySQL pytest **112 passed / 0 failed / exit 0**（t49，server 提交 `6befd5e`；t30 时点 105 passed） | `server/tests/test_80_demo_seed.py`；`docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md:39,124` |
+| 契约套件 **103 通过 / 0 失败 / 1 跳过**；解析口径 `endpoints=20`、`biz_codes=33`、`db_tables=11`、`device_codes=13` | `tools/test/reports/latest.md`（git `f2c1e6b`） |
+| 云端真 MySQL pytest **116 passed / 0 failed / exit 0**（HEAD `f2c1e6b` 实测；t49 时点 112、t30 时点 105） | `server/tests/test_80_demo_seed.py`；`docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md:39,124` |
 | 20 条端点在代码中逐条存在；密钥 0 命中；测试库 `_test` 隔离 | `docs/评审与验证/复核-t5-服务器骨架与模拟API-2026-10-17.md` |
 | 节点/汇聚编译 **41 组合 0 失败** | `ws63-firmware/doc/12-汇聚H1-SLE客户端与UART帧.md:67`；`docs/评审与验证/复核-t2-节点固件骨架-2026-10-18.md:35` |
 | 星闪双板长跑 **659.9 s / lost=0 / P50 1007 ms / P95 1036 ms** | `docs/技术笔记/星闪双板测试.md:380-391`（提交 `d2070ef`） |
 | 雷达抓包 **113,927 B**、`0x0E02` **19.85 帧/s** | `docs/技术笔记/雷达LD6002C-接线与实测.md:22,70` |
-| 网关主机自测 **259 通过 / 0 失败** | `rk2206-gateway/配网实现说明.md:104` |
+| 网关主机自测 **322 通过 / 0 失败** | `rk2206-gateway/配网实现说明.md:105` |
 | 网关配网本地 API 模拟 **100 用例 / 0 失败** | `rk2206-gateway/test/run-prov-sim.sh`；`rk2206-gateway/配网实现说明.md:101` |
 | 安卓配网壳（P1）**29 用例 / 0 失败**、APK **7 069 346 B** | `docs/评审与验证/复核-t11-Android配网App-2026-10-18.md:17,18` |
-| 契约 v1.2：§6.12 三事件、§4.3 十四属性、§6.9 21 键、§6.17 趋势字段、33 条错误码 | `docs/技术/接口契约.md` |
+| 契约 v1.3：§6.12 三事件、§4.3 十四属性、§6.9 21 键、§6.17 趋势字段、33 条错误码 | `docs/技术/接口契约.md` |
 | SoftAP 地址 `192.168.4.1` 为占位、实际网段待上板实测（CAL-12） | `rk2206-gateway/doc/契约偏差清单.md` |
 | D8（演示事件三项）/ D9（语音、4G 为扩展设计）/ D11（指纹写体积+提交号） | `docs/执行/待确认问题.md` |
 | 15 份独立复核报告（含一轮 needs_revision；`复核-t*` 13 + 契约复核 + 南向可行性复核） | `docs/评审与验证/*.md` |
