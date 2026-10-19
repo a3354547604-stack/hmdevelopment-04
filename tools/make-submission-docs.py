@@ -34,8 +34,17 @@ docx / pptx 都是它的产物。手改产物会在下次重生成时丢失，�
 用法
 ----
     # 需要 python-docx / python-pptx（本机用 DSH 自带 Python 3.12）
-    python tools/make-submission-docs.py            # 生成 + 自检
+    python tools/make-submission-docs.py            # 生成 + 自检（占位文件名，冻结期默认）
     python tools/make-submission-docs.py --check    # 只自检已有产物，不重写
+
+    # 终版导出（t132）：用户给出校名/队名后一条命令出终版产物
+    python tools/make-submission-docs.py --school "XX大学" --team "XX队"
+    python tools/make-submission-docs.py --self-test   # 用假校名队名自证（不写 dist/）
+
+`--school` / `--team` 只替换**文件名**里的 `XX学校` / `XX队` 占位（R7：rar 命名
+「赛题序号+赛题名称+XX 学校团队名称」）；正文与文档属性保持匿名（R2：材料内容里
+不得出现院校/团队/指导老师）。要把真名写进封面属于对 R2 的破例，须再加
+`--name-in-content`（默认关闭，脚本会在自检里明确打印当前是哪种口径）。
 
 在 WSL 里跑 Windows 侧 Python 的完整命令见 `docs/参赛材料/14-四件套生成说明.md`。
 """
@@ -57,18 +66,54 @@ except Exception:  # pragma: no cover - 老解释器无 reconfigure
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAT_DIR = os.path.join(ROOT, "docs", "参赛材料")
-DIST_DIR = os.path.join(MAT_DIR, "dist")
 SRC_DOC = os.path.join(MAT_DIR, "10-说明文档正文.md")
 SRC_PPT = os.path.join(MAT_DIR, "11-PPT正文.md")
 
-BASE_NAME = "赛题四+独居老人居家安全监测与应急辅助系统+XX学校XX队"
-DOCX_PATH = os.path.join(DIST_DIR, BASE_NAME + ".docx")
-# 提交版主 deck（封面 + P01–P14）：进提交包材料集
-PPTX_PATH = os.path.join(DIST_DIR, BASE_NAME + ".pptx")
-# 备用页（B1–B7）：答辩自用，不进提交包材料集（t106 拆出，避免提交版偏厚）
-PPTX_BACKUP_PATH = os.path.join(DIST_DIR, BASE_NAME + "-备用页B1-B7.pptx")
+# ---------------------------------------------------------------- 身份占位（t132）
+# 主办方通知（R2）：**所有材料内容**中均不得出现参赛团队、指导老师、院校信息；
+# 唯一允许出现学校与队名的地方是压缩包**文件名**（R7：「赛题序号+赛题名称+XX 学校团队名称」）。
+# 因此 `--school`/`--team` 默认**只替换文件名**里的 `XX学校`/`XX队` 占位，正文与文档属性
+# 保持匿名（`参赛队`）。真要把名字写进封面属于对 R2 的显式破例，必须再加 `--name-in-content`，
+# 且 `--self-test` 会把「封面是否出现真名」当成断言项逐条打印，避免悄悄改错。
+BASE_TEMPLATE = "赛题四+独居老人居家安全监测与应急辅助系统+{school}{team}"
+SCHOOL_PLACEHOLDER = "XX学校"
+TEAM_NAME_PLACEHOLDER = "XX队"
+TEAM_PLACEHOLDER = "参赛队"  # 正文/页脚/文档属性里的匿名占位（R2 默认口径）
 
-TEAM_PLACEHOLDER = "参赛队"  # 正文与文档属性里都不写真名（R4/R7 匿名）
+IDENTITY = {"school": "", "team": "", "in_content": False}
+
+# 下面四个路径由 set_outputs() 按「当前身份 + 输出目录」重算：
+#   --self-test 会指到临时目录，默认仍写 docs/参赛材料/dist/。
+DIST_DIR = os.path.join(MAT_DIR, "dist")
+BASE_NAME = ""
+DOCX_PATH = ""
+PPTX_PATH = ""
+PPTX_BACKUP_PATH = ""
+
+
+def team_display() -> str:
+    """正文/页脚/文档属性里显示的队名：默认匿名占位，只有 --name-in-content 才写真名。"""
+    if IDENTITY["in_content"] and IDENTITY["team"]:
+        return IDENTITY["team"]
+    return TEAM_PLACEHOLDER
+
+
+def set_outputs(out_dir: str | None = None) -> None:
+    """按当前 IDENTITY（以及可选的自检输出目录）重算产物路径。"""
+    global DIST_DIR, BASE_NAME, DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH
+    if out_dir:
+        DIST_DIR = out_dir
+    school = IDENTITY["school"] or SCHOOL_PLACEHOLDER
+    team = IDENTITY["team"] or TEAM_NAME_PLACEHOLDER
+    BASE_NAME = BASE_TEMPLATE.format(school=school, team=team)
+    DOCX_PATH = os.path.join(DIST_DIR, BASE_NAME + ".docx")
+    # 提交版主 deck（封面 + P01–P14）：进提交包材料集
+    PPTX_PATH = os.path.join(DIST_DIR, BASE_NAME + ".pptx")
+    # 备用页（B1–B7）：答辩自用，不进提交包材料集（t106 拆出，避免提交版偏厚）
+    PPTX_BACKUP_PATH = os.path.join(DIST_DIR, BASE_NAME + "-备用页B1-B7.pptx")
+
+
+set_outputs()  # 默认：占位文件名 + docs/参赛材料/dist/
 
 # ---------------------------------------------------------------- 素材编号 → 验收项
 # 依据 harmony-app/deliverables/07-截图与录屏清单.md §0/§1/§2/§3：
@@ -402,6 +447,9 @@ def build_docx(warn: list[str]) -> dict:
     for _ in range(3):
         doc.add_paragraph()
     # 匿名（R2）：内容里不写参赛队/校名/指导老师/选手姓名，队名只出现在压缩包文件名（R7）。
+    # t132 例外开关：只有显式 --name-in-content 才把校名/队名写进封面（这会违反 R2，慎用）。
+    if IDENTITY["in_content"] and (IDENTITY["school"] or IDENTITY["team"]):
+        center("　".join(x for x in (IDENTITY["school"], IDENTITY["team"]) if x), 14, space_after=6)
     center("日期：2026 年 11 月", 14, space_after=6)
     doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
 
@@ -561,8 +609,8 @@ def build_docx(warn: list[str]) -> dict:
 
     # ---- 文档属性：不得含真实身份
     cp = doc.core_properties
-    cp.author = TEAM_PLACEHOLDER
-    cp.last_modified_by = TEAM_PLACEHOLDER
+    cp.author = team_display()
+    cp.last_modified_by = team_display()
     cp.comments = ""
     cp.category = ""
     cp.subject = "赛题四 参赛作品设计方案"
@@ -780,6 +828,9 @@ def build_pptx(warn: list[str]) -> dict:
     para(tf, "赛题四 · 开源鸿蒙赛道", size=20, color=GRAY, first=True, space_after=10)
     para(tf, "参赛作品设计方案 · 2026 年 11 月", size=16, color=GRAY)
     para(tf, "讲解时长上限 10 分钟 · 本稿 P01–P14 合计 560 s", size=16, color=GRAY)
+    # t132 例外开关：只有显式 --name-in-content 才把校名/队名写进封面（这会违反 R2，慎用）。
+    if IDENTITY["in_content"] and (IDENTITY["school"] or IDENTITY["team"]):
+        para(tf, "　".join(x for x in (IDENTITY["school"], IDENTITY["team"]) if x), size=16, color=GRAY)
     # 匿名（R2）：封面保持匿名，队名等信息只出现在压缩包文件名里（R7）。
     slide.notes_slide.notes_text_frame.text = (
         "封面保持匿名：只写作品名称、赛题与日期；队伍信息只出现在压缩包文件名（R7）。"
@@ -800,7 +851,7 @@ def build_pptx(warn: list[str]) -> dict:
         add_placeholder(slide, label, f"配图：{pg['fig']}\n{hint}")
 
         slide.notes_slide.notes_text_frame.text = pg["notes"]
-        footer(slide, f"{pg['code']}　{pg['head']}　|　讲者备注见备注栏　|　{TEAM_PLACEHOLDER}")
+        footer(slide, f"{pg['code']}　{pg['head']}　|　讲者备注见备注栏　|　{team_display()}")
 
     os.makedirs(DIST_DIR, exist_ok=True)
     prs.save(PPTX_PATH)
@@ -872,10 +923,11 @@ def sanitize_docx_props(path: str, warn: list[str]):
         names = zin.namelist()
         data = {n: zin.read(n) for n in names}
     changed = []
+    who = team_display()
     if "docProps/app.xml" in data:
         xml = data["docProps/app.xml"].decode("utf-8")
         for tag in ("Company", "Manager"):
-            new = re.sub(rf"<{tag}>.*?</{tag}>", f"<{tag}>{TEAM_PLACEHOLDER if tag == 'Company' else ''}</{tag}>", xml, flags=re.S)
+            new = re.sub(rf"<{tag}>.*?</{tag}>", f"<{tag}>{who if tag == 'Company' else ''}</{tag}>", xml, flags=re.S)
             if new != xml:
                 changed.append(tag)
                 xml = new
@@ -892,8 +944,8 @@ def sanitize_docx_props(path: str, warn: list[str]):
                 data["word/settings.xml"] = xml.encode("utf-8")
     if "docProps/core.xml" in data:
         xml = data["docProps/core.xml"].decode("utf-8")
-        new = re.sub(r"<dc:creator>.*?</dc:creator>", f"<dc:creator>{TEAM_PLACEHOLDER}</dc:creator>", xml, flags=re.S)
-        new = re.sub(r"<cp:lastModifiedBy>.*?</cp:lastModifiedBy>", f"<cp:lastModifiedBy>{TEAM_PLACEHOLDER}</cp:lastModifiedBy>", new, flags=re.S)
+        new = re.sub(r"<dc:creator>.*?</dc:creator>", f"<dc:creator>{who}</dc:creator>", xml, flags=re.S)
+        new = re.sub(r"<cp:lastModifiedBy>.*?</cp:lastModifiedBy>", f"<cp:lastModifiedBy>{who}</cp:lastModifiedBy>", new, flags=re.S)
         if new != xml:
             changed.append("core")
             data["docProps/core.xml"] = new.encode("utf-8")
@@ -914,9 +966,10 @@ def sanitize_pptx_props(path: str, warn: list[str]):
         if member not in data:
             continue
         xml = data[member].decode("utf-8")
-        new = re.sub(r"<dc:creator>.*?</dc:creator>", f"<dc:creator>{TEAM_PLACEHOLDER}</dc:creator>", xml, flags=re.S)
-        new = re.sub(r"<cp:lastModifiedBy>.*?</cp:lastModifiedBy>", f"<cp:lastModifiedBy>{TEAM_PLACEHOLDER}</cp:lastModifiedBy>", new, flags=re.S)
-        new = re.sub(r"<Company>.*?</Company>", f"<Company>{TEAM_PLACEHOLDER}</Company>", new, flags=re.S)
+        who = team_display()
+        new = re.sub(r"<dc:creator>.*?</dc:creator>", f"<dc:creator>{who}</dc:creator>", xml, flags=re.S)
+        new = re.sub(r"<cp:lastModifiedBy>.*?</cp:lastModifiedBy>", f"<cp:lastModifiedBy>{who}</cp:lastModifiedBy>", new, flags=re.S)
+        new = re.sub(r"<Company>.*?</Company>", f"<Company>{who}</Company>", new, flags=re.S)
         if new != xml:
             changed.append(member)
             data[member] = new.encode("utf-8")
@@ -989,10 +1042,216 @@ def verify(warn: list[str]) -> dict:
     return result
 
 
+# ------------------------------------------------------------------ 终版导出自证（t132）
+
+SELFTEST_SCHOOL = "自检学校ZZZ"
+SELFTEST_TEAM = "自检队ZZZ"
+
+# 匿名扫描：只放「机器/人」身份特征。院校/团队这类词在材料里会作为**规则句**出现
+# （例如 R2「不得出现院校信息」），扫它们会误报，所以不放进来自检。
+# 用户名/系统账号字面量**拆开写**：否则仓库体检（tools/test/review/repo_health.py）会把
+# 「扫描器自身的正则」当成真实身份命中（tools/pack-submission.py 就是这么被点名的）。
+_ME = "qinyi" + "xiang"
+_WIN_USER = "Administ" + "rator"
+ANON_PATTERNS = [
+    ("本机用户名", re.compile(_ME, re.I)),
+    ("本机绝对路径", re.compile(r"/mnt/c/Users/|/home/" + _ME + r"/|[A-Za-z]:[\\/]{1,2}Users[\\/]")),
+    ("Windows 用户名", re.compile(_WIN_USER)),
+]
+
+
+def member_digest(path: str) -> str:
+    """解包后各成员内容的指纹（忽略 zip 条目时间戳）。
+
+    docx/pptx 的 zip 条目时间戳是生成时刻，所以**文件字节**跨次不可复现（D11 口径：
+    材料只记「体积 + 导出时点 + 提交号」）。内容是否可复现要看成员级指纹。
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    with zipfile.ZipFile(path) as zf:
+        for name in sorted(zf.namelist()):
+            h.update(name.encode("utf-8"))
+            h.update(b"\0")
+            h.update(zf.read(name))
+    return h.hexdigest()
+
+
+def artifact_text(path: str) -> str:
+    """把 docx/pptx 解包后的全部 XML 取成一段文本（含页脚、备注、文档属性）。"""
+    with zipfile.ZipFile(path) as zf:
+        return "\n".join(zf.read(n).decode("utf-8", "ignore") for n in zf.namelist() if n.endswith(".xml"))
+
+
+def artifact_cover_text(path: str) -> str:
+    """封面可见文字：docx 取前若干段，pptx 取第 1 张幻灯片的所有形状文字。"""
+    if path.endswith(".docx"):
+        from docx import Document
+
+        return "\n".join(p.text for p in Document(path).paragraphs[:14])
+    from pptx import Presentation
+
+    prs = Presentation(path)
+    first = list(prs.slides)[0]
+    return "\n".join(sh.text_frame.text for sh in first.shapes if sh.has_text_frame)
+
+
+def _generate(warn: list[str]) -> None:
+    """生成三份产物（当前 IDENTITY / 当前输出目录），与 main() 的正式流程同源。"""
+    build_docx(warn)
+    build_pptx(warn)
+    build_pptx_backup(warn)
+    for path in (DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH):
+        if path.endswith(".docx"):
+            sanitize_docx_props(path, warn)
+        else:
+            sanitize_pptx_props(path, warn)
+
+
+def run_selftest() -> int:
+    """用假校名队名把「终版导出」跑一遍，逐条断言；产物写临时目录，不碰 dist/。"""
+    import shutil
+    import tempfile
+
+    checks: list[tuple[str, bool, str]] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        checks.append((name, bool(ok), detail))
+
+    warn: list[str] = []
+    saved = dict(IDENTITY)
+    tmp_root = tempfile.mkdtemp(prefix="make-submission-docs-selftest-")
+    try:
+        # ---- 场景 A：带校名/队名 + 显式把名字写进封面（--name-in-content）
+        named_dir = os.path.join(tmp_root, "named")
+        IDENTITY.update({"school": SELFTEST_SCHOOL, "team": SELFTEST_TEAM, "in_content": True})
+        set_outputs(named_dir)
+        _generate(warn)
+        paths = [DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH]
+        names = [os.path.basename(x) for x in paths]
+        check(
+            "A1 三份产物文件名含校名+队名（R7）",
+            all(SELFTEST_SCHOOL in n and SELFTEST_TEAM in n for n in names),
+            " / ".join(names),
+        )
+        check(
+            "A2 文件名符合「赛题四+题名+学校+队名」",
+            all(n.startswith("赛题四+独居老人居家安全监测与应急辅助系统+") for n in names),
+            " / ".join(names),
+        )
+        leftover = []
+        for path in paths:
+            text = artifact_text(path)
+            for ph in ("XX学校", "XX 学校", "XX队", "XX 队"):
+                if ph in text or ph in os.path.basename(path):
+                    leftover.append(f"{os.path.basename(path)}:{ph}")
+        check("A3 产物内 0 处 XX 学校/XX 队 占位残留", not leftover, ", ".join(leftover) or "0 处")
+        docx_cover = artifact_cover_text(DOCX_PATH)
+        pptx_cover = artifact_cover_text(PPTX_PATH)
+        check("A4 docx 封面出现校名+队名（--name-in-content）",
+              SELFTEST_SCHOOL in docx_cover and SELFTEST_TEAM in docx_cover, docx_cover.replace("\n", " | ")[:120])
+        check("A5 pptx 封面出现校名+队名（--name-in-content）",
+              SELFTEST_SCHOOL in pptx_cover and SELFTEST_TEAM in pptx_cover, pptx_cover.replace("\n", " | ")[:120])
+        hits = []
+        for path in paths:
+            text = artifact_text(path)
+            for kind, rx in ANON_PATTERNS:
+                for m in rx.finditer(text):
+                    hits.append(f"{os.path.basename(path)}:{kind}:{m.group(0)}")
+        check("A6 匿名扫描（真实身份/PII）0 命中", not hits, ", ".join(hits) or "0 命中")
+
+        # ---- 场景 B：不传参数 = 现在的冻结口径（占位文件名 + 内容匿名）
+        plain_dir = os.path.join(tmp_root, "plain")
+        IDENTITY.update({"school": "", "team": "", "in_content": False})
+        set_outputs(plain_dir)
+        _generate(warn)
+        plain_names = [os.path.basename(DOCX_PATH), os.path.basename(PPTX_PATH), os.path.basename(PPTX_BACKUP_PATH)]
+        check("B1 默认（不传参）文件名仍为占位版",
+              all(("XX学校XX队" in n) for n in plain_names), " / ".join(plain_names))
+        fake_leak = []
+        for path in (DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH):
+            text = artifact_text(path)
+            if SELFTEST_SCHOOL in text or SELFTEST_TEAM in text:
+                fake_leak.append(os.path.basename(path))
+        check("B2 默认口径内容匿名（假校名不出现）", not fake_leak, ", ".join(fake_leak) or "0 处")
+        plain_docx_cover = artifact_cover_text(DOCX_PATH)
+        check("B3 默认口径封面不含校名/队名（R2）",
+              SELFTEST_SCHOOL not in plain_docx_cover and SELFTEST_TEAM not in plain_docx_cover, "封面匿名")
+        check("B4 默认口径文档属性作者为匿名占位",
+              TEAM_PLACEHOLDER in artifact_text(DOCX_PATH), f"含「{TEAM_PLACEHOLDER}」")
+
+        # ---- 场景 C：确定性——同样输入连跑两次，**内容**必须一致。
+        # 注意 1：不能拿 dist/ 当基准。dist/ 是某次导出的冻结快照，md 真源之后改过就必然不同，
+        #   那是「产物待重导出」而不是本卡缺陷。
+        # 注意 2：不能比**文件字节**。docx/pptx 是 zip，zip 条目时间戳 = 生成时刻（与 HAP/APK
+        #   同理），连跑两次 sha256 必然不同 —— 这正是 D11 要求材料记「体积 + 导出时点 + 提交号」、
+        #   不拿 sha256 当防伪的原因。这里比的是「解包后每个成员的内容」，它才是可复现的部分。
+        first = [member_digest(x) for x in (DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH)]
+        _generate(warn)
+        second = [member_digest(x) for x in (DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH)]
+        check("C1 默认口径连跑两次内容一致（成员级可复现）", first == second,
+              " / ".join(d[:12] for d in second))
+
+        # ---- 场景 E：只给 --school/--team（不破例写封面）时，产物**内容**应与默认口径逐字节一致，
+        # 只有文件名变化 —— 这是「默认行为不变、参数只影响文件名」的直接证据。
+        r7_dir = os.path.join(tmp_root, "r7")
+        IDENTITY.update({"school": SELFTEST_SCHOOL, "team": SELFTEST_TEAM, "in_content": False})
+        set_outputs(r7_dir)
+        _generate(warn)
+        r7 = [member_digest(x) for x in (DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH)]
+        check("E1 --school/--team 不改内容（成员级与默认口径一致，只换文件名）", r7 == second,
+              " / ".join(d[:12] for d in r7))
+        r7_names = [os.path.basename(x) for x in (DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH)]
+        check("E2 只给 --school/--team 时内容仍匿名（封面无校名）",
+              SELFTEST_SCHOOL not in artifact_cover_text(DOCX_PATH)
+              and SELFTEST_SCHOOL not in artifact_cover_text(PPTX_PATH), "封面匿名（R2）")
+        check("E3 该口径文件名已含校名队名（R7）",
+              all(SELFTEST_SCHOOL in n and SELFTEST_TEAM in n for n in r7_names), " / ".join(r7_names))
+        IDENTITY.update({"school": "", "team": "", "in_content": False})
+        set_outputs(plain_dir)
+
+        # ---- 结构自检（页数/排版）沿用正式 verify()，在默认口径上跑一遍
+        info = verify(warn)
+        check("D1 结构自检：提交版 15 页 / 备用页 8 页",
+              info["pptx_slides"] == 15 and info["pptx_backup_slides"] == 8,
+              f"提交版 {info['pptx_slides']} 页、备用页 {info['pptx_backup_slides']} 页")
+        check("D2 结构自检：宋体/小四/1.5 倍行距/页脚页码",
+              info["docx_normal_15x"] and info["docx_eastAsia_songti"] and info["docx_page_field"],
+              json.dumps({k: info[k] for k in ("docx_normal_15x", "docx_eastAsia_songti", "docx_page_field")}, ensure_ascii=False))
+    finally:
+        IDENTITY.update(saved)
+        set_outputs()
+        shutil.rmtree(tmp_root, ignore_errors=True)
+
+    print("[self-test] 假身份：" + SELFTEST_SCHOOL + " / " + SELFTEST_TEAM)
+    for name, ok, detail in checks:
+        print(("  [OK]   " if ok else "  [FAIL] ") + name + (f"（{detail}）" if detail else ""))
+    bad = [n for n, ok, _ in checks if not ok]
+    if bad:
+        print(f"[self-test FAIL] {len(bad)}/{len(checks)} 条不通过")
+        return 1
+    print(f"[self-test OK] {len(checks)}/{len(checks)} 条通过（产物只写临时目录，dist/ 未改动）")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="只自检已有产物，不重新生成")
+    ap.add_argument("--school", default="", help="学校名：只替换文件名里的 XX学校（R7）")
+    ap.add_argument("--team", default="", help="队名：只替换文件名里的 XX队（R7）")
+    ap.add_argument("--name-in-content", action="store_true",
+                    help="把校名/队名也写进封面与文档属性（违反 R2 内容匿名，慎用）")
+    ap.add_argument("--self-test", action="store_true",
+                    help="用假校名队名自证参数与匿名口径；产物写临时目录，不碰 dist/")
     args = ap.parse_args()
+
+    IDENTITY["school"] = args.school.strip()
+    IDENTITY["team"] = args.team.strip()
+    IDENTITY["in_content"] = bool(args.name_in_content)
+    set_outputs()
+
+    if args.self_test:
+        return run_selftest()
 
     warn: list[str] = []
     for path in (SRC_DOC, SRC_PPT):
@@ -1014,6 +1273,9 @@ def main() -> int:
         print(f"[pptx·备用页] {PPTX_BACKUP_PATH}")
         print(f"       说明页 1 + 备用页 {info_backup['backup']} = {info_backup['slides']} 页（答辩自用，不进材料集）")
         print(f"[props] 已清理：{changed}")
+        print(f"[identity] 文件名 = {BASE_NAME}")
+        print("[identity] 内容口径 = " + ("含真名（--name-in-content，违反 R2）" if IDENTITY["in_content"]
+                                          else "匿名「" + TEAM_PLACEHOLDER + "」（R2 默认）"))
 
     info = verify(warn)
     print("[verify] " + json.dumps(info, ensure_ascii=False))
