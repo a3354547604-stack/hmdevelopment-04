@@ -130,7 +130,7 @@
 " q('hub').textContent=d.hub_online?'在线':'离线';\n" \
 " var i=d.iotda||{};\n" \
 " wifiSaved=!!(d.sta_ssid||d.wifi_saved);\n" \
-" q('cloud').textContent=i.configured?'已配置（密钥不回显）':'未配置（用固件里的默认值）';\n" \
+" q('cloud').textContent=i.configured?'已配置（不回显）':'未配置（用固件里的默认值）';\n" \
 " q('csrc').textContent=i.host?('接入地址 '+i.host+':'+i.port+' / 设备 '+i.device_id):'-';\n" \
 " q('bc').textContent=String(d.bound_count)+' / 8';q('sf').textContent=String(d.slots_free);\n" \
 " q('busy').textContent=d.busy==='scan'?'扫描中':(d.busy==='connect'?'连接 Wi-Fi':'空闲');\n" \
