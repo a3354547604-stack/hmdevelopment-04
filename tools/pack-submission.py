@@ -58,6 +58,14 @@ MATERIAL_SRC = [
 # material_dist_files()）：正式包（不加 --include-untracked）也照样收这个目录。
 MATERIAL_DIST = "docs/参赛材料/dist"
 
+# 按文件名排除（只作用于材料成品目录）：答辩自用的「备用页」deck 是现场答问的兜底材料，
+# 不属于赛题通知要求随包提交的三类材料（docx / mp4 / pptx 提交版），**绝不能进正式提交包**。
+# 为什么用「名字含关键字」而不是精确文件名（t108）：备用页 deck 会随答辩版本改名
+# （B1–B7 / v2 / 终版…），精确匹配迟早漏一个；而「打包前忘了人工 mv」是真实发生过的错误窗口
+# （t106 实测 `--list` 里出现 3 个成品，其中 1 个就是备用页）。名字里带「备用页」即排除，
+# 排除理由会打进 `--list` / `--pack` 的输出，不静默。
+MATERIAL_EXCLUDE_NAMES = ["备用页"]
+
 # 源码与文档（§5.1 第 6 项「若随包交付源码」）：显式前缀，不用整目录
 SOURCE_GLOBS = [
     "README.md",
@@ -300,6 +308,19 @@ def _matches(path: str, globs: list[str]) -> bool:
     return any(fnmatch.fnmatch(path, g) for g in globs)
 
 
+def material_name_excluded(path: str) -> str | None:
+    """材料成品目录的「按文件名排除」规则：返回理由；None = 不因文件名被排除。
+
+    只看 basename（目录名不参与），命中 MATERIAL_EXCLUDE_NAMES 里任一关键字即排除。
+    """
+    base = os.path.basename(path)
+    for kw in MATERIAL_EXCLUDE_NAMES:
+        if kw in base:
+            return ("材料成品·按文件名排除（名字含「%s」）：答辩自用/非提交件，"
+                    "不进正式提交包（t108）" % kw)
+    return None
+
+
 def excluded_reason(path: str) -> str | None:
     """返回排除理由；None = 允许入包。"""
     if path in EXEMPT:
@@ -309,8 +330,13 @@ def excluded_reason(path: str) -> str | None:
             return why
     # 材料成品目录例外：`docs/参赛材料/dist/` 是「放 docx/mp4/pptx」的地方，
     # 不能因为目录名里有 dist 就被 E3 的构建产物规则吃掉（后缀规则仍然照拦 .apk/.hap）。
-    if path.startswith(MATERIAL_DIST + "/") and os.path.splitext(path)[1].lower() not in EXCLUDE_EXT:
-        return None
+    # 但「按文件名排除」（备用页 deck，t108）必须在这里先判——否则这条早退会把名字规则绕过。
+    if path.startswith(MATERIAL_DIST + "/"):
+        why = material_name_excluded(path)
+        if why:
+            return why
+        if os.path.splitext(path)[1].lower() not in EXCLUDE_EXT:
+            return None
     for rx, why in EXCLUDE_RE:
         if rx.search(path):
             if path == "server/.env.example":
@@ -431,6 +457,17 @@ def cmd_list(include_untracked: bool) -> int:
         hits = [p for p in kept if _kind_of(p) == kind]
         state = "有 %d 个" % len(hits) if hits else "缺（%s）" % note
         print("   %-22s %s" % (label, state))
+
+    # 材料成品目录逐文件列「收/排除」（t108）：备用页 deck 必须在这里就看得见被排除，
+    # 而不是等打包后才发现包里多了东西。
+    dist_all = material_dist_files()
+    if dist_all:
+        print("\n== 材料成品目录 %s（%d 个）==" % (MATERIAL_DIST, len(dist_all)))
+        for p in dist_all:
+            why = excluded_reason(p)
+            print("   %s %s" % ("✗ 排除" if why else "✓ 收  ", os.path.basename(p)))
+            if why:
+                print("          ← %s" % why)
 
     print("\n== 排除规则（t54 §5.2 E1–E11，本次实际命中 %d 条）==" % len(dropped))
     for why in sorted({w for _, w in dropped}):
@@ -905,6 +942,9 @@ def _build_candidate(root: str, dirty: bool) -> None:
         fh.write("占位符示例：XX 学校XX队（规则引用句：不得出现院校信息）。\n")
     _fake_docx(os.path.join(root, "docs/参赛材料/dist/设计方案.docx"))
     _fake_pptx(os.path.join(root, "docs/参赛材料/dist/答辩PPT.pptx"))
+    # t108 反例夹具：答辩自用的「备用页」deck（名字含「备用页」）与提交版同目录，
+    # 必须被 MATERIAL_EXCLUDE_NAMES 排除、且不得出现在包里。
+    _fake_pptx(os.path.join(root, "docs/参赛材料/dist/答辩PPT-备用页B1-B7.pptx"), slides=8)
     with open(os.path.join(root, "docs/参赛材料/dist/演示视频.mp4"), "wb") as fh:
         fh.write(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 2048)
     if dirty:
@@ -929,27 +969,54 @@ def do_selftest(args) -> int:
         try:
             cand = os.path.join(tmp, "candidate")
             _build_candidate(cand, dirty)
-            kept = [rel for rel, _ in _iter_files(cand)]
+            all_files = list(_iter_files(cand))
+            # 用**真规则**过滤（而不是把候选目录整个塞进包）：这样夹具才能证明
+            # 「按文件名排除」（t108 的备用页 deck）真的作用在打包路径上。
+            kept, name_dropped = [], []
+            for rel, full in all_files:
+                why = excluded_reason(rel)
+                if why:
+                    name_dropped.append((rel, why))
+                else:
+                    kept.append((rel, full))
             archive = os.path.join(tmp, "赛题四+独居老人居家安全监测与应急辅助系统+XX 学校XX队.zip")
             staging = os.path.join(tmp, "stage")
             os.makedirs(staging, exist_ok=True)
-            for rel, full in _iter_files(cand):
+            for rel, full in kept:
                 dst = os.path.join(staging, rel)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(full, dst)
+            # 脏候选还要模拟「禁入文件混进了包」：只放身份/PII 类夹具（.env 与两份证据），
+            # **不放**备用页 deck —— 备用页必须连这种场景都不在包里，否则 t108 的规则形同虚设。
+            if dirty:
+                for rel in (".env", "docs/技术/证据.md", "docs/技术/证据-反斜杠.md"):
+                    src = os.path.join(cand, rel)
+                    if os.path.isfile(src):
+                        dst = os.path.join(staging, rel)
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        shutil.copy2(src, dst)
             with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
                 for rel, full in _iter_files(staging):
                     zf.write(full, rel)
+            with zipfile.ZipFile(archive) as zf:
+                in_archive = zf.namelist()
             dest = os.path.join(tmp, "unpacked")
             os.makedirs(dest, exist_ok=True)
             unpack(archive, dest)
             rep = self_check(dest, os.path.basename(archive), False)
             n_fail = len(rep.fails)
-            print("\n-- %s候选（%d 个文件）：FAIL %d --" % ("脏" if dirty else "干净", len(kept), n_fail))
+            print("\n-- %s候选（%d 个文件，按规则排除 %d 个）：FAIL %d --"
+                  % ("脏" if dirty else "干净", len(kept), len(name_dropped), n_fail))
+            for rel, why in name_dropped:
+                print("   ✗ 已排除 %s ← %s" % (rel, why))
             rep.dump()
             expect = 1 if dirty else 0
             ok = (1 if n_fail else 0) == expect
-            results.append((dirty, ok, n_fail, rep))
+            # t108 反例：夹具里的「备用页」deck 必须被排除、且**不在包内**（静默通过=不通过）
+            spare = [(rel, why) for rel, why in name_dropped if "备用页" in os.path.basename(rel)]
+            spare_in_archive = [n for n in in_archive if "备用页" in os.path.basename(n)]
+            spare_ok = bool(spare) and not spare_in_archive
+            results.append((dirty, ok, n_fail, rep, spare, spare_in_archive, spare_ok))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -963,6 +1030,10 @@ def do_selftest(args) -> int:
     win_rows = [a for lvl, _i, _e, a in results[1][3].rows
                 if lvl == "FAIL" and "证据-反斜杠" in a]
     hit_win = any("身份-绝对路径本机用户" in a and "Administrator" in a for a in win_rows)
+    # t108 反例：两轮夹具里都有「备用页」deck，必须被规则排除且不在包内
+    spare_ok = all(r[6] for r in results)
+    spare_n = sum(len(r[4]) for r in results)
+    spare_leak = [n for r in results for n in r[5]]
     print("\n== 自检自证结果 ==")
     print("   干净包必须 rc=0        ：%s" % ("通过" if clean_ok else "失败"))
     print("   脏包必须 rc≠0          ：%s" % ("通过" if dirty_ok else "失败"))
@@ -970,8 +1041,12 @@ def do_selftest(args) -> int:
     print("   脏包命中本机用户名      ：%s" % ("是" if hit_user else "否"))
     print("   脏包命中 Windows 反斜杠路径（t81 注入反例）：%s（%d 行）"
           % ("是" if hit_win else "否", len(win_rows)))
-    if clean_ok and dirty_ok and hit_env and hit_user and hit_win:
-        print("   结论：打包器自检有效（既能放行干净包，也能抓住 .env、正斜杠家目录与 Windows 反斜杠路径）")
+    print("   备用页 deck 被排除且不在包内（t108 注入反例）：%s（两轮共排除 %d 个%s）"
+          % ("是" if spare_ok else "否", spare_n,
+             ("，泄漏 %r" % spare_leak) if spare_leak else ""))
+    if clean_ok and dirty_ok and hit_env and hit_user and hit_win and spare_ok:
+        print("   结论：打包器自检有效（既能放行干净包，也能抓住 .env、正斜杠家目录、"
+              "Windows 反斜杠路径与「备用页」deck）")
         return 0
     print("   结论：自检本身不可信，先修打包器", file=sys.stderr)
     return 1

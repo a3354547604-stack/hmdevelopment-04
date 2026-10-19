@@ -50,6 +50,9 @@ python3 tools/pack-submission.py --pack \
   E5 探针与抓包 / E6 厂商工具与手册 / E7 第三方 PII（主办方 PDF）/ E8 内部文档（`docs/执行/`、
   内部实施计划、复核报告）/ E9 `.env` 与备份 / E10 缓存（`__pycache__`、`.gradle`、`build/`、
   机器日志 json）/ E11 含身份的证据文档（构建日志等）。
+- **材料成品目录另有一条「按文件名排除」**（t108）：`MATERIAL_EXCLUDE_NAMES = ["备用页"]`。
+  答辩自用的「备用页 B1–B7」deck 与提交版同目录、不属于赛题通知要求的三类材料，
+  名字里带「备用页」即排除，理由会打进 `--list` / `--pack` 输出（不静默）。**不需要人工 `mv`**。
 - 包内附 `MANIFEST.txt`：生成时间、包名、口径、逐条文件清单（+ 脱敏处数）。
 
 ## 解包后自检断言（全部在临时目录里对解包结果做，不看工作树）
@@ -145,6 +148,50 @@ t80 独立解包复扫时发现打包器**只看正斜杠**，漏掉 Windows 反
 | `--check-only --out <空目录>` | **rc=2** + 明确提示（防「空参数假绿」） |
 | `--selftest` | **rc=0**：干净包 rc=0、脏包 rc≠0 且命中 `.env`/本机用户名/Windows 反斜杠路径 3 行 |
 | `--include-untracked`（未入库包，仅论证用） | **FAIL 1 / rc=1**（`ws63-firmware/doc/10-…-16.txt:5` 本机路径）+ 打印「这不是正式提交包」 |
+
+## t108 补丁：备用页 deck 按文件名排除（2026-10-19）
+
+**缺口**：`material_dist_files()` 用 `os.walk` 递归收 `dist/` 下所有非 `EXCLUDE_EXT` 后缀的文件，
+**没有任何按文件名排除的规则** ⇒ 答辩自用的「备用页 B1–B7」deck 会被打进正式提交包
+（t106 交付后实测 `--list` 的材料分组里出现 3 个成品，其中 1 个就是备用页）。原先只能靠
+「打包前人工 `mv` 出去」，谁忘了移包就带错文件。
+
+**修法**：顶部常量 `MATERIAL_EXCLUDE_NAMES = ["备用页"]` + `material_name_excluded(path)`，
+在 `excluded_reason()` 的「材料成品目录例外」分支里**先判名字再判后缀**（顺序很重要：
+原来那条 `return None` 早退会把名字规则整个绕过）。用「名字含关键字」而不是精确文件名，
+因为备用页 deck 会随答辩版本改名（`B1–B7`/`v2`/`终版`…），精确匹配迟早漏一个。
+
+**复核方式（三条，任一即可）**：
+
+```bash
+# ① 清单里看得见「收 / 排除」
+python3 tools/pack-submission.py --list | sed -n '/材料成品目录/,/^$/p'
+#    期望：只 ✗ 排除 备用页；docx 与提交版 pptx 是 ✓ 收
+
+# ② 备用页留在 dist/ 里直接打包，包内也不该有它
+python3 tools/pack-submission.py --pack --allow-missing-materials --out /tmp/t108-pack
+python3 - <<'PY'
+import zipfile, glob, os
+z = zipfile.ZipFile(glob.glob('/tmp/t108-pack/*.zip')[0])
+print([n for n in z.namelist() if "备用页" in n] or "无备用页条目")
+PY
+
+# ③ 解包自检（不给路径就取 --out 里最新的包）
+python3 tools/pack-submission.py --check-only
+```
+
+**`--selftest` 反例夹具**：`_build_candidate()` 在 `dist/` 里放一个
+`答辩PPT-备用页B1-B7.pptx`，自检要求它**被规则排除且不在包内**（静默通过=不通过），
+打印一行「备用页 deck 被排除且不在包内（t108 注入反例）：是」。
+
+### t108 复跑实测（2026-10-19）
+
+| 项 | 结果 |
+|---|---|
+| `--list` 材料分组 | 3 个成品 → **✗ 排除 备用页**（带理由）+ **✓ 收** docx、提交版 pptx；入包 320 文件 / 3370.2 KB |
+| `--pack`（备用页**仍在** `dist/`） | 包内 321 条目，**含「备用页」的条目 = 0**；材料成品条目只有 docx + pptx；`MANIFEST.txt` 里也不提备用页 |
+| `--check-only` 同一包 | rc=1，FAIL 2：① `tools/freeze_check.py:238` 字面量「学校/队名」被身份扫描判红（**t101 文件，不在 t108 inScope，已上报**）② 材料齐全·② 演示视频 `.mp4` 缺件（t77 材料返工） |
+| `--selftest` | **rc=0**，五项自证全通过（干净包 rc=0、脏包 rc≠0、命中 `.env`、命中本机用户名、命中 Windows 反斜杠 3 行、备用页被排除且不在包内） |
 
 ## 边界
 
