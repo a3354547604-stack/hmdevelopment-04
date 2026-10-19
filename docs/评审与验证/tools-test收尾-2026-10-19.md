@@ -84,7 +84,7 @@ s03 13/0/0、s04 20/0/0、s05 14/0/0、s06 19/0/0、s07 13/0/0。改动前同命
 
 | 段 | 改动前 | 改动 |
 |---|---|---|
-| A | 「HttpApiService 里找不到 `GET /api/time`」 | 契约 §6.2 总表 20 条 = App 18 条 + **内部 2 条**（`GET /api/time` 给网关、`POST /api/iotda/webhook` 给 IoTDA）；新增 `GATEWAY_ONLY = {"/api/time", "/api/iotda/webhook"}`，这 2 条不再要求 App 实现 |
+| A | 「HttpApiService 里找不到 `GET /api/time`」 | 契约 §6.2 总表 20 条 = App 18 条 + **内部 2 条**（`GET /api/time` 给网关、`POST /api/iotda/webhook` 给 IoTDA）。**代码侧是两条独立判据，不是同一个集合**：t97 新增的 `GATEWAY_ONLY = {"/api/time"}`（`tools/test/review/check_harmony_contract.py:81`）**只含 `/api/time`**；webhook 仍由既有内联条件排除（同文件 `:83` 的 `"/api/iotda/webhook" not in p`）。两者合起来才等于「内部 2 条」——**别把 webhook 并进 `GATEWAY_ONLY` 去改代码**（t100 复核 F-01） |
 | C | 「App 与 §6.9 示例的键差集不是预期的 `{gas_l1_to_l2_s}`：`[]`」 | D-01 已收口（App 21 键 = §6.9 21 键），断言改为**差集必须为空** |
 | D | 「§9.2 配网码 [1600…1606] 未翻译且没有 §12 接口」 | 改为 `[NOTE]`（不再是 DIFF）：与契约现状一致——**§12 消费方段**写明 App 配网页是 P1 消费者、§13.2 写明 P0 主路径=手机浏览器+网关 H5；并标注归属卡 app-harmony-op 的配网页卡（P1 落地时补 7 个码直译 + §12 五接口） |
 

@@ -96,8 +96,14 @@ def render_markdown(suites, checks, meta) -> str:
         sum(1 for c in checks if c["status"] == "failed"),
         sum(1 for c in checks if c["status"] == "skipped"), len(checks)))
     lines.append("")
-    lines.append("**总计：通过 %d · 失败 %d · 跳过 %d**" % (total["passed"], total["failed"],
-                                                            total["skipped"]))
+    # 口径注（t101/F-02）：下面这行「总计」**只累加 7 个契约套件**（s01–s07）的
+    # 通过/失败/跳过；上一行「构建检查」的跳过是**环境门**（本机没有 hvigorw /
+    # gcc / clang 之类工具链时按 skipped 记），不计入总计的跳过数。
+    # 因此「跳过 0」= 套件里没有 SKIP（没有靠 known_issues 换 SKIP 的用例），
+    # **不等于**整份报告里没有任何 skip 行 —— 读表时请把这两行分开看。
+    lines.append("**总计：通过 %d · 失败 %d · 跳过 %d**（只算 7 个契约套件；构建检查的"
+                 "跳过是环境门，见上一行）" % (total["passed"], total["failed"],
+                                                total["skipped"]))
     lines.append("")
     if any(c.status == "failed" for s in suites for c in s.cases) or \
        any(c["status"] == "failed" for c in checks):
