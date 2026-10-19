@@ -234,8 +234,12 @@ def _materials_lines(log: str) -> list[str]:
     out = []
     with open(log, encoding="utf-8", errors="replace") as fh:
         for ln in fh:
+            # 选择器只用**不含身份类词**的关键字：打包器那条 WARN 的标签是「…/队名已替换」，
+            # 直接抄它的标签会让本文件自己被 pack-submission 的身份类正则命中 ⇒ 任何提交包
+            # 自检固定红一项（t113）。用「队名」即可匹配同一条日志，且与正则里的角色词不重叠；
+            # 若打包器改标签，这里要跟着改。
             if ("[FAIL]" in ln or "[WARN]" in ln) and any(
-                    k in ln for k in ("材料齐全", "提交格式", "学校/队名", "PPT", "docx")):
+                    k in ln for k in ("材料齐全", "提交格式", "队名", "PPT", "docx")):
                 out.append(ln.strip())
     return out
 
