@@ -175,7 +175,8 @@ async function main(): Promise<void> {
   check('D2-settings-21-keys', keysCount === 21 && gs.data?.items.gas_l1_to_l2_s === undefined
     && gs.data?.items.alert_repush_s !== undefined && gs.data?.items.alert_repush_s?.length === 3,
     `keys=${keysCount} gas_l1_to_l2_s=${gs.data?.items.gas_l1_to_l2_s} repush=${JSON.stringify(gs.data?.items.alert_repush_s)}`
-    + `（App SettingsItems 仍声明 22 键、含 v1.2 D-01 不进 items 的 gas_l1_to_l2_s → App 侧待修 t38/t45）`);
+    + `（历史：App SettingsItems 曾把 21 键误当 22 键（多算 D-01 不进 items 的 gas_l1_to_l2_s），`
+    + `已由 t62/t63 收口——本断言即收口后的形态，实测 keys=21）`);
 
   RecordingTransport.reset();
   const ps = await api.putSettings(7, { no_motion_min: 45 });
@@ -218,8 +219,8 @@ async function main(): Promise<void> {
     && tr.data.compare.title === '今日活动频次' && tr.data.compare.text === '较昨日下降 20%'
     && tr.data.compare.delta_pct === -20 && tr.data.series.length === 7,
     `title=${JSON.stringify(tr.data?.compare.title)} text='${tr.data?.compare.text}' delta=${tr.data?.compare.delta_pct} points=${tr.data?.series.length}`
-    + `（App TrendCompare 未解析 v1.2 必现键 title；且 Types.ets 把 yesterday/delta_pct/text 当必填，`
-    + `无基线响应会整条解析失败 → App 侧待修 t38/t45）`);
+    + `（历史：App TrendCompare 曾漏解析 compare 的 title，且 Types.ets 把 yesterday/delta_pct/text 当必填`
+    + `（无基线响应会整条解析失败），已由 t65 收口——本断言即收口后的形态）`);
 
   const sm = await api.summaryReport(7, 'week');
   check('F4-summary-deep', sm.ok && sm.data !== undefined
