@@ -1,8 +1,8 @@
 # 验收基线报告（tools/test）
 
-- 生成时间：2026-10-18 14:51:19Z
-- 契约：接口契约.md · 157728 B · mtime 2026-10-18 12:12
-- git：3475cf9
+- 生成时间：2026-10-19 00:30:29Z
+- 契约：接口契约.md · 160072 B · mtime 2026-10-19 08:16
+- git：54cdd0a
 - 被测 REST：内置 mock（tools/test/mock_server.py）
 - 环境：python 3.14.4 / docker Docker version 27.5.1, build 9f9e405
 
@@ -14,17 +14,15 @@
 | s02_codec UART 帧编解码与 CRC（§3） | 14 | 0 | 0 | 14 |
 | s03_iotda IoTDA 物模型与鉴权（§4） | 13 | 0 | 0 | 13 |
 | s04_models 阈值状态机与数据模型（§7/§8/§9） | 20 | 0 | 0 | 20 |
-| s05_rest REST 契约冒烟（mock 内置） | 12 | 0 | 1 | 13 |
-| s06_audit 契约自身一致性与交叉引用（§0–§12） | 18 | 0 | 1 | 19 |
+| s05_rest REST 契约冒烟（mock 内置） | 14 | 0 | 0 | 14 |
+| s06_audit 契约自身一致性与交叉引用（§0–§12） | 19 | 0 | 0 | 19 |
 | s07_provision 本地配网/配对（§12 + §13 + §3.9 + §2.7） | 13 | 0 | 0 | 13 |
 | **构建检查** | 2 | 0 | 3 | 5 |
 
-**总计：通过 102 · 失败 0 · 跳过 2**
+**总计：通过 105 · 失败 0 · 跳过 0**
 
 ## 跳过项（已知问题或环境缺失）
 
-- `s05_rest / §6.2 接口总表逐条可达`：[COV-1] 待收口：§6.21 `GET /api/time`（免鉴权取时，PM D2）未纳入 mock 基线，s05 覆盖用例对不上（mock_server.py 未实现该路由）；负责人：t64 —— 需 PM 扩 inScope 至 tools/test/mock_server.py 才能转硬断言；本次观测：未覆盖：['/api/time']
-- `s06_audit / §0.2 报表日历引用落点（待收口 M3-0.2）`：[M3-0.2] 待收口：§0.2「报表的日/小时按 UTC+8 日历切分（§7.6）」引用的是 sensor_readings；同口径的 §5.3 已指向 §7.9/§7.10，此处权威位置应同为 §7.9/§7.10；负责人：PM 契约修订（t64 已报，待开卡）；本次观测：§0.2 报表日历行引用 §7.6：- 报表的「日/小时」一律按 **Asia/Shanghai（UTC+8）日历**切分（§7.6）。
 - `构建检查 / 网关构建检查`：主机没有 gcc/clang，无法做语法检查
 - `构建检查 / HAP 构建检查`：主机没有 hvigorw（HarmonyOS SDK 未安装或未进 PATH），无法真编译 HAP；在装了 DevEco/HarmonyOS SDK 的机器上跑 hvigorw assembleHap；本机只做工程结构检查
 - `构建检查 / WS63 固件构建检查`：默认只做静态检查；整包编译需 --full（容器 ws63wsl:latest + SDK）；验收构建时用：python3 tools/test/build_checks.py --full

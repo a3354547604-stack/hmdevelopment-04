@@ -19,6 +19,7 @@ import json
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -199,11 +200,14 @@ class Handler(BaseHTTPRequestHandler):
         from urllib.parse import parse_qs, urlparse
         return {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
 
-    def _send(self, status: int, payload: Dict[str, Any]) -> None:
+    def _send(self, status: int, payload: Dict[str, Any],
+              headers: Optional[Dict[str, str]] = None) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -326,6 +330,16 @@ class Handler(BaseHTTPRequestHandler):
                                             "iotda_token_expire_at": NOW_MS() + 3600000,
                                             "webhook_last_at": st.webhook_last_at,
                                             "clock_source": "device", "server_ts": NOW_MS()}))
+
+        # ---- §6.21 取时（免鉴权、无参数、Cache-Control: no-store；消费方是网关）----
+        # t97 补：原先 mock 没这条路由，s05「§6.2 总表逐条可达」只能对 /api/time 记
+        # COV-1 待收口 → 长期 SKIP。补上后该用例转硬断言（SKIP=0）。
+        if path == "/api/time":
+            now = int(time.time())
+            return self._send(*envelope(0, {
+                "utc_epoch": now,
+                "iso8601": datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }), headers={"Cache-Control": "no-store"})
 
         # ---- §5 webhook（token 校验，不是 JWT）----
         if path == "/api/iotda/webhook":

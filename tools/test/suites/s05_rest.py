@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import urllib.error
@@ -25,7 +26,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "contract")))
 
 import contract_source as cs          # noqa: E402
-import known_issues as ki             # noqa: E402          # noqa: E402
 import mock_server                    # noqa: E402
 from harness import CaseFail, SkipCase, SuiteResult, require, require_eq, require_in, run_cases  # noqa: E402
 
@@ -133,12 +133,34 @@ def case_envelope_shape():
     require_eq(payload["code"], 0, "health code")
 
 
+def case_time_endpoint_shape():
+    """§6.21：/api/time 免鉴权、只回 utc_epoch（整数秒）+ iso8601（秒精度 Z）、响应头 no-store。
+
+    t97 新增：这条路由原先 mock 没有，s05 只能对 /api/time 记 SKIP（COV-1）。
+    """
+    st, payload = CLIENT.call("GET", "/api/time")          # 不带 token：免鉴权
+    require_eq(st, 200, "§6.21 /api/time 的 HTTP 码")
+    require_eq(payload["code"], 0, "§6.21 /api/time 的业务码")
+    data = payload.get("data") or {}
+    ep = data.get("utc_epoch")
+    require(isinstance(ep, int) and not isinstance(ep, bool), "utc_epoch 必须是整数秒：%r" % ep)
+    iso = data.get("iso8601")
+    require(isinstance(iso, str)
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", iso) is not None,
+            "iso8601 必须是秒精度、Z 结尾：%r" % iso)
+    require(len(str(ep)) == 10, "utc_epoch 应是 10 位秒级时间戳（不是毫秒）：%r" % ep)
+    with urllib.request.urlopen(urllib.request.Request(CTX["base"] + "/api/time"), timeout=10) as resp:
+        cc = (resp.headers.get("Cache-Control") or "").lower()
+    require("no-store" in cc, "§6.21 响应头必须带 Cache-Control: no-store：%r" % cc)
+
+
 def case_endpoints_all_reachable():
     """§6.2 的每个接口都必须被服务识别（不是 404/1000 未知路径）。"""
     token = _login()
     dev = _current_device()
     mapping = [
         ("GET", "/api/health", None, None),
+        ("GET", "/api/time", None, None),          # §6.21 免鉴权取时（消费方=网关，t97 补）
         ("POST", "/api/auth/login", {"username": CTX["username"], "password": "verifier-pass-1"}, None),
         ("POST", "/api/auth/register", {"username": CTX["username"], "password": "verifier-pass-1"}, None),
         ("GET", "/api/devices", None, token),
@@ -180,13 +202,10 @@ def case_endpoints_all_reachable():
                    for k in known_paths):
             missing.append((method, path, "验收基线未覆盖该接口"))
     if missing:
-        # 只有「已登记待收口」的接口才允许 SKIP（带原因 + 负责人卡号），其余一律 FAIL：
-        # 静默 SKIP 会把「mock 少一个路由」长期藏起来。
-        paths = {p for _m, p, _why in missing}
-        if paths <= {"/api/time"}:
-            ki.pending("COV-1", "未覆盖：%r" % sorted(paths))   # 抛 SkipCase，见下
-        else:
-            raise CaseFail("以下接口未覆盖且未登记（mock 未实现或基线未写）：%r" % missing[:6])
+        # t97：COV-1（mock 未实现 §6.21 /api/time）已收口 —— 本用例从「允许 /api/time
+        # 记 SKIP」改为硬断言，任何未覆盖接口一律 FAIL。再退回旧行为（少路由/少基线）
+        # 就会红，不再有降级通道。
+        raise CaseFail("以下接口未覆盖（mock 未实现或基线未写）：%r" % missing[:6])
 
 
 def case_register_and_login_errors():
@@ -378,6 +397,7 @@ CASES = [
     ("§6.1 信封与 health 无鉴权", case_envelope_shape),
     ("§6.1 无 token 401/1100", case_unauthorized),
     ("§6.2 接口总表逐条可达", case_endpoints_all_reachable),
+    ("§6.21 /api/time 免鉴权与形状", case_time_endpoint_shape),
     ("§6.3/§6.4 注册登录错误码", case_register_and_login_errors),
     ("§6.6 绑定码错误 1201", case_bind_code_error),
     ("§6.8 读数分页与越界", case_readings_limit_validation),

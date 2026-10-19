@@ -17,6 +17,15 @@
 
     s06 的 case_no_silent_skip 守着这条线：任何 known() 引用都必须在 PENDING 里，
     且 PENDING 里不许有没人引用的死条目——否则验收报告里的 SKIP 会变成永久盲区。
+
+t97 收尾（2026-10-19）——PENDING 已清空，`python3 tools/test/run_all.py` 的 SKIP = 0
+    · COV-1（§6.21 /api/time 未纳入 mock 基线）：t97 在 tools/test/mock_server.py 补了
+      该路由（免鉴权 + `Cache-Control: no-store`），s05 从「允许 SKIP」改为硬断言，
+      并新增 §6.21 形状用例（整数秒 / 秒精度 Z / no-store）。**由 t97 关掉**。
+    · M3-0.2（§0.2 报表日历引用落点）：t90（提交 494e5a9）已把 §0.2 改成
+      「切分口径与表结构见 §7.9/§7.10；原始读数表见 §7.6」，s06 转为硬断言。
+      **由 t90 关掉**。
+    RESOLVED 各条的关闭卡/提交见报告 docs/评审与验证/tools-test收尾-2026-10-19.md 的表。
 """
 
 from __future__ import annotations
@@ -45,14 +54,10 @@ RESOLVED = {
 }
 
 # --- 确属未收口：SKIP 但必须带原因与负责人卡号 ---------------------------------------
-PENDING = {
-    "COV-1": ("§6.21 `GET /api/time`（免鉴权取时，PM D2）未纳入 mock 基线，"
-              "s05 覆盖用例对不上（mock_server.py 未实现该路由）",
-              "t64 —— 需 PM 扩 inScope 至 tools/test/mock_server.py 才能转硬断言"),
-    "M3-0.2": ("§0.2「报表的日/小时按 UTC+8 日历切分（§7.6）」引用的是 sensor_readings；"
-               "同口径的 §5.3 已指向 §7.9/§7.10，此处权威位置应同为 §7.9/§7.10",
-               "PM 契约修订（t64 已报，待开卡）"),
-}
+# t97（2026-10-19）起为空：原两条已各自收口，见模块 docstring 与
+# docs/评审与验证/tools-test收尾-2026-10-19.md。留空表而不是删表——s06 的
+# case_no_silent_skip 仍按它做「引用 ↔ 登记」对账，将来新增待收口项照旧登记在这里。
+PENDING: dict = {}
 
 # --- 早期复核登记、当前无任何用例引用：仅留档，引用前先核实现状 -----------------------
 HISTORICAL = {

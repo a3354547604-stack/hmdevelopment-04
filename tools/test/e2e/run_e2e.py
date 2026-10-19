@@ -472,15 +472,14 @@ def stage3(out_lines, rep, log, run_id):
         rep.check("段3", "§4.6 原文报文（messages/up，无 services 外层）直投服务器",
                   "code=0 且 handled>0（§5.3 要求展开入库）",
                   "code=%s handled=%s" % (bare_code, bare_handled), ok=True)
-    elif ACCEPT_KNOWN:
-        rep.note("段3", "§4.6 原文报文直投服务器（已登记缺陷 F-01，本次按 --accept-known 降级）",
-                 "修复前恒为 handled=0",
-                 "code=%s handled=%s ← %s" % (bare_code, bare_handled, KNOWN_DEFECTS["F-01"]))
-        log["accepted_known"] = ["F-01"]
     else:
+        # t97：F-01 的 --accept-known 降级通道已撤（t75/2aff344 修好了服务器侧：
+        # telemetry._services() 现在同时接受裸 service 与 {"services":[…]}）。
+        # 这里必须是硬判红——服务器若退回只认外层信封的旧行为，本段就会红。
         rep.check("段3", "§4.6 原文报文（messages/up，无 services 外层）直投服务器",
-                  "code=0 且 handled>0（§5.3 要求展开入库）；若确认是已登记缺陷 F-01 请加 --accept-known",
-                  "code=%s handled=%s ← F-01：%s" % (bare_code, bare_handled, KNOWN_DEFECTS["F-01"]),
+                  "code=0 且 handled>0（§5.3 要求展开入库）",
+                  "code=%s handled=%s ← 服务器未展开裸 service 信封（F-01 回归）"
+                  % (bare_code, bare_handled),
                   ok=False)
     log["samples_bare_code"] = bare_code
     log["samples_bare_handled"] = bare_handled
@@ -600,13 +599,10 @@ READING_ITEM_KEYS = ["id", "node_sn", "type", "ts", "payload"]
 # （server/app/routers/alerts.py:68），所以它缺席不算契约违背——但要另证「只在停推时缺席」。
 CONDITIONALLY_OMITTED = {"next_push_at"}
 
-# 已登记缺陷：只在显式传入 --accept-known 时降级为 SKIP，默认仍然判红。
-# F-01（本次 t39 抓到）：网关按 §4.6 发的 messages/up 报文是裸 service 对象
-# （{"name":"node_samples","id":…,"content":"[…]"}），而 server/app/services/telemetry.py
-# 的 _services(body) 只认 {"services":[…]} → device.message 永远 handled=0 → 节点明细
-# 不落库 → 活动报表/趋势无数据。修法见报告；修复后请去掉 --accept-known。
-KNOWN_DEFECTS = {"F-01": "messages/up 裸 service 对象不被 server 解析（节点明细不落库）"}
-ACCEPT_KNOWN = False
+# F-01（t39 抓到、t75/2aff344 修好）：网关按 §4.6 发的 messages/up 报文是裸 service 对象
+# （{"name":"node_samples","id":…,"content":"[…]"}），服务器曾只认 {"services":[…]} →
+# device.message 恒 handled=0 → 节点明细不落库 → 活动报表/趋势无数据。
+# t97 起**没有降级通道**：段3 对该报文是硬断言，服务器退回旧行为就会红。
 
 
 def leaf_keys(obj):
@@ -812,11 +808,9 @@ def main():
     ap.add_argument("--dry", action="store_true", help="只做不需要构建/容器的检查")
     ap.add_argument("--stages", default="1,2,3,4")
     ap.add_argument("--keep-stack", action="store_true", help="跑完不停 compose（调试用）")
-    ap.add_argument("--accept-known", action="store_true",
-                    help="把已登记缺陷（如 F-01 messages/up 信封）降级为 SKIP；默认仍判红")
+    # t97：--accept-known 已撤（F-01 修好后不再需要降级通道；留开关就等于留一条
+    # 「带豁免地绿」的路）。若有人仍传该参数，argparse 会直接报未知参数。
     args = ap.parse_args()
-    global ACCEPT_KNOWN
-    ACCEPT_KNOWN = bool(args.accept_known)
     stages = [int(x) for x in args.stages.split(",") if x.strip()]
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

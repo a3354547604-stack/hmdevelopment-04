@@ -98,12 +98,21 @@ def case_activity_merge_ref():
 def case_report_calendar_ref():
     """§0.2「报表的日/小时按 UTC+8 日历切分」的落点应是活动归并表 §7.9/§7.10。
 
-    这是 M3 修正后残留的一处引用（§7.6 是 sensor_readings，不是日历切分的定义处），
-    已登记为 PENDING M3-0.2（负责人：PM 契约修订）。契约改好后本用例应转硬断言。
+    M3-0.2 已由 t90（提交 494e5a9）收口：§0.2 改为「切分口径与表结构见 §7.9/§7.10；
+    原始读数表见 §7.6」。t97 起本用例是**硬断言**——再退回只引 §7.6 就会红，
+    不再有 SKIP 通道（§7.6 是 sensor_readings，不是日历切分的定义处）。
     """
-    for line in C.section_text("0.2").splitlines():
-        if "日历" in line and "报表" in line and "§7.6" in line and "§7.9" not in line:
-            ki.pending("M3-0.2", "§0.2 报表日历行引用 §7.6：%s" % line.strip()[:70])
+    text = C.section_text("0.2")
+    # 目标行是「- 报表的「日/小时」一律按 Asia/Shanghai（UTC+8）日历切分（…）」；
+    # 用「报表的」而不是「报表」做判据——§0.2 另有一行讲时间戳样例（含「日历日」与
+    # 「报表 `daily[].date`」），会把「报表」误命中。
+    cands = [l for l in text.splitlines() if "报表的" in l and "日历" in l]
+    require(cands, "§0.2 找不到「报表的…日历切分」那一行")
+    line = cands[0]
+    require("§7.9" in line or "§7.10" in line,
+            "§0.2 报表日历行的权威落点应是 §7.9/§7.10：%s" % line.strip()[:90])
+    require("§7.6" not in line or "§7.9" in line or "§7.10" in line,
+            "§0.2 报表日历行不得只引 §7.6（原始读数表）：%s" % line.strip()[:90])
 
 
 def case_adc_mv_order_claim():
@@ -241,7 +250,7 @@ CASES = [
     ("§6.19 push_tokens 引用 §7.12", case_push_table_ref),
     ("§3.8 door 分派引用 §8.5", case_door_dispatch_ref),
     ("§5.3 活动归并引用 §7.9/§7.10", case_activity_merge_ref),
-    ("§0.2 报表日历引用落点（待收口 M3-0.2）", case_report_calendar_ref),
+    ("§0.2 报表日历引用落点（硬断言）", case_report_calendar_ref),
     ("§11 #2 adc_mv 顺序声明", case_adc_mv_order_claim),
     ("§8 告警类型都有 summary 文案", case_alert_types_have_summary),
     ("§6.13 summary 表 9 行且 level 合法", case_summary_table_shape),

@@ -6,7 +6,7 @@
   · 本脚本证明 03-契约字段核对表.md 的覆盖清单与实现/契约现状**对得上**（含 v1.1 新增项）。
 
 检查项：
-  A. §6.2 的 19 条接口（18 App + webhook）↔ HttpApiService 实现；
+  A. §6.2 的 20 条接口（18 App + webhook + §6.21 取时）↔ HttpApiService 实现；
   B. ApiPort 与 HttpApiService 方法集一致；
   C. §6.9 键集合 ↔ SettingsItems ↔ settingsBody ↔ §8.2（D-01）；
   D. §9.2 全部业务码 ↔ Result.codeText 直译表，以及 describe() 是否真的带服务器 message；
@@ -46,6 +46,11 @@ def diff(msg: str) -> None:
     print("  [DIFF] " + msg)
 
 
+def note(msg: str) -> None:
+    """已知留白/归属他人：打印但不计入退出码（与 [DIFF] 区分开，避免假红）。"""
+    print("  [NOTE] " + msg)
+
+
 def block(text: str, start: str, stop: str = "}") -> str:
     """取 `export interface X {...}` 的字段块：按"整行就是 }"结束，
     避免被字段注释里的 `{`/`}`（如 nodes_online 的示例 JSON）截断。"""
@@ -69,8 +74,14 @@ settings_page = read(ETS / "pages/SettingsPage.ets")
 print("A. §6.2 契约接口 ↔ HttpApiService 实现")
 t62 = C.table("6.2")
 eps = [(t62.p(r, "方法"), t62.p(r, "路径")) for r in t62.rows]
+# §6.2 里不是 App 消费者的两条：webhook 由 IoTDA 平台调（§5），
+# §6.21 /api/time 由**网关**启动握手取时（§6.21 明写「网关启动握手取时用」，
+# 且规则里只要求网关据此把 clock_source 置 device）。t97 更正：原先只排掉 webhook，
+# 于是 /api/time 被当成「App 该实现但没实现」报 DIFF —— 那是错的期望，不是 App 的缺口。
+GATEWAY_ONLY = {"/api/time"}
 app_eps = [(m, p) for (m, p) in eps
-           if m in ("GET", "POST", "PUT") and "/api/iotda/webhook" not in p]
+           if m in ("GET", "POST", "PUT") and "/api/iotda/webhook" not in p
+           and p not in GATEWAY_ONLY]
 internal = [(m, p) for (m, p) in eps if (m, p) not in app_eps]
 print("  契约 §6.2：%d 条（App %d + 内部 %d：%s）"
       % (len(eps), len(app_eps), len(internal), ", ".join("%s %s" % e for e in internal)))
@@ -140,9 +151,24 @@ else:
     ok("§6 覆盖的 %d 个业务码（含 1400 报表无数据）全部有中文直译；HTTP 类别由 kindOfStatus 兜底"
        % (len(codes) - len(provision_codes)))
 if provision_codes:
-    diff("§9.2 的配网码 %s 未翻译，且 ApiPort/HttpApiService 里没有 §12 的任何接口 —— "
-         "契约 §13.2 的步骤 5/7/11/12/13 明确写「谁=App」，核对表 §8 也没把配网界面列为留白"
-         % provision_codes)
+    # t97 更正期望文本：原句写「§13.2 的步骤 5/7/11/12/13 明确写『谁=App』」——
+    # t36 之后 §13.2 只有步骤 1/10/14 是 App（纯 HTTP，P1），3/4/6/9 是
+    # 「手机（系统 WLAN 设置）」、5/7/11/12/13 是「手机浏览器」；节标题本身写
+    # 「P0 主路径 = 手机浏览器 + 网关 H5 页面」，§12.11 又明写「安卓 App 与鸿蒙 App
+    # 的配网页是 P1 消费者」。所以「App 无 §12 接口、无 1600–1606 直译」与契约现状
+    # **一致**，是 P1 留白而不是缺陷 → 报 NOTE 并标归属卡。
+    # 有牙：契约一旦把 App 配网页改回 P0（§12.11 里不再写 P1），这里立刻转 DIFF。
+    sec_12 = C.section_text("12")
+    sec_132 = C.section_text("13.2")
+    app_p1 = ("配网页" in sec_12 and "P1 消费者" in sec_12 and "手机浏览器" in sec_132)
+    if app_p1:
+        note("§9.2 的配网码 %s 未翻译、ApiPort/HttpApiService 也没有 §12 接口 —— 与契约"
+             "现状一致（§12 消费方段：App 配网页是 P1 消费者；§13.2 P0 主路径=手机浏览器+网关 H5）。"
+             "归属卡：app-harmony-op 的配网页卡（P1）；P1 落地时需补这 %d 个码的直译 + §12 五接口"
+             % (provision_codes, len(provision_codes)))
+    else:
+        diff("§9.2 的配网码 %s 未翻译，且 ApiPort/HttpApiService 里没有 §12 的任何接口 —— "
+             "契约 §12.11 已不再把 App 配网页标为 P1，App 侧应实现" % provision_codes)
 tail = result.split("export function describe")[1]
 if "codeText(code)" in tail and "+ serverMessage" not in tail.split("if (status === 0)")[0]:
     diff("describe() 业务码分支只返回 codeText、不拼接服务器 message —— 核对表 §5 称"
