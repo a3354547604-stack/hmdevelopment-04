@@ -30,6 +30,12 @@ int gw_hw_key_pressed(void);
  * 全部可用通道扫描。返回写入字节数（不含 NUL）。 */
 int gw_hw_key_report(char *out, uint32_t cap);
 
+/* `keys <通道>`：对指定通道做**一次**采样并回一段文本（现场标定用）。
+ * 通道范围 0..GW_KEY_ADC_SCAN_LAST；越界返回 -1 且 out 里写明可用范围。
+ * 为什么要有它：万一按键其实挂在别的通道上（原理图与实物不一致时很常见），
+ * 现场能直接 `keys 4` 逐个试，不必改 GW_KEY_ADC_CHANNEL 重编固件。 */
+int gw_hw_key_probe(unsigned channel, char *out, uint32_t cap);
+
 /* 把 `keys` 挂到 SDK 自带 shell（实现在 gw_kvcfg_shell.c：板上只有它 include shell.h）。 */
 void gw_keys_shell_register(void);
 

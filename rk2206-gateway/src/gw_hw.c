@@ -232,3 +232,33 @@ int gw_hw_key_report(char *out, uint32_t cap)
     gw_hw_adc_scan(out + used, cap - used);
     return (int)strlen(out);
 }
+
+int gw_hw_key_probe(unsigned channel, char *out, uint32_t cap)
+{
+    uint32_t used = 0u;
+    uint32_t raw = 0u;
+    uint32_t mv = 0u;
+    int rc;
+
+    if (out == NULL || cap == 0u) {
+        return -1;
+    }
+    out[0] = '\0';
+    if (channel > GW_KEY_ADC_SCAN_LAST) {
+        used = (uint32_t)hw_append(out, cap, used,
+                                   "  [key] 通道号超出范围：0..%u（本板按键在 ch%u）\n",
+                                   GW_KEY_ADC_SCAN_LAST, GW_KEY_ADC_CHANNEL);
+        return -1;
+    }
+    rc = gw_hw_adc_read(channel, &raw, &mv);
+    if (rc != 0) {
+        used = (uint32_t)hw_append(out, cap, used, "  [key] ch%u 读失败（ADC 未初始化？）\n", channel);
+        return -1;
+    }
+    used = (uint32_t)hw_append(out, cap, used,
+                               "  [key] ch%u raw=%u mv=%u 分档=%s%s\n",
+                               channel, raw, mv,
+                               gw_key_band_name(&s_key.band, mv),
+                               (channel == GW_KEY_ADC_CHANNEL) ? "  <= 当前判定通道" : "");
+    return (int)used;
+}

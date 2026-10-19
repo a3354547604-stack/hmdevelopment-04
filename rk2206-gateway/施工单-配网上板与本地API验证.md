@@ -146,7 +146,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
 1. 串口敲 `keys`（就是调试口，不用另接线）。它会打印：通道、基线、当前 raw/mV、
    「低于多少 mV 才算按下」、以及 ch2–ch7 的通道扫描表。
-2. 依次按 K1、K2、K3、K4，每按一次敲一次 `keys`，把「当前」那行的 mV 抄下来。
+   只想看某一路时敲 `keys 4`（0–7 任意通道做一次采样，不用重编固件）。
+2. 依次按 K1、K2、K3、K4，每按一次敲一次 `keys`，把「当前」那行的 mV 抄下来；
+   若怀疑按键不在 ch5，就逐个 `keys 0`…`keys 7` 试，看哪一路在按下时会跳。
 3. 把四个值回传给我（PM），我填进 `rk2206-gateway/配网实现说明.md` 的「板载按键标定」表。
 
 **当前口径（不要当成已实测）**
@@ -397,14 +399,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
   ```
   文件 rk2206-gateway/out/gateway-Firmware.img   2097152 字节
-  liteos.elf                                     946360 字节（t137 是 942496）
-  sha256 521828aa78e74b559a8577f1dfeca945fe1595a95db10cde091085508023a2d9（当次构建）
-  md5    b6e2e83ae308e866107815f7abb6c984（当次构建）
+  liteos.elf                                     946440 字节（t137 是 942496）
+  sha256 460308f76e7142ad427615c8b79bdf1d109c0e9b9f20f7f787e809bde84814ec（当次构建）
+  md5    4809a8b606a32fff6477263278ec5a24（当次构建）
   sdk_rev 35339be8fb6b59871eed793fdce0472352398d94
   ```
 
   判断"是不是带板载键的这版"，除 `liteos.elf` 体积外，镜像里应能 grep 到
-  `[gw] 板载键基线：` 与 `板载键诊断`（`keys` 命令注册时打印的那句）。
+  `[gw] 板载键基线：`、`板载键诊断`（`keys` 注册时打印的那句）与 `[key] ch%u raw=`（`keys <通道>` 的输出）。
 
 ## 9. 验收逐字对照表（日志字符串 = 源码里的字面量）
 

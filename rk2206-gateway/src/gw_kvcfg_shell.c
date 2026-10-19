@@ -128,12 +128,34 @@ static UINT32 gw_keys_shell_cmd(UINT32 argc, const CHAR **argv)
     char out[GW_KEY_REPORT_MAX];
     UINT32 i;
 
-    /* 带参数时只提示一句：这条命令没有开关，避免用户以为 `keys 5` 能切通道 */
-    if (argc != 0u) {
-        printf("[key] `keys` 不接受参数（想确认通道号看输出里的通道扫描）\n");
-        for (i = 0; i < argc; i++) {
-            (void)argv[i];
+    /* `keys <通道>`：对指定通道做一次采样（现场标定用，不用重编固件）；
+     * 不带参数打印完整报告（通道、基线、当前读数、判定依据、通道扫描）。 */
+    if (argc >= 1u) {
+        unsigned ch = 0u;
+        const char *p = (const char *)argv[0];
+        int bad = 0;
+
+        if (p == NULL || *p == '\0') {
+            bad = 1;
         }
+        for (i = 0u; !bad && p[i] != '\0'; i++) {
+            if (p[i] < '0' || p[i] > '9') {
+                bad = 1;
+            } else {
+                ch = ch * 10u + (unsigned)(p[i] - '0');
+                if (ch > 99u) {
+                    bad = 1;
+                }
+            }
+        }
+        if (bad) {
+            printf("  [key] 用法：`keys` 或 `keys <0-%u>`（通道号必须是十进制数字）\n",
+                   GW_KEY_ADC_SCAN_LAST);
+            return (UINT32)-1;
+        }
+        (void)gw_hw_key_probe(ch, out, (uint32_t)sizeof(out));
+        printf("%s", out);
+        return 0u;
     }
     (void)gw_hw_key_report(out, (uint32_t)sizeof(out));
     printf("%s", out);
