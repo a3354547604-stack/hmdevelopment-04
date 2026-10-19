@@ -12,8 +12,18 @@ docx / pptx 都是它的产物。手改产物会在下次重生成时丢失，�
 ---------------------------
 * `赛题四+独居老人居家安全监测与应急辅助系统+XX学校XX队.docx`
   宋体 / 小四 / 1.5 倍行距，含封面、目录（域）、页脚页码、每章末尾「待补素材占位框」。
-* `赛题四+独居老人居家安全监测与应急辅助系统+XX学校XX队.pptx`
-  16:9，P01–P14 + 备用页 B1–B7，每页「标题 + ≤3 要点 + 配图占位框 + 讲者备注」。
+* `赛题四+独居老人居家安全监测与应急辅助系统+XX学校XX队.pptx`（**提交版主 deck**）
+  16:9，封面 + P01–P14 = **15 页**，每页「标题 + ≤3 要点 + 配图占位框 + 讲者备注」。
+  页数口径见下方「页数：官方要求 vs 内部口径」。
+* `赛题四+独居老人居家安全监测与应急辅助系统+XX学校XX队-备用页B1-B7.pptx`（**答辩自用**）
+  1 页说明 + B1–B7 = 8 页；**不进提交包材料集**，只在评委追问时投屏。
+
+页数：官方要求 vs 内部口径（t106）
+----------------------------------
+* **官方要求**：主办方通知对 PPT 只要求「图文并茂、内容完整、简明扼要，重点展示设计亮点 /
+  功能实现 / 创新点，讲解时长控制在 10 分钟以内」——**没有页数限制**。
+* **内部口径**：主 deck 封面 + 14 页讲演页（P01–P14，合计 560 s ≤ 600 s）、备用页另存一份。
+  这是参赛队自己定的规格，**不是赛事要求**，写材料时不得混写。
 
 硬约束（违反即视为 bug，脚本会自检失败）
 --------------------------------------
@@ -53,7 +63,10 @@ SRC_PPT = os.path.join(MAT_DIR, "11-PPT正文.md")
 
 BASE_NAME = "赛题四+独居老人居家安全监测与应急辅助系统+XX学校XX队"
 DOCX_PATH = os.path.join(DIST_DIR, BASE_NAME + ".docx")
+# 提交版主 deck（封面 + P01–P14）：进提交包材料集
 PPTX_PATH = os.path.join(DIST_DIR, BASE_NAME + ".pptx")
+# 备用页（B1–B7）：答辩自用，不进提交包材料集（t106 拆出，避免提交版偏厚）
+PPTX_BACKUP_PATH = os.path.join(DIST_DIR, BASE_NAME + "-备用页B1-B7.pptx")
 
 TEAM_PLACEHOLDER = "参赛队"  # 正文与文档属性里都不写真名（R4/R7 匿名）
 
@@ -664,22 +677,17 @@ def fig_hint(fig_text: str):
     return "【占位·待补】配图", f"待补（{fig_text or '未注明'}；建议矢量或 ≥1600 px 宽高清 PNG）"
 
 
-def build_pptx(warn: list[str]) -> dict:
-    from pptx import Presentation
+def _pptx_toolkit() -> dict:
+    """pptx 排版小工具（主 deck 与备用页两份产物共用）。
+
+    闭包只依赖传入的 slide、不依赖具体 Presentation，所以两份产物共用同一套实现：
+    排版口径必须一致，否则备用页投屏时字号/占位框会跟主 deck 对不上。
+    """
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN
     from pptx.oxml import parse_xml
     from pptx.oxml.ns import qn
-    from pptx.util import Emu, Inches, Pt
-
-    lines = read_lines(SRC_PPT)
-    pages = parse_ppt_pages(lines, warn)
-    backup = parse_backup_pages(lines)
-
-    prs = Presentation()
-    prs.slide_width = Inches(13.333)
-    prs.slide_height = Inches(7.5)
-    blank = prs.slide_layouts[6]
+    from pptx.util import Inches, Pt
 
     DARK = RGBColor(0x1F, 0x35, 0x64)
     GRAY = RGBColor(0x59, 0x59, 0x59)
@@ -733,6 +741,37 @@ def build_pptx(warn: list[str]) -> dict:
         box, tf = textbox(slide, 0.6, 6.95, 12.1, 0.4)
         para(tf, text, size=10, color=GRAY, first=True)
 
+    return {
+        "DARK": DARK,
+        "GRAY": GRAY,
+        "RED": RED,
+        "set_font": set_font,
+        "textbox": textbox,
+        "para": para,
+        "add_placeholder": add_placeholder,
+        "footer": footer,
+    }
+
+
+def build_pptx(warn: list[str]) -> dict:
+    """主 deck：封面 + P01–P14 = 15 页（提交版，进提交包材料集）。"""
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    lines = read_lines(SRC_PPT)
+    pages = parse_ppt_pages(lines, warn)
+    backup = parse_backup_pages(lines)
+
+    kit = _pptx_toolkit()
+    DARK, GRAY = kit["DARK"], kit["GRAY"]
+    textbox, para = kit["textbox"], kit["para"]
+    add_placeholder, footer = kit["add_placeholder"], kit["footer"]
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    blank = prs.slide_layouts[6]
+
     # 封面
     slide = prs.slides.add_slide(blank)
     box, tf = textbox(slide, 0.8, 2.2, 11.7, 1.2)
@@ -763,17 +802,49 @@ def build_pptx(warn: list[str]) -> dict:
         slide.notes_slide.notes_text_frame.text = pg["notes"]
         footer(slide, f"{pg['code']}　{pg['head']}　|　讲者备注见备注栏　|　{TEAM_PLACEHOLDER}")
 
-    # 备用页
-    if backup:
-        slide = prs.slides.add_slide(blank)
-        box, tf = textbox(slide, 0.6, 0.35, 12.1, 0.9)
-        para(tf, "备用页 B1–B7（附录，不计入 10 分钟）", size=28, bold=True, color=DARK, first=True)
-        box, tf = textbox(slide, 0.75, 1.5, 11.8, 5.0)
-        para(tf, "被追问时翻到这里；内容已在正文/附录里，不新造数字。", size=18, color=GRAY, first=True, space_after=12)
-        for row in backup:
-            if len(row) >= 3:
-                para(tf, f"• {row[0]}　{row[1]}：{row[2]}", size=16, space_after=8)
-        footer(slide, "备用页目录")
+    os.makedirs(DIST_DIR, exist_ok=True)
+    prs.save(PPTX_PATH)
+
+    return {"pages": len(pages), "backup": len(backup), "slides": len(prs.slides._sldIdLst)}
+
+
+def build_pptx_backup(warn: list[str]) -> dict:
+    """备用页 deck：说明页 + B1–B7（答辩自用，不进提交包材料集）。
+
+    t106 从主 deck 里拆出来：官方通知对 PPT 没有页数限制，但提交版放 23 页偏厚、
+    也与我们自己的 14 页口径不一致 —— 拆成两份后，提交版只留封面 + P01–P14。
+    """
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    lines = read_lines(SRC_PPT)
+    backup = parse_backup_pages(lines)
+
+    kit = _pptx_toolkit()
+    DARK, GRAY = kit["DARK"], kit["GRAY"]
+    textbox, para = kit["textbox"], kit["para"]
+    add_placeholder, footer = kit["add_placeholder"], kit["footer"]
+
+    prs = Presentation()
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
+    blank = prs.slide_layouts[6]
+
+    # 说明页：这份文件是什么、怎么用（避免答辩时误当正式讲演页）
+    slide = prs.slides.add_slide(blank)
+    box, tf = textbox(slide, 0.8, 0.9, 11.7, 1.0)
+    para(tf, "备用页 B1–B7（答辩自用）", size=32, bold=True, color=DARK, first=True)
+    box, tf = textbox(slide, 0.8, 2.1, 11.7, 4.3)
+    para(tf, "本文件是「备用页」：只在评委追问时投屏，不主动讲，也不计入讲解时长（主 deck 560 s ≤ 600 s）。",
+         size=18, color=GRAY, first=True, space_after=14)
+    para(tf, "内容与说明文档 / PPT 正文一致，不新造数字；数字一律「体积 + 提交号」（D11，不写 sha256 当防伪）。",
+         size=16, color=GRAY, space_after=14)
+    para(tf, "本文件不进提交包材料集：材料集 = 说明文档 docx / 主 deck pptx / 演示视频 mp4 / 源码与打包。",
+         size=16, color=GRAY, space_after=14)
+    for row in backup:
+        if len(row) >= 3:
+            para(tf, f"• {row[0]}　{row[1]}：{row[2]}", size=15, space_after=6)
+    footer(slide, "备用页 deck · 不进提交包材料集")
 
     for row in backup:
         slide = prs.slides.add_slide(blank)
@@ -786,9 +857,9 @@ def build_pptx(warn: list[str]) -> dict:
         footer(slide, f"{row[0]} 备用页")
 
     os.makedirs(DIST_DIR, exist_ok=True)
-    prs.save(PPTX_PATH)
+    prs.save(PPTX_BACKUP_PATH)
 
-    return {"pages": len(pages), "backup": len(backup), "slides": len(prs.slides._sldIdLst)}
+    return {"backup": len(backup), "slides": len(prs.slides._sldIdLst)}
 
 
 # ------------------------------------------------------------------ 产物属性清理
@@ -898,6 +969,23 @@ def verify(warn: list[str]) -> dict:
             if sh.has_text_frame and "【占位" in sh.text_frame.text:
                 ph += 1
     result["pptx_placeholder_shapes"] = ph
+
+    # 备用页 deck（t106 拆出的第二份产物）：答辩自用，不进提交包材料集
+    if os.path.exists(PPTX_BACKUP_PATH):
+        bprs = Presentation(PPTX_BACKUP_PATH)
+        bslides = list(bprs.slides)
+        result["pptx_backup_slides"] = len(bslides)
+        result["pptx_backup_slides_with_notes"] = sum(
+            1 for s in bslides if s.has_notes_slide and s.notes_slide.notes_text_frame.text.strip()
+        )
+        bph = 0
+        for s in bslides:
+            for sh in s.shapes:
+                if sh.has_text_frame and "【占位" in sh.text_frame.text:
+                    bph += 1
+        result["pptx_backup_placeholder_shapes"] = bph
+    else:
+        result["pptx_backup_slides"] = 0
     return result
 
 
@@ -915,26 +1003,34 @@ def main() -> int:
     if not args.check:
         info_doc = build_docx(warn)
         info_ppt = build_pptx(warn)
+        info_backup = build_pptx_backup(warn)
         changed = sanitize_docx_props(DOCX_PATH, warn)
         changed += sanitize_pptx_props(PPTX_PATH, warn)
+        changed += sanitize_pptx_props(PPTX_BACKUP_PATH, warn)
         print(f"[docx] {DOCX_PATH}")
         print(f"       标题 {info_doc['headings']} / 表格 {info_doc['tables']} / 占位框 {info_doc['placeholder_boxes']}")
-        print(f"[pptx] {PPTX_PATH}")
-        print(f"       P 页 {info_ppt['pages']} / 备用页 {info_ppt['backup']}")
+        print(f"[pptx·提交版] {PPTX_PATH}")
+        print(f"       封面 1 + P 页 {info_ppt['pages']} = {info_ppt['slides']} 页")
+        print(f"[pptx·备用页] {PPTX_BACKUP_PATH}")
+        print(f"       说明页 1 + 备用页 {info_backup['backup']} = {info_backup['slides']} 页（答辩自用，不进材料集）")
         print(f"[props] 已清理：{changed}")
 
     info = verify(warn)
     print("[verify] " + json.dumps(info, ensure_ascii=False))
-    for path in (DOCX_PATH, PPTX_PATH):
+    for path in (DOCX_PATH, PPTX_PATH, PPTX_BACKUP_PATH):
         print(f"[size] {os.path.basename(path)} = {os.path.getsize(path)} B")
 
     problems = []
     if info["docx_placeholder_boxes"] < len(CHAPTER_ASSETS):
         problems.append(f"占位框 {info['docx_placeholder_boxes']} < 章节数 {len(CHAPTER_ASSETS)}")
-    if info["pptx_slides"] < 15 + 7:
-        problems.append(f"PPT 页数 {info['pptx_slides']} 少于 P01–P14 + 备用页 7 页")
-    if info["pptx_slides_with_notes"] < info["pptx_slides"] - 2:
-        problems.append(f"有备注的页 {info['pptx_slides_with_notes']} 偏少（除封面与备用页目录外都应有备注）")
+    # 提交版页数口径（t106）：封面 + P01–P14 = 15 页。官方通知对 PPT 无页数限制，
+    # 15 页是我们自己的内部口径（03-PPT大纲.md / 11-PPT正文.md）；改了 md 页数就要同步这里。
+    if info["pptx_slides"] != 15:
+        problems.append(f"提交版 PPT 应为 15 页（封面 + P01–P14），实际 {info['pptx_slides']} 页")
+    if info["pptx_backup_slides"] != 8:
+        problems.append(f"备用页 PPT 应为 8 页（说明页 + B1–B7），实际 {info['pptx_backup_slides']} 页")
+    if info["pptx_slides_with_notes"] < info["pptx_slides"] - 1:
+        problems.append(f"提交版有备注的页 {info['pptx_slides_with_notes']} 偏少（除封面外都应有备注）")
     if not info["docx_page_field"]:
         problems.append("页脚缺 PAGE 域")
     if not info["docx_normal_15x"]:
