@@ -1,5 +1,5 @@
 HMProgram 应用端（harmony-app）HAP 构建日志
-生成时间（UTC+8）：2026-10-18 11:45:01
+生成时间（UTC+8）：2026-10-19 09:56:45
 工具链：5.8.9　Node：v18.20.1
 SDK：12 default 
 
@@ -8,12 +8,14 @@ SDK：12 default
 ==============================================================
 [31m1 ERROR: [31mArkTS:ERROR File: /mnt/c/Users/Administrator/Desktop/HMProgram/harmony-app/entry/src/main/ets/pages/HomePage.ets:23:28
  Cannot find name 'NOT_DEFINED_CONST_FOR_GATE_PROBE'.
-> hvigor [91mERROR: BUILD FAILED in 22 s 970 ms [39m
-回退注入：grep 计数 = 0（应为 0）
+> hvigor [91mERROR: BUILD FAILED in 14 s 952 ms [39m
+自证断言：hvigor rc=255（应≠0）；日志 BUILD FAILED=2 处、ArkTS 错误=2 处（都应≥1）；回退注入 grep 计数=0（应为 0）
 
 ==============================================================
 [2/2] 正式构建：hvigorw --no-daemon --no-analyze --max-workers=2 assembleHap
 ==============================================================
+构建前 /mnt/c/Users/Administrator/Desktop/HMProgram/harmony-app/entry/build/default/outputs/default 下无 HAP 产物
+构建起始时间戳（epoch，新鲜度基准）：1792375022
 > hvigor [33mWARN: Command line '--no-analyze' is deprecated, please use '--analyze=false' instead.[39m
 > hvigor [32mUP-TO-DATE :entry:default@PreBuild...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@GenerateMetadata...  [39m
@@ -21,33 +23,35 @@ SDK：12 default
 > hvigor [32mUP-TO-DATE :entry:default@MergeProfile...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@CreateBuildProfile...  [39m
 > hvigor [32mFinished :entry:default@PreCheckSyscap... after 3 ms [39m
-> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 4 ms [39m
-> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 10 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 5 ms [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 12 ms [39m
 > hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 1 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@MakePackInfo...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessProfile...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@SyscapTransform...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessRouterMap...  [39m
-> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 12 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 11 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessResource...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@GenerateLoaderJson...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessLibs...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@CompileResource...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@DoNativeStrip...  [39m
-> hvigor [32mFinished :entry:default@BuildJS... after 82 ms [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 78 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@CacheNativeLibs...  [39m
-> hvigor [32mFinished :entry:default@CompileArkTS... after 17 s 477 ms [39m
-> hvigor [32mFinished :entry:default@GeneratePkgModuleJson... after 78 ms [39m
-> hvigor [32mFinished :entry:default@PackageHap... after 1 s 117 ms [39m
+> hvigor [32mFinished :entry:default@CompileArkTS... after 15 s 984 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgModuleJson... after 25 ms [39m
+> hvigor [32mFinished :entry:default@PackageHap... after 860 ms [39m
 > hvigor [33mWARN: No signingConfig found for product default[39m
-> hvigor [32mFinished :entry:default@SignHap... after 31 ms [39m
+> hvigor [32mFinished :entry:default@SignHap... after 25 ms [39m
 > hvigor [32mFinished :entry:assembleHap... after 1 ms [39m
-> hvigor [32mBUILD SUCCESSFUL in 23 s 943 ms [39m
+> hvigor [32mBUILD SUCCESSFUL in 20 s 310 ms [39m
+正式构建 hvigor rc=0（应为 0）
 
 ==============================================================
 产物
 ==============================================================
--rwxrwxrwx 1 <user> <user> 971362 Oct 18 11:45 entry/build/default/outputs/default/entry-default-unsigned.hap
+971362 bytes  mtime=2026-10-19 09:57:23.118230600 +0800  /mnt/c/Users/Administrator/Desktop/HMProgram/harmony-app/entry/build/default/outputs/default/entry-default-unsigned.hap
+新鲜度判据：HAP mtime(epoch)=1792375043 ≥ 构建起始 epoch=1792375022 ⇒ 本轮产出
 
 说明：本机无 hdc 设备、CLT 内无模拟器、/dev/kvm 不可写，
       因此只做到「编译产 HAP」；安装/上架/真机运行标注为「待用户实测」。
