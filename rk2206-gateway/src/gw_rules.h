@@ -205,9 +205,16 @@ typedef struct {
 void gw_settings_init(gw_settings_t *s);
 
 /* 校验 + 落值。返回 GW_RC_OK / GW_RC_RANGE / GW_RC_UNSUPPORTED（= §4.5 的 result_code 0/2/1）。
- * echo 非空时写入成功响应 paras：{"result":"ok","key":"...","value":<值>}（§4.5）。 */
-int gw_threshold_apply(gw_settings_t *s, const char *key, const gw_th_value_t *v,
-                       char *echo, uint32_t echo_cap);
+ * **不产出响应报文**：回显改由下面的 gw_threshold_cmd_paras() 在"已确认成功"之后组装
+ * （t111 收口 L-1：曾经在这里顺手写回显，于是 0x10 无 ACK/被拒时响应里留下了 {"result":"ok"}）。 */
+int gw_threshold_apply(gw_settings_t *s, const char *key, const gw_th_value_t *v);
+
+/* 命令响应 paras 的唯一组装点（t111，契约 §4.5）：
+ *   result_code == 0 → {"result":"ok","key":"<key>","value":<值>}（与 §4.5 表格一致）
+ *   result_code != 0 → 空对象 {}（失败不回显 result/key/value：值并未生效，回显即自相矛盾）
+ * 返回写入字节数；buffer 太小/键查不到/值格式化失败一律退化成 {}，绝不输出半截 JSON。 */
+uint32_t gw_threshold_cmd_paras(int result_code, const char *key, const gw_th_value_t *v,
+                                char *out, uint32_t cap);
 
 /* 拼 §3.4 的 0x11 下行 PAYLOAD：
  *   {"cmd":"set_threshold","key":"<key>","value":<值>}

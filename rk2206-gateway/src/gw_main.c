@@ -1278,11 +1278,12 @@ static int handle_set_threshold(const cJSON *p, char *resp_paras, uint32_t cap, 
         return GW_RC_RANGE;             /* 缺 value / 类型不符：§4.5 =2 */
     }
 
-    rc = gw_threshold_apply(&s_settings, jkey->valuestring, &v, resp_paras, cap);
+    rc = gw_threshold_apply(&s_settings, jkey->valuestring, &v);
     if (rc != GW_RC_OK) {
         printf("[%s] set_threshold %s 拒绝 result=%d（%s）\n",
                GW_LOG_TAG, jkey->valuestring, rc,
                (rc == GW_RC_UNSUPPORTED) ? "未知键/不支持" : "参数越界");
+        /* t111：失败不回显 —— resp_paras 保持空，on_cmd 会把它填成 {}（契约 §4.5） */
         return rc;
     }
 
@@ -1333,6 +1334,10 @@ static int handle_set_threshold(const cJSON *p, char *resp_paras, uint32_t cap, 
     if (strcmp(jkey->valuestring, "report_interval_s") == 0) {
         s_report_interval_ms = s_settings.report_interval_s * 1000u;
     }
+    /* 走到这里才叫"真的成功"（本地已生效 + 节点 0x10 ACK 回 result=0）：
+     * 唯一产出成功回显的地方；上面任何一条 return 都不会再留下 {"result":"ok"}
+     * ——那是 t74 观察 L-1 的根因（t111 收口）。 */
+    (void)gw_threshold_cmd_paras(GW_RC_OK, jkey->valuestring, &v, resp_paras, cap);
     printf("[%s] set_threshold %s 生效并已下发（SEQ=%u）：%s\n",
            GW_LOG_TAG, jkey->valuestring, (unsigned)s_th_seq, payload);
     return GW_RC_OK;

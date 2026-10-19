@@ -579,14 +579,11 @@ static void th_note_applied(gw_settings_t *s, const gw_th_spec_t *spec)
     }
 }
 
-int gw_threshold_apply(gw_settings_t *s, const char *key, const gw_th_value_t *v,
-                       char *echo, uint32_t echo_cap)
+int gw_threshold_apply(gw_settings_t *s, const char *key, const gw_th_value_t *v)
 {
     const gw_th_spec_t *spec;
     const th_dst_t *dst;
     int rc;
-    char val[48];
-    int m;
 
     if (s == NULL || v == NULL || key == NULL) { return GW_RC_RANGE; }
 
@@ -618,13 +615,44 @@ int gw_threshold_apply(gw_settings_t *s, const char *key, const gw_th_value_t *v
     }
 
     th_note_applied(s, spec);
-
-    if (echo != NULL && echo_cap > 0u) {
-        if (th_value_json(spec, v, val, sizeof(val)) == 0u) { echo[0] = '\0'; return GW_RC_RANGE; }
-        m = snprintf(echo, echo_cap, "{\"result\":\"ok\",\"key\":\"%s\",\"value\":%s}", spec->key, val);
-        if (m <= 0 || (uint32_t)m >= echo_cap) { echo[0] = '\0'; }
-    }
     return GW_RC_OK;
+}
+
+/* 失败时的统一回包形状：空对象。抽出来是为了让"绝不输出半截 JSON"只有一个实现。 */
+static uint32_t th_paras_empty(char *out, uint32_t cap)
+{
+    if (out == NULL || cap < 3u) {
+        if (out != NULL && cap > 0u) { out[0] = '\0'; }
+        return 0u;
+    }
+    out[0] = '{';
+    out[1] = '}';
+    out[2] = '\0';
+    return 2u;
+}
+
+uint32_t gw_threshold_cmd_paras(int result_code, const char *key, const gw_th_value_t *v,
+                               char *out, uint32_t cap)
+{
+    const gw_th_spec_t *spec;
+    char val[48];
+    int m;
+
+    if (out == NULL || cap == 0u) { return 0u; }
+
+    /* 失败分支（1/2/7/10/11/12/1002/1003…）一律不回显：值没生效，回显即"自相矛盾的成功声明"。
+     * 失败原因由信封的 result_code 唯一表达，paras 再复述一遍不带来新信息（契约 §4.5）。 */
+    if (result_code != GW_RC_OK || key == NULL || v == NULL) {
+        return th_paras_empty(out, cap);
+    }
+
+    spec = gw_threshold_spec(key);
+    if (spec == NULL || th_value_json(spec, v, val, sizeof(val)) == 0u) {
+        return th_paras_empty(out, cap);
+    }
+    m = snprintf(out, cap, "{\"result\":\"ok\",\"key\":\"%s\",\"value\":%s}", spec->key, val);
+    if (m <= 0 || (uint32_t)m >= cap) { return th_paras_empty(out, cap); }
+    return (uint32_t)m;
 }
 
 uint32_t gw_threshold_cmd_payload(const char *key, const gw_th_value_t *v, char *out, uint32_t cap)
