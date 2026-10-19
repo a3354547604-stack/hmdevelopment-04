@@ -3,6 +3,7 @@
 > **用途**：本文是 `docs/参赛材料/03-PPT大纲.md` 的**逐页文字稿**，可直接粘进 PPT。页序与秒数与 `03` 一致（14 页 / 560 s，上限 600 s）；**配图以本稿为准**（`03` 的配图列为简写）。
 > **本文写到什么程度**：每页给「**标题 + ≤3 条要点（最终措辞）+ 配图编号 + 讲者备注要点**」。**不写逐字稿**——答辩念稿会掉分；备注是提示顺序与避坑，现场用自己的话讲。
 > **三条红线**：① D9：4G / 语音只写「扩展设计，本原型未实现」；② D11：产物指纹写「体积 + 提交号」，不用 sha256 当防伪；③ 未跑真机的界面/联网一律标「待实测」。
+> **活文件口径（t123）**：同 `10` —— `tools/test/reports/latest.md` 是**每次跑验收都会被覆盖**的活文件，材料里凡引用它均指截至提交号 `ea8ca79`（t98 复跑）那一版；复核用 `git show ea8ca79:tools/test/reports/latest.md`。
 > **数字口径**：本稿数字已按 t65 后的当前状态更新（**无设备自检 34/34**、HAP 971362 B、提交 `4424608`/`e0fa17b`），与 `harmony-app/deliverables/01|02|07` 一致。
 
 ---
@@ -251,7 +252,7 @@
 | 备用页 | 标题 | 要点（≤3 条） |
 |---|---|---|
 | B1 | 接口契约端点全表 | 18 App REST + §5 webhook + §6.21 取时；方法/路径/鉴权/幂等 |
-| B2 | 数据库表结构 | **11 张表**（用户/设备/绑定/告警/处置/读数/设置/重推…）【出处：`tools/test/reports/latest.md`（`db_tables=11`）+ `server/db/schema.sql`】 |
+| B2 | 数据库表结构 | **11 张表**（用户/设备/绑定/告警/处置/读数/设置/重推…）【出处：`tools/test/reports/latest.md`（**活文件**·截至 `ea8ca79`）（`db_tables=11`）+ `server/db/schema.sql`】 |
 | B3 | 错误码表 | §9.2 共 33 条；`1002` 越界 / `1003` 未知键 / `1104` 非属主 / `1206` 演示事件非法 |
 | B4 | 星闪帧与汇聚 UART 帧 | 契约 §3 帧格式（含 CRC）、SLE 上报字段 |
 | B5 | 告警重推时序 | §8.5 未确认队列状态机（`retry_count` / `next_retry_at` / 分级） |
@@ -304,7 +305,7 @@
 | HAP **971362 B**、提交 `4424608`、证据日志 `e0fa17b`；门禁自证 BUILD FAILED → SUCCESSFUL | `harmony-app/deliverables/01-HAP构建日志.txt` |
 | 无设备自检 **34/34（exit 0）**（含失败路径 exit=1 的负向证明） | `harmony-app/deliverables/02-无设备自检日志.txt` |
 | HTTP 契约探针 **32/32** | `tools/test/review/check_harmony_http.py`；独立证据 `docs/评审与验证/复核-t6-鸿蒙App骨架-2026-10-17.md:33`（32/32 CHECK PASS） |
-| 契约套件 **105 通过 / 0 失败 / 0 跳过**；解析口径 `endpoints=20`、`biz_codes=33`、`db_tables=11`、`device_codes=13` | `tools/test/reports/latest.md`（git `ea8ca79`，t98 复跑） |
+| 契约套件 **105 通过 / 0 失败 / 0 跳过**；解析口径 `endpoints=20`、`biz_codes=33`、`db_tables=11`、`device_codes=13` | `tools/test/reports/latest.md`（**活文件**·截至 `ea8ca79`，t98 复跑） |
 | 云端真 MySQL pytest **116 passed / 0 failed / exit 0**（HEAD `ea8ca79`（t98） 实测；t49 时点 112、t30 时点 105） | `server/tests/test_80_demo_seed.py`；`docs/评审与验证/复核-t30-服务器收口F01至F04-2026-10-18.md:39,124` |
 | 20 条端点在代码中逐条存在；密钥 0 命中；测试库 `_test` 隔离 | `docs/评审与验证/复核-t5-服务器骨架与模拟API-2026-10-17.md` |
 | 节点/汇聚编译 **41 组合 0 失败** | `ws63-firmware/doc/12-汇聚H1-SLE客户端与UART帧.md:67`；`docs/评审与验证/复核-t2-节点固件骨架-2026-10-18.md:35` |
