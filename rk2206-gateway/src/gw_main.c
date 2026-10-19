@@ -29,6 +29,7 @@
 #include "gw_net.h"
 #include "gw_store.h"
 #include "gw_kvcfg.h"
+#include "gw_wifi_shell.h"
 
 #include "ohos_init.h"
 #include "los_task.h"
@@ -1162,19 +1163,98 @@ static void tick_task(void *arg)
     }
 }
 
+/* ---- 联网（t136）：串口 `wifi set` 与长按配网键写的是同一份 gw_store 凭证 ----
+ * 为什么不再无条件调 SetWifiModeOn()：它读的是 SDK 自己的 Vendor 槽
+ * （VENDOR_ID_WIFI_ROUTE_SSID / PASSWD），我们从来没往那里写过；
+ * 现场表现就是 `ifconfig` 里 wlan0 一直 not connected，然后永远卡在"取时失败"。 */
+static void net_wifi_boot(void)
+{
+    char ssid[GW_PROV_SSID_MAX + 1u];
+    char psk[GW_PROV_PSK_LEN];
+    char reason[GW_NET_REASON_LEN];
+    char ip[24];
+
+    ssid[0] = '\0';
+    psk[0] = '\0';
+    if (gw_store_cred_load(ssid, (uint32_t)sizeof(ssid), psk, (uint32_t)sizeof(psk)) != 0) {
+        printf("[%s] 未配置家庭 Wi-Fi：串口敲 `wifi set ssid=<名称> psk=<口令>`，"
+               "或长按配网键 3 s 进网页配网\n", GW_LOG_TAG);
+        /* 兼容路径：SDK 槽里若被写过硬编码的 SSID（出厂镜像），SetWifiModeOn 仍能连上 */
+        SetWifiModeOn();
+        LOS_Msleep(GW_WIFI_BOOT_SETTLE_MS);
+        return;
+    }
+    printf("[%s] 联网：使用 Flash 里的家庭 Wi-Fi ssid=%s（口令不回显）\n", GW_LOG_TAG, ssid);
+    if (gw_net_sta_connect_wait(ssid, psk, GW_WIFI_CONNECT_TIMEOUT_MS, reason,
+                                (uint32_t)sizeof(reason)) == 1) {
+        ip[0] = '\0';
+        (void)gw_net_sta_ip(ip, (uint32_t)sizeof(ip));
+        printf("[%s] 联网成功：IP=%s（接着取时 → 连 IoTDA）\n", GW_LOG_TAG, ip);
+    } else {
+        printf("[%s] ⚠ 联网失败：%s（串口 `wifi show` 复查，`wifi set` 重配）\n",
+               GW_LOG_TAG, gw_net_reason_text(reason));
+    }
+    memset(psk, 0, sizeof(psk));
+}
+
+/* 开机没连上时的有限重试：路由器刚重启、DHCP 慢都靠这段兜住。
+ * 为什么要有上限：AddDeviceConfig 每次都会往 SDK 的配置表里加一条，
+ * 无限重试迟早把它撑满（那以后连正常配置都加不进去）。 */
+static void net_wifi_retry(uint32_t now, uint32_t *last_ms, uint8_t *tries)
+{
+    char ssid[GW_PROV_SSID_MAX + 1u];
+    char psk[GW_PROV_PSK_LEN];
+    char reason[GW_NET_REASON_LEN];
+    char ip[24];
+
+    if (*tries >= GW_WIFI_RETRY_MAX) {
+        return;
+    }
+    if (gw_net_sta_ip(ip, (uint32_t)sizeof(ip)) == 0) {
+        return;                 /* 已经连着，没必要再发起一次 */
+    }
+    if (gw_prov_active(&s_prov) != 0) {
+        return;                 /* 配网窗口里由 gw_prov 自己管 STA，别抢 */
+    }
+    if (*last_ms != 0u && (uint32_t)(now - *last_ms) < GW_WIFI_RETRY_MS) {
+        return;
+    }
+    *last_ms = now;
+    (*tries)++;
+    ssid[0] = '\0';
+    psk[0] = '\0';
+    if (gw_store_cred_load(ssid, (uint32_t)sizeof(ssid), psk, (uint32_t)sizeof(psk)) != 0) {
+        *tries = GW_WIFI_RETRY_MAX;     /* 没有凭证：重试也没用 */
+        return;
+    }
+    if (gw_net_sta_connect_wait(ssid, psk, GW_WIFI_CONNECT_TIMEOUT_MS, reason,
+                                (uint32_t)sizeof(reason)) == 1) {
+        ip[0] = '\0';
+        (void)gw_net_sta_ip(ip, (uint32_t)sizeof(ip));
+        printf("[%s] 联网重试成功（第 %u 次）：IP=%s\n", GW_LOG_TAG, (unsigned)*tries, ip);
+        *tries = GW_WIFI_RETRY_MAX;     /* 连上就不再重试 */
+    } else {
+        printf("[%s] 联网重试失败（%u/%u）：%s\n", GW_LOG_TAG, (unsigned)*tries,
+               (unsigned)GW_WIFI_RETRY_MAX, gw_net_reason_text(reason));
+    }
+    memset(psk, 0, sizeof(psk));
+}
+
 static void net_task(void *arg)
 {
     uint32_t now;
     uint32_t last_try_ms = 0;
+    uint32_t last_wifi_ms = 0;
+    uint8_t  wifi_tries = 0;
 
     (void)arg;
-    SetWifiModeOn();        /* 用 Flash 里已存的 SSID/密码联网（config_network.h） */
-    LOS_Msleep(8000);       /* 等 DHCP：联网 → 取时 → 连云，顺序不能反 */
+    net_wifi_boot();        /* 联网 → 取时 → 连云，顺序不能反 */
 
     for (;;) {
         now = gw_now_ms();
 
         if (!gw_cloud_is_connected(&s_cloud)) {
+            net_wifi_retry(now, &last_wifi_ms, &wifi_tries);
             if (gw_time_is_synced() == 0) {
                 (void)gw_try_timesync();
             }
@@ -1474,6 +1554,38 @@ static void demo_gas_tick(uint32_t now)
 }
 
 /* ============================== 启动 ============================== */
+/* `wifi` 命令（t136）的板级回调：把"真的去读写/去连"收在这里，
+ * gw_wifi_shell.c 因此只剩纯逻辑，主机自测能覆盖全部参数分支。 */
+static int wifi_op_sta_info(char *ssid, uint32_t ssid_cap, char *ip, uint32_t ip_cap)
+{
+    if (gw_net_sta_ip(ip, ip_cap) != 0) {
+        return 0;               /* 拿不到 IP 就是没连上，别把"正在连"报成已连接 */
+    }
+    (void)gw_net_sta_ssid(ssid, ssid_cap);
+    return 1;
+}
+
+/* 「取时 → 连云」进度：真正的判据是串口那两行日志，这里只让人少敲一次 show */
+static int wifi_op_progress(char *out, uint32_t cap)
+{
+    if (out == NULL || cap == 0u) {
+        return -1;
+    }
+    (void)snprintf(out, cap, "取时=%s，已连 IoTDA=%s",
+                   (gw_time_is_synced() != 0) ? "完成" : "未完成（等 /api/time 或 NTP）",
+                   gw_cloud_is_connected(&s_cloud) ? "是" : "否");
+    return 0;
+}
+
+static const gw_wifi_ops_t s_wifi_ops = {
+    .cred_load = gw_store_cred_load,
+    .cred_save = gw_store_cred_save,
+    .connect   = gw_net_sta_connect_wait,
+    .sta_info  = wifi_op_sta_info,
+    .scan      = gw_net_scan_list,
+    .progress  = wifi_op_progress,
+};
+
 static UINT32 task_create(TSK_ENTRY_FUNC fn, void *arg, UINT32 stack, UINT16 prio, const char *name)
 {
     UINT32 tid = 0;
@@ -1549,6 +1661,11 @@ static void gw_main_entry(void)
     /* 8) 串口凭证工具（t34）：`gwkv ...` 挂在 SDK 自带 shell 上。
      * 走调试串口（与 [gw] 日志同口），**不动**契约 §3 的汇聚 UART0 二进制链路。 */
     gw_kvcfg_shell_register();
+
+    /* 8.1) 串口配网（t136）：`wifi show/set/scan`。
+     * 先装回调表再注册命令——注册是同步的，装反了第一条命令就会报"板级回调未接"。 */
+    gw_wifi_set_ops(&s_wifi_ops);
+    gw_wifi_shell_register();
 
     /* 9) 任务 */
     if (task_create(uart_task, NULL, GW_TASK_STACK_UART, GW_TASK_PRIO_UART, "gwUart") != LOS_OK) {

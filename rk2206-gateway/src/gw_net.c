@@ -23,6 +23,7 @@
 #include "lwip/ip_addr.h"
 #include "lwip/netif.h"
 #include "lwip/netifapi.h"
+#include "los_task.h"          /* LOS_Msleep：只在 gw_net_sta_connect_wait 里用 */
 #include "wifi_device.h"
 #include "wifi_error_code.h"
 #include "wifi_hotspot.h"
@@ -60,6 +61,122 @@ static int net_freq_to_ch(int freq)
         return (freq - 2407) / 5;
     }
     return 0;
+}
+
+/* ------------------------------------------------- 阻塞式连接（t136 新增） */
+
+static void net_set_reason(char *reason, uint32_t cap, const char *s)
+{
+    if (reason != NULL && cap > 0u) {
+        (void)snprintf(reason, cap, "%s", s);
+    }
+}
+
+const char *gw_net_reason_text(const char *reason)
+{
+    if (reason == NULL || reason[0] == '\0') {
+        return "未给出原因";
+    }
+    if (strcmp(reason, "auth") == 0) {
+        return "认证失败：口令不对，或被路由器拉黑/限速";
+    }
+    if (strcmp(reason, "timeout") == 0) {
+        return "超时：SSID 拼错 / 信号弱 / 那是 5 GHz 网络";
+    }
+    if (strcmp(reason, "internal") == 0) {
+        return "Wi-Fi 驱动返回错误";
+    }
+    if (strcmp(reason, "busy") == 0) {
+        return "另一条连接正在进行";
+    }
+    if (strcmp(reason, "not_found") == 0) {
+        return "2.4 GHz 扫描里没有这个 SSID";
+    }
+    return reason;
+}
+
+int gw_net_sta_connect_wait(const char *ssid, const char *psk,
+                            uint32_t timeout_ms, char *reason, uint32_t cap)
+{
+    uint32_t waited = 0u;
+    int r;
+
+    if (reason != NULL && cap > 0u) {
+        reason[0] = '\0';
+    }
+    /* 已有连接在跑（例如配网窗口里 gw_prov 刚发起的那次）就不再叠一条：
+     * wifi_lite 的 AddDeviceConfig/ConnectTo 不是可重入的，同时发起会互相打断。 */
+    if (s_sta_pending != 0u) {
+        net_set_reason(reason, cap, "busy");
+        return -1;
+    }
+    if (gw_net_sta_start(ssid, psk) != 0) {
+        net_set_reason(reason, cap, "internal");
+        return -1;
+    }
+    for (;;) {
+        LOS_Msleep(GW_WIFI_CONNECT_POLL_MS);
+        waited += GW_WIFI_CONNECT_POLL_MS;
+        r = gw_net_sta_poll(reason, cap);
+        if (r == 1) {
+            return 1;
+        }
+        if (r < 0) {
+            return -1;
+        }
+        if (waited >= timeout_ms) {
+            s_sta_pending = 0u;     /* 别把状态留成"还在连"，否则下一次直接 busy */
+            net_set_reason(reason, cap, "timeout");
+            return -1;
+        }
+    }
+}
+
+/* --------------------------------------------------------- 扫描（列表） */
+
+int gw_net_scan_list(char *out, uint32_t cap)
+{
+    static WifiScanInfo list[GW_NET_SCAN_MAX];
+    unsigned int num = GW_NET_SCAN_MAX;
+    unsigned int i;
+    unsigned int n = 0u;
+    uint32_t used = 0u;
+
+    if (out == NULL || cap == 0u) {
+        return -1;
+    }
+    out[0] = '\0';
+    if (net_wifi_on() != 0) {
+        return -1;
+    }
+    memset(list, 0, sizeof(list));
+    if (Scan() != WIFI_SUCCESS) {
+        /* 单射频：SoftAP 起来以后驱动会拒绝扫描。这不是故障，只是"这会儿扫不了" */
+        printf("[NET] 扫描被驱动拒绝（SoftAP 已开启？）\n");
+        return -1;
+    }
+    if (GetScanInfoList(list, &num) != WIFI_SUCCESS) {
+        return -1;
+    }
+    if (num > GW_NET_SCAN_MAX) {
+        num = GW_NET_SCAN_MAX;
+    }
+    for (i = 0u; i < num && n < GW_NET_LIST_MAX; i++) {
+        int ch = net_freq_to_ch(list[i].frequency);
+        int w;
+
+        if (ch == 0) {
+            continue;               /* 只要 2.4 G：网关连 5 G 连不上，列出来只会误导 */
+        }
+        w = snprintf(out + used, cap - used, "    %u) %-32s rssi=%d dBm ch=%d\n",
+                     n + 1u, (const char *)list[i].ssid, (int)list[i].rssi, ch);
+        if (w <= 0 || (uint32_t)w >= (cap - used)) {
+            break;
+        }
+        used += (uint32_t)w;
+        n++;
+    }
+    return (int)n;
 }
 
 /* ------------------------------------------------------------------ AP */

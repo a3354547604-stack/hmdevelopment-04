@@ -1623,6 +1623,261 @@ static void test_kvcfg(void)
     gw_host_flash_reset();
 }
 
+/* -------------------- t136：串口 `wifi` 命令（纯逻辑 + 注入回调） --------------------
+ *
+ * 为什么这段能在主机上跑：gw_wifi_shell.c 不 include 任何 SDK 头，全部副作用走
+ * gw_wifi_ops_t。这里装一份假表，把"现场最贵的那几个错误分支"（空 SSID / 超长 /
+ * 口令 <8 / 写 Flash 失败 / 认证失败 / 超时 / 扫描不可用）提前跑一遍——
+ * 真机上错一次就得挪路由器。
+ *
+ * 期望值来源不是"跑一遍看输出"：
+ *   - 长度边界取 gw_config.h 的契约常量（GW_PROV_SSID_MAX=32、GW_PROV_PSK_MIN=8、PSK_MAX=63）
+ *   - 「口令不回显」断言的是"明文一次都不出现在输出里"（安全口径，不是排版偏好）
+ */
+#include "gw_wifi_shell.h"
+
+static char        s_wf_ssid[GW_PROV_SSID_MAX + 1u];
+static char        s_wf_psk[GW_WIFI_PSK_CAP];
+static int         s_wf_configured;
+static int         s_wf_save_fail;
+static int         s_wf_connect_rc;
+static const char *s_wf_connect_reason = "auth";
+static int         s_wf_sta_ok;
+static int         s_wf_scan_n;
+static int         s_wf_save_calls;
+static int         s_wf_connect_calls;
+static char        s_wf_last_psk[GW_WIFI_PSK_CAP];
+
+static int wf_cred_load(char *ssid, uint32_t ssid_cap, char *psk, uint32_t psk_cap)
+{
+    /* 契约：读不到必须把两个缓冲清空（否则调用方会拿上一轮的残留值） */
+    if (ssid_cap > 0u) {
+        ssid[0] = '\0';
+    }
+    if (psk_cap > 0u) {
+        psk[0] = '\0';
+    }
+    if (!s_wf_configured) {
+        return -1;
+    }
+    (void)snprintf(ssid, ssid_cap, "%s", s_wf_ssid);
+    (void)snprintf(psk, psk_cap, "%s", s_wf_psk);
+    return 0;
+}
+
+static int wf_cred_save(const char *ssid, const char *psk)
+{
+    s_wf_save_calls++;
+    if (s_wf_save_fail) {
+        return -1;
+    }
+    (void)snprintf(s_wf_ssid, sizeof(s_wf_ssid), "%s", ssid);
+    (void)snprintf(s_wf_psk, sizeof(s_wf_psk), "%s", psk);
+    s_wf_configured = 1;
+    return 0;
+}
+
+static int wf_connect(const char *ssid, const char *psk, uint32_t timeout_ms, char *reason, uint32_t cap)
+{
+    (void)ssid;
+    (void)timeout_ms;
+    s_wf_connect_calls++;
+    (void)snprintf(s_wf_last_psk, sizeof(s_wf_last_psk), "%s", psk != NULL ? psk : "");
+    if (reason != NULL && cap > 0u) {
+        reason[0] = '\0';
+        if (s_wf_connect_rc != 1) {
+            (void)snprintf(reason, cap, "%s", s_wf_connect_reason);
+        }
+    }
+    return s_wf_connect_rc;
+}
+
+static int wf_sta_info(char *ssid, uint32_t ssid_cap, char *ip, uint32_t ip_cap)
+{
+    if (!s_wf_sta_ok) {
+        return 0;
+    }
+    (void)snprintf(ssid, ssid_cap, "%s", s_wf_ssid);
+    (void)snprintf(ip, ip_cap, "192.168.1.77");
+    return 1;
+}
+
+static int wf_scan(char *out, uint32_t cap)
+{
+    if (s_wf_scan_n < 0) {
+        return -1;
+    }
+    if (s_wf_scan_n == 0) {
+        out[0] = '\0';
+        return 0;
+    }
+    (void)snprintf(out, cap, "    1) HomeWiFi                         rssi=-42 dBm ch=6\n");
+    return 1;
+}
+
+static int wf_progress(char *out, uint32_t cap)
+{
+    (void)snprintf(out, cap, "取时=未完成（等 /api/time 或 NTP），已连 IoTDA=否");
+    return 0;
+}
+
+static const gw_wifi_ops_t wf_ops = {
+    wf_cred_load, wf_cred_save, wf_connect, wf_sta_info, wf_scan, wf_progress
+};
+
+#define GW_WF_PSK   "hunter2secret"     /* 明文口令：全程不得出现在任何输出里 */
+
+static void test_wifi_cmd(void)
+{
+    char out[GW_WIFI_CMD_OUT_MAX];
+    char big[40];
+    char long_psk[80];
+    int rc;
+
+    t_start("t136 串口 wifi：参数解析 / 边界 / 口令不回显 / 失败可判读");
+
+    s_wf_ssid[0] = '\0';
+    s_wf_psk[0] = '\0';
+    s_wf_configured = 0;
+    s_wf_save_fail = 0;
+    s_wf_connect_rc = 1;
+    s_wf_connect_reason = "auth";
+    s_wf_sta_ok = 1;
+    s_wf_scan_n = 1;
+    s_wf_save_calls = 0;
+    s_wf_connect_calls = 0;
+    gw_wifi_set_ops(&wf_ops);
+
+    /* ① 用法与子命令分派 */
+    rc = gw_wifi_cmd("wifi", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "wifi set ssid=") != NULL, "光敲 `wifi` → 打用法（含可照抄的一行）");
+    rc = gw_wifi_cmd("wifi help", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "口令不回显") != NULL, "help：明确写出「口令不回显」这条口径");
+    rc = gw_wifi_cmd("wifi nosuch", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "不认识的子命令") != NULL, "未知子命令 → 拒绝 + 用法");
+    rc = gw_wifi_cmd("show", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "未配置家庭 Wi-Fi") != NULL,
+         "不带 `wifi` 前缀也认（shell argv 形态）；未配置时明说「未配置」");
+
+    /* ② 边界：空 SSID / 超长 SSID / 口令过短 / 口令过长 / 非法字符 */
+    rc = gw_wifi_cmd("wifi set ssid= psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "SSID 不能为空") != NULL, "空 SSID → 拒绝（1–32 字节）");
+    memset(big, 'A', 33); big[33] = '\0';
+    {
+        char line[128];
+        (void)snprintf(line, sizeof(line), "wifi set ssid=%s psk=%s", big, GW_WF_PSK);
+        rc = gw_wifi_cmd(line, out, sizeof(out));
+    }
+    t_ok(rc == -1 && strstr(out, "SSID 太长：33 > 32") != NULL, "SSID 33 字节 → 拒绝（报出 33 > 32）");
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=1234567", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "口令太短：7 < 8") != NULL, "口令 7 字节 → 拒绝（WPA2 最少 8）");
+    memset(long_psk, 'p', 64); long_psk[64] = '\0';
+    {
+        char line[160];
+        (void)snprintf(line, sizeof(line), "wifi set ssid=HomeWiFi psk=%s", long_psk);
+        rc = gw_wifi_cmd(line, out, sizeof(out));
+    }
+    t_ok(rc == -1 && strstr(out, "口令太长：64 > 63") != NULL, "口令 64 字节 → 拒绝（最多 63）");
+    rc = gw_wifi_cmd("wifi set ssid=Bad\"Name psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "SSID 含非法字符") != NULL, "SSID 带双引号 → 拒绝（粘贴整段时最容易带进来）");
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=\xe5\x8f\xa3\xe4\xbb\xa4""12345678", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "口令含非法字符") != NULL, "口令含中文 → 拒绝（WPA2 口令是可见 ASCII）");
+
+    /* ③ 缺参数 / 多参数：打错一个字母必须报错，不能静默忽略 */
+    rc = gw_wifi_cmd("wifi set psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "缺 ssid=") != NULL, "只给 psk → 报缺 ssid");
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "缺 psk=") != NULL, "只给 ssid → 报缺 psk");
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK " passwd=oops", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "不认识的参数") != NULL && strstr(out, "passwd=oops") != NULL,
+         "把 psk 写成 passwd → 明确拒绝并回显那个参数名");
+    t_ok(s_wf_save_calls == 0 && s_wf_connect_calls == 0,
+         "以上所有拒绝路径都没碰 Flash、也没发连接（校验必须在副作用之前）");
+
+    /* ④ 成功：写 Flash + 立即联网 + 报 IP + 报「取时/连云」进度 */
+    out[0] = '\0';
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "已保存 ssid=HomeWiFi") != NULL, "合法参数 → 落 Flash 并回显 SSID");
+    t_ok(strstr(out, "不回显") != NULL && strstr(out, GW_WF_PSK) == NULL,
+         "输出里只有「不回显」，明文口令一个字符都不出现");
+    t_ok(strstr(out, "✓ 已连上 ssid=HomeWiFi，IP=192.168.1.77") != NULL, "连上后报 SSID 与拿到的 IP");
+    t_ok(strstr(out, "取时=未完成") != NULL && strstr(out, "已连 IoTDA=否") != NULL,
+         "同时报出「取时 → 连 IoTDA」进度（别让人以为连上 Wi-Fi 就完事了）");
+    t_ok(strcmp(s_wf_last_psk, GW_WF_PSK) == 0 && s_wf_save_calls == 1,
+         "真把口令交给了 cred_save/connect（不打印 ≠ 不生效）");
+    /* 连上但 DHCP 还没给地址：不能报成"已连上 ssid= ip="（空值最误导） */
+    s_wf_sta_ok = 0;
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "IP 还没拿到") != NULL && strstr(out, "IP=192.168.1.77") == NULL,
+         "连上但没拿到 IP → 明说「DHCP 慢」，不打印空 IP");
+    s_wf_sta_ok = 1;
+
+    /* ⑤ 失败必须可判读：auth / timeout / busy 三句话各不相同 */
+    s_wf_connect_rc = -1;
+    s_wf_connect_reason = "auth";
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "认证失败") != NULL && strstr(out, "口令不对") != NULL,
+         "reason=auth → 「认证失败：口令不对」，并给出排查顺序");
+    s_wf_connect_reason = "timeout";
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "超时") != NULL && strstr(out, "5 GHz") != NULL,
+         "reason=timeout → 报超时并点出「5 GHz / 拼错」这两种现场常见原因");
+    s_wf_connect_reason = "busy";
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "另一条连接正在进行") != NULL, "reason=busy → 说清是与配网窗口抢，而不是泛泛的失败");
+    s_wf_connect_reason = "internal";
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "Wi-Fi 驱动返回错误") != NULL, "reason=internal → 指向驱动层（GetLinkedInfo/ConnectTo）");
+    s_wf_connect_rc = 1;
+
+    /* ⑥ 写 Flash 失败：必须说"没保存"，否则用户会以为已经生效 */
+    s_wf_save_fail = 1;
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "凭证没有保存") != NULL && strstr(out, GW_WF_PSK) == NULL,
+         "cred_save 失败 → 明说「没有保存」且仍不回显口令");
+    s_wf_save_fail = 0;
+
+    /* ⑦ show：已配置 + STA 已连 + 进度；口令不得出现 */
+    rc = gw_wifi_cmd("wifi show", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "已保存 SSID：HomeWiFi") != NULL &&
+         strstr(out, "STA：已连接 ssid=HomeWiFi ip=192.168.1.77") != NULL,
+         "show（已配置 + 已连）：SSID / STA / IP 三项齐全");
+    t_ok(strstr(out, "口令不回显") != NULL && strstr(out, GW_WF_PSK) == NULL,
+         "show 也绝不打印口令（连长度都不给）");
+    s_wf_sta_ok = 0;
+    rc = gw_wifi_cmd("wifi show", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "STA：未连接") != NULL, "show（未连）：明说 STA 未连接");
+    s_wf_sta_ok = 1;
+    rc = gw_wifi_cmd("wifi show extra", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "不带参数") != NULL, "show 收到多余参数：提示忽略，不报错退出");
+
+    /* ⑧ scan：有热点 / 0 个 / 扫不了 三种都要能判读 */
+    rc = gw_wifi_cmd("wifi scan", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "HomeWiFi") != NULL && strstr(out, "rssi=-42") != NULL,
+         "scan：列出 SSID 与 RSSI（现场核对拼写与信号用）");
+    s_wf_scan_n = 0;
+    rc = gw_wifi_cmd("wifi scan", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "0 个 2.4 GHz 热点") != NULL, "scan 扫到 0 个 → 提示路由器可能只开 5 GHz");
+    s_wf_scan_n = -1;
+    rc = gw_wifi_cmd("wifi scan", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "SoftAP 已开启时单射频驱动会拒绝扫描") != NULL,
+         "scan 被驱动拒绝 → 说清原因，并给「直接按名字 set」的替代路径");
+    s_wf_scan_n = 1;
+
+    /* ⑨ 回调未接 / 输出缓冲太小：不能静默 */
+    gw_wifi_set_ops(NULL);
+    rc = gw_wifi_cmd("wifi show", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "板级回调未接") != NULL, "回调表为空 → 明确报内部错误（不崩不静默）");
+    gw_wifi_set_ops(&wf_ops);
+    out[0] = '\0';
+    rc = gw_wifi_cmd("wifi show", out, 64u);
+    t_ok(rc == -1, "输出缓冲 < 128 B → 直接拒绝（不给截断的半个句子）");
+    rc = gw_wifi_cmd(NULL, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "用法") != NULL, "line=NULL → 打用法并拒绝");
+
+    gw_wifi_set_ops(NULL);
+}
+
 int main(void)
 {
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
@@ -1631,6 +1886,7 @@ int main(void)
     test_set_threshold();            /* §4.5 set_threshold：21 键校验 + 生效 + 0x11 payload */
     test_threshold_fail_paras();     /* t111 L-1 收口：失败响应 paras 必须是 {}、不谎报成功 */
     test_kvcfg();                    /* t34 凭证 KV：布局 + 落盘 + 串口命令 + 负向 */
+    test_wifi_cmd();                 /* t136 串口 wifi：边界校验 + 口令不回显 + 失败可判读 */
     test_parser();
     test_crypto_auth();
     test_time();

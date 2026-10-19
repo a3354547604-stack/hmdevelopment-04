@@ -235,4 +235,22 @@
 /* §12.5 device_sn 占位：真实值优先取 Vendor Flash 里的 SN，取不到才用它。 */
 #define GW_DEVICE_SN                "M0-3F1A2B"
 
+/* ------------------------------------------------------------------ *
+ * 9. 串口 `wifi` 命令（t136）：免按键配网
+ *    现场没有外接配网按键，原来只能长按 GPIO0_PA3 进 SoftAP，
+ *    所以给调试串口一条命令直接写家庭 Wi-Fi。数值都是"人机交互"口径：
+ *    - 15 s：配网流程默认 30 s，但串口命令是人在等、失败还能重敲；
+ *      15 s 覆盖 DHCP 慢的常见情况，又不至于让串口看起来卡死。
+ *    - 100 ms：与 gw_net_sta_poll 的"3 s 后才认认证失败"节拍配套
+ *      （GW_NET_AUTH_FAIL_POLLS = 30）。
+ * ------------------------------------------------------------------ */
+#define GW_WIFI_CONNECT_TIMEOUT_MS  15000u  /* wifi set 同步等连接结果的上限 */
+#define GW_WIFI_CONNECT_POLL_MS     100u    /* 阻塞等待时每次轮询的间隔 */
+#define GW_WIFI_BOOT_SETTLE_MS      8000u   /* 开机等 DHCP（沿用原 net_task 的 8 s） */
+#define GW_WIFI_RETRY_MS            30000u  /* 开机没连上时 net_task 的重试间隔 */
+#define GW_WIFI_RETRY_MAX           6u      /* 最多重试 6 次（≈3 min）后停手：
+                                             * 反复 AddDeviceConfig 会把 SDK 的配置表撑满 */
+#define GW_NET_REASON_LEN           16u     /* "auth"/"timeout"/"internal"/"busy"/"not_found" */
+#define GW_NET_LIST_MAX             12u     /* wifi scan 最多列 12 个 2.4 G 热点 */
+
 #endif /* GW_CONFIG_H */

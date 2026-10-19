@@ -38,9 +38,11 @@ mkdir -p "$OUT"
 [ -f "$CJSON_SRC" ] || { echo "找不到 $CJSON_SRC（cJSON 随 SDK 提供；用 GW_SDK=<SDK 路径> 指定）" >&2; exit 2; }
 
 CFLAGS='-std=c99 -O1 -g -Wall -Wextra -Wno-unused-parameter'
-OBJS='gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c gw_kvcfg.c'
+OBJS='gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c gw_kvcfg.c gw_wifi_shell.c'
 # ↑ t34 起多一个 gw_kvcfg.c（凭证 Flash KV 的编解码与串口命令本体：纯逻辑、不碰 SDK）。
 #   它必须在这份清单里，否则 test/gw_selftest.c 的 test_kvcfg() 会因缺符号编译不过。
+#   t136 起再多一个 gw_wifi_shell.c（`wifi show/set/scan` 的参数解析与边界校验：
+#   副作用全走 gw_wifi_ops_t 注入，所以它能在主机上跑，test_wifi_cmd() 覆盖全部分支）。
 #   gw_kvcfg_shell.c（osCmdReg 那层）是板级，主机刻意不编 —— 与 gw_plat.c/gw_main.c 同理。
 
 run_host() {

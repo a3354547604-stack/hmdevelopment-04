@@ -34,7 +34,8 @@ static_library("gateway_app") {
         "gw_net.c",         # 板级 Wi-Fi：SoftAP / STA / 2.4 G 预检（wifi_lite）
         "gw_store.c",       # 配网持久化：Wi-Fi 凭证 + 绑定白名单（Vendor Flash）
         "gw_kvcfg.c",       # 设备凭证 KV：编解码 + 写入/读回校验 + 串口命令本体（纯逻辑）
-        "gw_kvcfg_shell.c", # 把 `gwkv` 挂到 SDK 自带 shell（板级，主机自测不编）
+        "gw_wifi_shell.c",  # 串口 `wifi show/set/scan` 命令本体（纯逻辑，回调表注入）
+        "gw_kvcfg_shell.c", # 把 `gwkv` / `wifi` 挂到 SDK 自带 shell（板级，主机自测不编）
     ]
 
     include_dirs = [
