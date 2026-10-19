@@ -193,6 +193,31 @@ python3 tools/pack-submission.py --check-only
 | `--check-only` 同一包 | rc=1，FAIL 2：① `tools/freeze_check.py:238` 字面量「学校/队名」被身份扫描判红（**t101 文件，不在 t108 inScope，已上报**）② 材料齐全·② 演示视频 `.mp4` 缺件（t77 材料返工） |
 | `--selftest` | **rc=0**，五项自证全通过（干净包 rc=0、脏包 rc≠0、命中 `.env`、命中本机用户名、命中 Windows 反斜杠 3 行、备用页被排除且不在包内） |
 
+## t121 口径：正式预演统一带 `--allow-missing-materials`（2026-10-19）
+
+**现象**：`--check-only` 裸跑（不带 flag）会 **rc=1**，唯一 FAIL 是 `材料齐全·② 演示视频 .mp4 缺件`。
+**这不是缺陷** —— 它与 `--pack` 需要 `--allow-missing-materials` 是**同一件事的两种口径**：
+
+| 模式 | 缺件（mp4 / docx / pptx） | 用途 |
+|---|---|---|
+| 试跑模式（带 `--allow-missing-materials`） | 降级为 **WARN** | 材料返工期间证明「除缺件外无真问题」 |
+| 严格模式（不带该 flag） | 判 **FAIL / rc=1** | 材料定稿后的正式出包判据 |
+
+**正式预演统一写法**（与 `--pack` 同口径）：
+
+```bash
+python3 tools/pack-submission.py --pack --allow-missing-materials --out /tmp/preflight
+python3 tools/pack-submission.py --check-only /tmp/preflight/<刚打出的包> --allow-missing-materials
+# 不给包路径时：自动取 --out 目录里 mtime 最新的 .zip/.rar
+```
+
+**mp4 录好、材料齐全后，裸跑 `--check-only` 即 rc=0**（不再需要该 flag）——那正是「材料已定稿」的信号之一。
+
+**依据（绑定证据）**：t121 冻结前全量验收，报告 `docs/评审与验证/冻结前全量验收-2026-10-19.md`，
+**被验收 HEAD `d9eb3b7`**、**报告提交 `80fecce`**：裸跑 rc=1 唯一 FAIL 为 mp4 缺件；同口径
+`--check-only --allow-missing-materials` → **rc=0 / FAIL 0（共 12 条）**，解包安全项全绿
+（禁入路径 0 条、身份/PII 非良性命中 0 处、包名符合 R7）。
+
 ## 边界
 
 - 正式提交包**没有生成**：材料正文仍在返工（卡 t77），且 R7 要 rar 而本机没有 `rar` 命令。

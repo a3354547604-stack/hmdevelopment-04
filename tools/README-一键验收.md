@@ -14,7 +14,7 @@ bash tools/freeze-check.sh --full      # 冻结前：含构建与容器（约 5~
 |---|---|---|
 | 1 | `bash tools/freeze-check.sh --quick` | 末行「所有硬项通过」，`RC=0`；8 项 PASS + 5 项「本模式不跑」 |
 | 2 | `bash tools/freeze-check.sh --full` | 末行「所有硬项通过」，`RC=0`；构建/容器项也 PASS |
-| 3 | 看 json（可选） | `tools/test/reports/freeze-latest.json` 里 `exit_code: 0`、`hard_failures: []` |
+| 3 | 看 json（可选） | `/tmp/hm-freeze/freeze-latest.json`（默认产物目录；`HM_FREEZE_OUT` 可覆盖，见 §3）里 `exit_code: 0`、`hard_failures: []` |
 
 其它开关：
 
@@ -72,6 +72,12 @@ bash tools/freeze-check.sh --full      # 冻结前：含构建与容器（约 5~
   `hmprogram-rk2206-build`，鸿蒙走本机 DevEco CLT（`hvigorw` 不在 PATH 但脚本能找到）。
 - `--full` 里的构建/容器项内部走 `tools/build-lock.sh`（最多 2 个并发槽）；跑完自动
   `cd server && docker compose stop`（数据卷保留）。
+- ⚠️ **陷阱：不要再外套 `tools/build-lock.sh`**。`freeze-check.sh --full` 的构建/容器项**内部已各自**
+  持 `tools/build-lock.sh` 的**同一把锁**（`tools/freeze_check.py:43` 的 `LOCK` 常量），外层若写
+  `tools/build-lock.sh bash tools/freeze-check.sh --full`，子进程会去抢父进程已持有的同一把锁
+  → **同锁嵌套、死锁**。直接跑 `bash tools/freeze-check.sh --full` 即可（工具自带串行，满足 ≤2 槽纪律）。
+  依据：t121 冻结前全量验收的做法注记，报告 `docs/评审与验证/冻结前全量验收-2026-10-19.md`
+  （**被验收 HEAD `d9eb3b7`**、**报告提交 `80fecce`**）。
 - 不碰 `guanyin-*` 与别人的容器；不 `docker system prune`。
 - `materials`/`pack` 只做**试跑包**，正式提交包要等材料定稿（docx/mp4/pptx 成品）后由人工生成，
   并按赛题通知命名（`赛题四+独居老人居家安全监测与应急辅助系统+XX学校XX队.rar`）。
