@@ -8,14 +8,16 @@
 `.agent-teams/`、57.4 MB 厂商手册、厂商 PDF 里的主办方手机号、`.env` 与本机路径。
 
 本脚本的三条硬口径：
-  1. **只从显式清单取文件**：候选集 = `git ls-files` ∩ INCLUDE（脚本内常量），再逐条套 E1–E11
-     排除规则；**永不整目录打包**。`--list` 打印清单与排除规则。
+  1. **只从显式清单取文件**：候选集 = （`git ls-files` ∩ INCLUDE）+ **直接扫材料成品目录
+     `docs/参赛材料/dist/`**（该目录被根 .gitignore 的 `dist/` 规则忽略，靠 git 池收不到成品
+     ——t99），再逐条套 E1–E11 排除规则；**永不整目录打包**。`--list` 打印清单与排除规则。
+     **正式包不加 `--include-untracked`**（那会把在飞文件连本机路径一起带进去）。
   2. **打包后解包自检**：把产物解到临时目录，对**解包后的真实内容**断言（路径/扩展名/文本 PII/
      材料四件套/体积与页数/命名），而不是只看候选清单——防「压进去的东西和以为的不一样」。
   3. **负向自证**：`--selftest` 自己造一份干净包（必须 rc=0）与一份脏包（塞 `.env` + 含
      `/home/<user>` 的文件，必须 rc≠0 且打印命中位置），证明自检不是永远绿的摆设。
 
-用法（三步，详见 `tools/README-pack-submission.md`）：
+用法（三步，详见 `tools/README-提交包打包.md`）：
     python3 tools/pack-submission.py --list                  # 1) 看清单
     python3 tools/pack-submission.py --selftest              # 2) 证明自检有效（正/负向）
     python3 tools/pack-submission.py --pack --name "赛题四+独居老人居家安全监测与应急辅助系统+XX 学校XX队.zip"
@@ -51,7 +53,9 @@ MATERIAL_SRC = [
     "docs/参赛材料/12-视频文案与镜头表.md",
 ]
 
-# 材料成品目录：docx / mp4 / pptx 做好后放这里（`--include-untracked` 才会收未入库的成品）
+# 材料成品目录：docx / mp4 / pptx 做好后放这里。
+# 该目录被根 `.gitignore:2` 的 `dist/` 规则忽略，所以成品**不能**靠 git 池收（详见
+# material_dist_files()）：正式包（不加 --include-untracked）也照样收这个目录。
 MATERIAL_DIST = "docs/参赛材料/dist"
 
 # 源码与文档（§5.1 第 6 项「若随包交付源码」）：显式前缀，不用整目录
@@ -320,10 +324,35 @@ def excluded_reason(path: str) -> str | None:
     return None
 
 
+def material_dist_files() -> list[str]:
+    """直接扫材料成品目录（`docs/参赛材料/dist/`），**不经 git**。
+
+    为什么必须直接扫（t99 的 P0 根因）：该目录被根 `.gitignore:2` 的 `dist/` 规则忽略
+    ⇒ `git ls-files` 看不到（未入库），`git status --porcelain -uall` 也**不列被忽略的
+    文件**，于是「未入库池」里永远没有成品——修前实测：加 `--include-untracked` 的 B 变体
+    包内仍 `materials: []`（`git check-ignore -v` → `.gitignore:2:dist/`）。
+    成品是本系统唯一「必须进包、又注定不入库」的东西，所以这里从文件系统兜底。
+    """
+    base = os.path.join(ROOT, MATERIAL_DIST)
+    if not os.path.isdir(base):
+        return []
+    out = []
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
+        for fn in filenames:
+            rel = os.path.relpath(os.path.join(dirpath, fn), ROOT).replace(os.sep, "/")
+            out.append(rel)
+    return sorted(out)
+
+
 def candidates(include_untracked: bool = False) -> tuple[list[str], list[tuple[str, str]]]:
-    """返回 (入包路径, [(被排除路径, 理由)])。"""
+    """返回 (入包路径, [(被排除路径, 理由)])。
+
+    池 = 已入库（`git ls-files`）+ 材料成品目录（直接扫，见 material_dist_files）
+         + 其它未入库文件（仅当 include_untracked；正式包不要用它，会把在飞文件一起带进去）。
+    """
     tracked = [p for p in _git("-c", "core.quotepath=false", "ls-files").splitlines() if p]
-    pool = list(tracked)
+    pool = list(tracked) + material_dist_files()
     if include_untracked:
         for ln in _git("-c", "core.quotepath=false", "status", "--porcelain", "-uall").splitlines():
             if ln.startswith("?? "):
@@ -348,12 +377,19 @@ def candidates(include_untracked: bool = False) -> tuple[list[str], list[tuple[s
 
 
 def missing_untracked() -> list[str]:
-    """清单命中但未入库的文件（例如刚做好的 docx/mp4/pptx）。"""
+    """清单命中但**不在入包池**的未入库文件（例如刚写好的源码/文档）。
+
+    材料成品目录（`docs/参赛材料/dist/`）由 material_dist_files() 直接扫、总是收，
+    且它被 .gitignore 忽略、`git status` 本来就列不出来 ⇒ 这里显式排除，避免误报。
+    """
+    dist = set(material_dist_files())
     out = []
     for ln in _git("-c", "core.quotepath=false", "status", "--porcelain", "-uall").splitlines():
         if not ln.startswith("?? "):
             continue
         path = ln[3:].strip().strip('"')
+        if path in dist:
+            continue
         if _matches(path, SELF_EXCLUDE):
             continue
         if _matches(path, MATERIAL_SRC + SOURCE_GLOBS) or path.startswith(MATERIAL_DIST + "/"):
@@ -364,7 +400,7 @@ def missing_untracked() -> list[str]:
 def cmd_list(include_untracked: bool) -> int:
     kept, dropped = candidates(include_untracked)
     total = sum(os.path.getsize(os.path.join(ROOT, p)) for p in kept)
-    print("== 入包清单（显式清单 ∩ git ls-files，共 %d 个文件，%.1f KB）==" % (len(kept), total / 1024))
+    print("== 入包清单（显式清单 ∩ git ls-files + 直接扫材料成品目录，共 %d 个文件，%.1f KB）==" % (len(kept), total / 1024))
     groups = [
         ("材料正文（docx/mp4/pptx 的取材源）", lambda p: p in MATERIAL_SRC),
         ("材料成品目录", lambda p: p.startswith(MATERIAL_DIST + "/")),
@@ -723,12 +759,15 @@ def do_pack(args) -> int:
     kept, dropped = candidates(args.include_untracked)
     total = sum(os.path.getsize(os.path.join(ROOT, p)) for p in kept)
     print("== 打包（%s）==" % fmt)
-    print("   入包 %d 个文件，%.1f KB（显式清单 ∩ git ls-files，非整目录）" % (len(kept), total / 1024))
+    print("   入包 %d 个文件，%.1f KB（显式清单 ∩ git ls-files + 直接扫材料成品目录，非整目录）" % (len(kept), total / 1024))
     print("   排除命中 %d 条（E1–E11）" % len(dropped))
     miss = missing_untracked()
     if miss:
-        print("   ⚠ 清单命中但未入库（默认不收，加 --include-untracked 才收）：%s" % ", ".join(miss[:6]))
+        print("   ⚠ 清单命中但未入库（默认不收，加 --include-untracked 才收；材料成品目录 dist/ 例外，始终收）：%s" % ", ".join(miss[:6]))
 
+    if args.include_untracked:
+        print("   ⚠ --include-untracked：把未入库文件一起收，**这不是正式提交包**"
+              "（正式包不加该开关；口径见 tools/README-提交包打包.md）")
     redactions = pack(kept, archive, name, redact=args.redact)
     if args.redact:
         print("   脱敏 %d 处（源文件未改；清单见包内 REDACTED.txt，仍建议归属人改源文件）" % len(redactions))
@@ -800,8 +839,26 @@ def write_fix_list(path: str, hits: list[tuple] | None = None) -> None:
     print("   修复清单 → %s（%d 条）" % (path, len(hits)))
 
 
+def _latest_archive(out_dir: str) -> str:
+    """`--check-only` 不带 ARCHIVE 时用：--out 目录里 mtime 最新的 zip/rar（没有则空串）。"""
+    if not os.path.isdir(out_dir):
+        return ""
+    packs = [os.path.join(out_dir, f) for f in os.listdir(out_dir)
+             if f.lower().endswith((".zip", ".rar")) and os.path.isfile(os.path.join(out_dir, f))]
+    return max(packs, key=os.path.getmtime) if packs else ""
+
+
 def do_check(args) -> int:
-    archive = os.path.abspath(args.check_only)
+    arg = (args.check_only or "").strip()
+    if not arg:
+        # 不给 ARCHIVE 时**不静默返回 0**：找 --out 目录里最新的包；找不到就明确 rc=2。
+        arg = _latest_archive(args.out or os.path.join(tempfile.gettempdir(), "hm-submission-pack"))
+        if not arg:
+            print("--check-only 需要压缩包路径（或先 `--pack` 出一个包再用本命令）；"
+                  "也可用 `--out DIR` 指定要查的目录", file=sys.stderr)
+            return 2
+        print("（未给 ARCHIVE，用 --out 目录里最新的包：%s）" % arg)
+    archive = os.path.abspath(arg)
     if not os.path.isfile(archive):
         print("找不到压缩包：%s" % archive, file=sys.stderr)
         return 2
@@ -924,12 +981,14 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="t78 提交包打包器 + 解包自检（t54 E1–E11 清单落地）")
     ap.add_argument("--list", action="store_true", help="打印入包清单与排除规则")
     ap.add_argument("--pack", action="store_true", help="按清单打包并解包自检")
-    ap.add_argument("--check-only", metavar="ARCHIVE", default="", help="只对已有压缩包做解包自检")
+    ap.add_argument("--check-only", nargs="?", const="", metavar="ARCHIVE", default=None,
+                    help="只对已有压缩包做解包自检（不给 ARCHIVE 时查 --out 目录里最新的包）")
     ap.add_argument("--selftest", action="store_true", help="正/负向自证（干净包 rc=0、脏包 rc≠0）")
     ap.add_argument("--name", default="", help="包名（R7：赛题四+独居老人居家安全监测与应急辅助系统+<学校><队名>）")
     ap.add_argument("--format", default="", choices=["", "zip", "rar"], help="压缩格式（默认按包名后缀）")
     ap.add_argument("--out", default="", help="产物目录（默认系统临时目录，不污染仓库）")
-    ap.add_argument("--include-untracked", action="store_true", help="连未入库但清单命中的文件一起收（如刚做好的 docx/mp4/pptx）")
+    ap.add_argument("--include-untracked", action="store_true",
+                    help="连未入库但清单命中的文件一起收（正式提交包不要用；材料成品目录 dist/ 始终收）")
     ap.add_argument("--redact", action="store_true",
                     help="打包时把身份/PII 命中替换成占位符（源文件不动；正式提交前仍应改源文件）")
     ap.add_argument("--fix-list", default="", metavar="FILE",
@@ -940,7 +999,7 @@ def main(argv=None) -> int:
 
     if args.selftest:
         return do_selftest(args)
-    if args.check_only:
+    if args.check_only is not None:
         return do_check(args)
     if args.pack:
         return do_pack(args)

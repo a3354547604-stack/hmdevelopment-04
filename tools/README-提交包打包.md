@@ -33,18 +33,19 @@ python3 tools/pack-submission.py --pack \
 |---|---|
 | `--list` | 打印入包清单、每条排除的 E 编号与原因、材料四件套状态 |
 | `--pack` | 按清单打包并解包自检（默认产物落系统临时目录，不污染仓库） |
-| `--check-only <包>` | 只对已有压缩包做解包自检（复核别人打的包用这个） |
+| `--check-only [包]` | 只对已有压缩包做解包自检（复核别人打的包用这个）；不给包路径时取 `--out` 目录里 **mtime 最新**的 `.zip/.rar`，一个都没有则**明确 rc=2**（不静默返回 0） |
 | `--selftest` | 正/负向自证：干净夹具包必须 rc=0、脏夹具包必须 rc≠0 |
 | `--redact` | 打包时把身份/PII 命中替换成占位符（**源文件不动**，包内写 `REDACTED.txt`） |
 | `--fix-list <md>` | 把源侧命中写成修复清单（文件:行/类型/该行内容），交给文件归属人 |
 | `--name` / `--format` | 包名（R7 规则）与格式；`--format rar` 需本机有 `rar` 命令 |
-| `--include-untracked` | 连未入库但清单命中的文件一起收（刚做好的 docx/mp4/pptx 用） |
+| `--include-untracked` | 连未入库但清单命中的文件一起收（**正式包不要用**：会把在飞文件连本机路径一起带进去；见下「正式包口径」） |
 | `--allow-missing-materials` | 材料返工期间允许缺 docx/mp4/pptx（降级 WARN，试跑用） |
 
 ## 入包口径
 
 - **只从显式清单取文件**：清单写在脚本里（材料源文件、源码树、文档树），再与 `git ls-files` 求交，
-  **不整目录 zip**；`--list` 会把每条排除的 E 编号与原因打出来。
+  **另外直接扫材料成品目录 `docs/参赛材料/dist/`**（见下节 t99：该目录被 `.gitignore` 忽略，
+  靠 git 池收不到成品），**不整目录 zip**；`--list` 会把每条排除的 E 编号与原因打出来。
 - 排除 E1 `.git` / E2 `.agent-teams` / E3 产物（fwpkg·exe·hap·apk·o·a）/ E4 日志 /
   E5 探针与抓包 / E6 厂商工具与手册 / E7 第三方 PII（主办方 PDF）/ E8 内部文档（`docs/执行/`、
   内部实施计划、复核报告）/ E9 `.env` 与备份 / E10 缓存（`__pycache__`、`.gradle`、`build/`、
@@ -105,6 +106,45 @@ t80 独立解包复扫时发现打包器**只看正斜杠**，漏掉 Windows 反
 | `--selftest` | rc=0；干净包 rc=0、脏包 rc≠0，命中 `.env` / `/home/<user>` / **Windows 反斜杠路径 3 行** |
 | 严格试跑 `--pack --allow-missing-materials --out /tmp/t81-sanitize --fix-list /tmp/t81-fixlist.md` | 入包 **313 文件 / 3022.2 KB**，**FAIL 0 / rc=0**（修复清单 0 条） |
 | 正则覆盖单测（10 例） | 三种形态 + 混用 + `@"…"` 全部命中；占位符 `C:\Users\<你的用户名>\…` 与普通路径不命中 |
+
+## t99 补丁：材料成品目录直扫 + 正式包口径（2026-10-19）
+
+**P0（t96 挖出，会直接导致「材料做好了、包里却是空的」）**：`docs/参赛材料/dist/` 被根
+`.gitignore:2` 的 `dist/` 规则忽略 ⇒ `git ls-files` 看不到（未入库）、`git status --porcelain -uall`
+**也不列被忽略的文件** ⇒ 原来的「未入库池」永远没有成品，加 `--include-untracked` 也收不到
+（修前实测：B 变体包内 `materials: []`）。修法：`material_dist_files()` **直接扫该目录**并把结果并入
+候选池，与开关无关；`missing_untracked()` 显式排除该目录（它总是收，不该出现在「未入库未收」提示里）。
+
+**正式包口径（写死在这儿，别再问）**：
+
+| 口径 | 命令 | 期望 |
+|---|---|---|
+| **规范包（正式提交）** | `python3 tools/pack-submission.py --pack --name '赛题四+独居老人居家安全监测与应急辅助系统+<院校名><队名>.rar' --format rar` | 四件套齐全；**不加** `--include-untracked`；要求 FAIL 0 / rc=0 |
+| 试跑包（材料仍在返工） | 同上再加 `--allow-missing-materials` | 缺件降 WARN；FAIL 0 才能证明「除缺件外无真问题」 |
+| **未入库包（禁止提交）** | 再加 `--include-untracked` | 会把在飞文件带进包（实测：`ws63-firmware/doc/10-LD6002C实物接线判通-2026-10-16.txt:5` 的本机路径判 FAIL）——工具会打印「这不是正式提交包」 |
+
+**材料成品目录不进 git 也不会丢**：`dist/` 未入库是仓库既有设计（`14-四件套生成说明.md` §1 有说明），
+生成脚本 `tools/make-submission-docs.py` 可随时重跑，打包器按目录名直接收。
+
+**P1（同卡修掉的两处包内本机路径/身份字样）**：`docs/参赛材料/14-四件套生成说明.md` 里
+①生成命令中的 Windows 账号目录改成 `<本机用户>` 占位；②匿名扫描那一行不再抄写「院校/角色类词 +
+本机账户名」的字面量，改为说明它引用 `tools/pack-submission.py` 的 `IDENTITY_PATTERNS` 口径。
+改后**规范包不再因为这两条红**（t96 时它们各判一条 FAIL）。
+
+**`--check-only` 不再可能「空参数静默 rc=0」**：不给包路径时取 `--out` 目录里最新的包并打印用了哪个；
+目录里没有包则 rc=2 并提示先 `--pack`（负对照实测：`--check-only --out /tmp/t99-empty` → rc=2）。
+
+### t99 复跑实测（2026-10-19）
+
+| 项 | 结果 |
+|---|---|
+| `--list` | 入包 **315 文件 / 3277.1 KB**（比 t96 的 313 多出的 2 个＝dist 里的 docx+pptx），`-- 材料成品目录（2）--` 分组已列出两者 |
+| 规范包 `--pack`（不加 `--allow-missing-materials`） | **FAIL 1 / rc=1**，唯一一条是「材料齐全·② 演示视频 .mp4 缺件」（真缺件，不属实现缺陷） |
+| 试跑包 `--pack --allow-missing-materials` | **FAIL 0 / rc=0**；包内 316 条目且含 dist 的 docx（66924 B）与 pptx（97036 B） |
+| `--check-only`（不给包路径，自动取最新） | 打印所用的包名 → **FAIL 1 / rc=1**（同 mp4 缺件） |
+| `--check-only --out <空目录>` | **rc=2** + 明确提示（防「空参数假绿」） |
+| `--selftest` | **rc=0**：干净包 rc=0、脏包 rc≠0 且命中 `.env`/本机用户名/Windows 反斜杠路径 3 行 |
+| `--include-untracked`（未入库包，仅论证用） | **FAIL 1 / rc=1**（`ws63-firmware/doc/10-…-16.txt:5` 本机路径）+ 打印「这不是正式提交包」 |
 
 ## 边界
 
