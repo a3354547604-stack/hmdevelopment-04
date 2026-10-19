@@ -1,5 +1,6 @@
 /*
- * gw_kvcfg_shell.c — 把 `gwkv` 与 `wifi` 两条命令挂到 LiteOS-M 自带的串口 shell 上（板级，主机测试不编它）
+ * gw_kvcfg_shell.c — 把 `gwkv` / `wifi` / `keys` 三条命令挂到 LiteOS-M 自带的串口 shell 上
+ *                    （板级，主机测试不编它）
  *
  * 为什么走 shell 而不是自己再写一个串口读循环：
  *   - 上游 SDK 的 board/main.c 已经无条件 `LosShellInit(); shell_cmd_init();`，命令行走的就是
@@ -19,6 +20,7 @@
 #include "gw_config.h"
 #include "gw_kvcfg.h"
 #include "gw_wifi_shell.h"
+#include "gw_hw.h"
 
 /* dump 子命令要打 256 B 的十六进制（513 字符）+ 提示语 */
 #define GW_KVCFG_SHELL_OUT_MAX (GW_KVCFG_DUMP_HEX_LEN + 256u)
@@ -111,5 +113,43 @@ void gw_wifi_shell_register(void)
     s_registered = 1u;
     rc = osCmdReg(CMD_TYPE_STD, "wifi", XARGS, (CMD_CBK_FUNC)gw_wifi_shell_cmd);
     printf("[%s] 串口配网：命令 `wifi`（%s）—— `wifi show` / `wifi set ssid=… psk=…` / `wifi scan`\n",
+           GW_LOG_TAG, (rc == 0u) ? "注册成功" : "注册失败（shell 未初始化？）");
+}
+
+/* ------------------------------------------------------------------ keys */
+
+/* 板载 ADC 按键诊断（t138）。为什么不做参数解析：这条命令的全部价值是
+ * 「烧完板子让用户挨个键按一遍，把读数抄回来标定」，越简单越好——
+ * 没有参数就没有解析错误，也不用在主机上测它。
+ * 输出交给 gw_hw_key_report()：通道、基线、当前 raw/mV、按下判定的依据、
+ * 分档表与全部可用通道扫描都在里面。 */
+static UINT32 gw_keys_shell_cmd(UINT32 argc, const CHAR **argv)
+{
+    char out[GW_KEY_REPORT_MAX];
+    UINT32 i;
+
+    /* 带参数时只提示一句：这条命令没有开关，避免用户以为 `keys 5` 能切通道 */
+    if (argc != 0u) {
+        printf("[key] `keys` 不接受参数（想确认通道号看输出里的通道扫描）\n");
+        for (i = 0; i < argc; i++) {
+            (void)argv[i];
+        }
+    }
+    (void)gw_hw_key_report(out, (uint32_t)sizeof(out));
+    printf("%s", out);
+    return 0u;
+}
+
+void gw_keys_shell_register(void)
+{
+    static uint8_t s_registered;
+    UINT32 rc;
+
+    if (s_registered != 0u) {
+        return;
+    }
+    s_registered = 1u;
+    rc = osCmdReg(CMD_TYPE_STD, "keys", XARGS, (CMD_CBK_FUNC)gw_keys_shell_cmd);
+    printf("[%s] 板载键诊断：命令 `keys`（%s）—— 打印 ADC 各通道 raw/mV 与按下判定依据\n",
            GW_LOG_TAG, (rc == 0u) ? "注册成功" : "注册失败（shell 未初始化？）");
 }

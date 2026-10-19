@@ -23,6 +23,7 @@
 #include "gw_433.h"
 #include "gw_plat.h"
 #include "gw_kvcfg.h"
+#include "gw_key.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -1916,6 +1917,148 @@ static void test_wifi_cmd(void)
     gw_wifi_set_ops(NULL);
 }
 
+
+/* ---------------------- t138 板载按键（ADC 电阻梯） ---------------------- */
+/* 期望值来源：
+ *   - 基线取中位数：33 点里混一个 0 mV 毛刺，中位数仍是 2300
+ *   - 按下阈值 300 mV / 去抖 50 ms / 长按 3 s：gw_config.h §11 的默认值
+ *   - 漂移：1 mV/采样的慢漂移（≈10 s 掉 100 mV），基线的 3%/采样跟踪
+ *     稳态落后约 32 mV，远小于 300 mV 阈值
+ * 这些都是纯算术，跟板子无关；板上真实 mV 由 PM 用 `keys` 标定后回填文档。 */
+static void key_cfg_default(gw_key_cfg_t *c, gw_key_band_t *b)
+{
+    memset(c, 0, sizeof(*c));
+    c->press_delta_mv = GW_KEY_PRESS_DELTA_MV;
+    c->release_delta_mv = GW_KEY_RELEASE_DELTA_MV;
+    c->debounce_ms = GW_KEY_DEBOUNCE_MS;
+    c->long_ms = GW_KEY_LONG_MS;
+    c->drift_q8 = GW_KEY_DRIFT_Q8;
+    c->baseline_min_mv = GW_KEY_BASELINE_MIN_MV;
+    c->baseline_max_mv = GW_KEY_BASELINE_MAX_MV;
+
+    memset(b, 0, sizeof(*b));
+    b->k1_max_mv = GW_KEY_BAND_K1_MAX_MV;
+    b->k2_max_mv = GW_KEY_BAND_K2_MAX_MV;
+    b->k3_max_mv = GW_KEY_BAND_K3_MAX_MV;
+    b->k4_max_mv = GW_KEY_BAND_K4_MAX_MV;
+    b->idle_min_mv = GW_KEY_BAND_IDLE_MIN_MV;
+}
+
+/* 采满一次基线：除第 spike_idx 个点外都是 idle_mv（spike 用来验证中位数的抗毛刺） */
+static void key_take_baseline(gw_key_t *k, uint32_t idle_mv, uint32_t spike_idx, uint32_t spike_mv)
+{
+    uint32_t i;
+
+    gw_key_baseline_restart(k);
+    for (i = 0; i < GW_KEY_BASELINE_MAX; i++) {
+        (void)gw_key_baseline_add(k, (i == spike_idx) ? spike_mv : idle_mv);
+    }
+    (void)gw_key_baseline_finish(k);
+}
+
+static void test_key_events(void)
+{
+    gw_key_t k;
+    gw_key_cfg_t cfg;
+    gw_key_band_t band;
+    gw_key_ev_t ev;
+    uint32_t i;
+
+    key_cfg_default(&cfg, &band);
+    gw_key_init(&k, &cfg, &band);
+
+    t_start("t138 板载键：基线中位数 / 去抖 / 长按 / 短按 / 漂移 / 异常");
+    /* 1) 基线中位数：一个 0 mV 毛刺不能把基线拉低 */
+    key_take_baseline(&k, 2300u, 5u, 0u);
+    t_ok(k.baseline_mv == 2300u, "基线取中位数：33 点里一个 0 mV 毛刺不影响（2300）");
+    t_ok(k.base_n == GW_KEY_BASELINE_MAX, "基线采样点数 = 33");
+
+    /* 2) 50 ms 去抖：低于阈值只保持 30 ms，不触发按下 */
+    ev = gw_key_feed(&k, 1000u, 2300u);
+    t_ok(ev == GW_KEY_EV_NONE, "空闲采样不产生事件");
+    ev = gw_key_feed(&k, 1010u, 1900u);          /* 候选按下（1900 <= 2300-300=2000） */
+    t_ok(ev == GW_KEY_EV_NONE, "候选按下第一拍不报事件（先去抖）");
+    ev = gw_key_feed(&k, 1040u, 2300u);          /* 30 ms 后回升：抖动 */
+    t_ok(ev == GW_KEY_EV_NONE, "30 ms 抖动不产生事件");
+    t_ok(gw_key_is_pressed(&k) == 0, "去抖：<50 ms 抖动不触发按下");
+
+    /* 3) 长按 3 s：按住当刻报 PRESS，到 3 s 当刻报 LONG（不等松手） */
+    ev = gw_key_feed(&k, 2000u, 1900u);
+    t_ok(ev == GW_KEY_EV_NONE, "按住第一拍仍只是候选");
+    ev = gw_key_feed(&k, 2060u, 1900u);
+    t_ok(ev == GW_KEY_EV_PRESS, "去抖 60 ms 后报 PRESS");
+    t_ok(gw_key_is_pressed(&k) == 1, "按下状态已置位");
+    ev = gw_key_feed(&k, 4990u, 1900u);
+    t_ok(ev == GW_KEY_EV_NONE, "按住 2.93 s 还不报长按");
+    ev = gw_key_feed(&k, 5060u, 1900u);
+    t_ok(ev == GW_KEY_EV_LONG, "按住 3.06 s 当刻报 LONG（松手前）");
+    t_ok(gw_key_press_ms(&k, 5060u) == 3060u, "按住时长按起始时刻算（3060 ms）");
+    ev = gw_key_feed(&k, 5200u, 2300u);
+    t_ok(ev == GW_KEY_EV_RELEASE, "松手报 RELEASE");
+    t_ok(gw_key_last_press_ms(&k) == 3200u, "上次按压总时长 3200 ms（含去抖期）");
+
+    /* 4) 短按 0.8 s：有 PRESS/RELEASE，**没有** LONG */
+    ev = gw_key_feed(&k, 6000u, 1900u);
+    t_ok(ev == GW_KEY_EV_NONE, "短按：候选第一拍无事件");
+    ev = gw_key_feed(&k, 6060u, 1900u);
+    t_ok(ev == GW_KEY_EV_PRESS, "短按：去抖后 PRESS");
+    ev = gw_key_feed(&k, 6500u, 1900u);
+    t_ok(ev == GW_KEY_EV_NONE, "短按：0.44 s 处不报 LONG");
+    ev = gw_key_feed(&k, 6860u, 2300u);
+    t_ok(ev == GW_KEY_EV_RELEASE, "短按：0.8 s 松手报 RELEASE");
+    t_ok(gw_key_last_press_ms(&k) == 860u, "短按总时长 860 ms");
+    t_ok(gw_key_is_pressed(&k) == 0, "短按不触发长按（配网窗口不会开）");
+
+    /* 5) 基线缓慢漂移：每采样掉 1 mV，500 个点（≈ 500 mV）不许误触发 */
+    gw_key_init(&k, &cfg, &band);
+    key_take_baseline(&k, 2300u, 0xFFFFFFFFu, 0u);
+    {
+        uint32_t mv = 2300u;
+        int fired = 0;
+
+        for (i = 0; i < 500u; i++) {
+            mv = (mv > 1800u) ? (mv - 1u) : 1800u;
+            ev = gw_key_feed(&k, 10000u + i * 100u, mv);
+            if (ev != GW_KEY_EV_NONE) {
+                fired = 1;
+            }
+        }
+        t_ok(fired == 0, "基线缓慢漂移（1 mV/采样、500 点）不误触发");
+        t_ok(gw_key_is_pressed(&k) == 0, "漂移后仍判未按下");
+        t_ok(k.baseline_mv + 100u >= mv, "基线跟着漂移走（落后 <100 mV）");
+    }
+
+    /* 6) 基线异常：恒 0 mV（通道没接/没切复用）→ 停判 + 给出可判读原因 */
+    gw_key_init(&k, &cfg, &band);
+    key_take_baseline(&k, 0u, 0xFFFFFFFFu, 0u);
+    t_ok(k.disabled == 1, "基线恒 0 mV → 停止判定（不许静默失败）");
+    t_ok(gw_key_warn_text(&k) != NULL, "基线异常有可判读的警告文本");
+    t_ok(strstr(gw_key_warn_text(&k), "0 mV") != NULL, "警告里点明「接近 0 mV」");
+    ev = gw_key_feed(&k, 1000u, 0u);
+    t_ok(ev == GW_KEY_EV_NONE && gw_key_is_pressed(&k) == 0, "停判后不再产生任何按下事件");
+
+    /* 7) 基线恒 3300 mV（悬空/上拉缺失）→ 同样停判 */
+    gw_key_init(&k, &cfg, &band);
+    key_take_baseline(&k, 3300u, 0xFFFFFFFFu, 0u);
+    t_ok(k.disabled == 1, "基线恒满量程 → 停止判定");
+
+    /* 8) 绝对分档只影响可读性，不参与按下判定 */
+    t_ok(strcmp(gw_key_band_name(&band, 100u), "K1") == 0, "分档：100 mV → K1");
+    t_ok(strcmp(gw_key_band_name(&band, 550u), "K2") == 0, "分档：550 mV → K2");
+    t_ok(strcmp(gw_key_band_name(&band, 1000u), "K3") == 0, "分档：1000 mV → K3");
+    t_ok(strcmp(gw_key_band_name(&band, 1650u), "K4") == 0, "分档：1650 mV → K4");
+    t_ok(strcmp(gw_key_band_name(&band, 2300u), "idle") == 0, "分档：2300 mV → idle");
+
+    /* 9) 分档表与实际按下判定解耦：即便 mv 落在「档间留白」(1970)，
+     *    只要偏离基线 ≥300 mV 仍算按下（K4 附近电平偏高的板子也能用） */
+    gw_key_init(&k, &cfg, &band);
+    key_take_baseline(&k, 2300u, 0xFFFFFFFFu, 0u);
+    (void)gw_key_feed(&k, 7000u, 1970u);
+    ev = gw_key_feed(&k, 7060u, 1970u);
+    t_ok(ev == GW_KEY_EV_PRESS, "档间留白（1970 mV）只要偏离基线够大仍判按下");
+    t_ok(strcmp(gw_key_band_name(&band, 1970u), "between") == 0, "1970 mV 在分档表里是 between");
+}
+
 int main(void)
 {
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
@@ -1925,6 +2068,7 @@ int main(void)
     test_threshold_fail_paras();     /* t111 L-1 收口：失败响应 paras 必须是 {}、不谎报成功 */
     test_kvcfg();                    /* t34 凭证 KV：布局 + 落盘 + 串口命令 + 负向 */
     test_wifi_cmd();                 /* t136 串口 wifi：边界校验 + 口令不回显 + 失败可判读 */
+    test_key_events();               /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
     test_parser();
     test_crypto_auth();
     test_time();

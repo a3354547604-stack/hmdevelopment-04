@@ -30,6 +30,7 @@
 #include "gw_store.h"
 #include "gw_kvcfg.h"
 #include "gw_wifi_shell.h"
+#include "gw_hw.h"
 
 #include "ohos_init.h"
 #include "los_task.h"
@@ -1208,10 +1209,41 @@ static void prov_http_task(void *arg)
     }
 }
 
+/* ---- 配网按键（t138）：板载 ADC 键与外接 EX_GPIO_A3 共用同一条状态机 ----
+ *
+ * 为什么合成一个函数：两路各写一套「按下时刻 / 长按判定」，现场就会出现
+ * 「板载键刚开窗、外接键又给关了」这种谁都解释不清的抖动；合成一处以后，
+ * 语义只有一条——按住 3 s 翻一次窗口，松手才生效（与改动前外接键行为一致）。
+ *
+ * 电平约定：调用方统一传「1=按下」，内部换成与外接键相同的 0=按下 表示，
+ * 这样两种键的极性问题只在调用点翻译一次。 */
+typedef struct {
+    uint8_t  last;          /* 1=松开（初值），0=按下 */
+    uint32_t press_start;
+} gw_pairkey_t;
+
+static gw_pairkey_t s_ext_key = { 1u, 0u };
+#if GW_KEY_ENABLE_BOARD
+static gw_pairkey_t s_board_key = { 1u, 0u };
+#endif
+
+static void pair_key_step(gw_pairkey_t *st, uint8_t pressed, uint32_t now_ms)
+{
+    uint8_t lvl = (pressed != 0u) ? 0u : 1u;
+
+    if (lvl == 0u && st->last == 1u) {
+        st->press_start = now_ms;
+    } else if (lvl == 1u && st->last == 0u) {
+        if ((uint32_t)(now_ms - st->press_start) >= GW_PAIRKEY_LONG_MS) {
+            (void)gw_prov_toggle(&s_prov, now_ms);
+        }
+    }
+    st->last = lvl;
+}
+
 static void tick_task(void *arg)
 {
     uint32_t now;
-    uint8_t pair_key = 1;
 
     (void)arg;
     for (;;) {
@@ -1243,19 +1275,16 @@ static void tick_task(void *arg)
             (void)gw_prov_resync_step(&s_prov);
         }
 
-        /* 配网键长按 3 s：未开窗则进入配网，已开窗则退出（§12.2 的"再长按一次退出"） */
-        {
-            static uint32_t press_start;
-            uint8_t lvl = (uint8_t)gw_plat_pairkey_level();
-            if (lvl == 0 && pair_key == 1) {
-                press_start = now;
-            } else if (lvl == 1 && pair_key == 0) {
-                if ((uint32_t)(now - press_start) >= GW_PAIRKEY_LONG_MS) {
-                    (void)gw_prov_toggle(&s_prov, now);
-                }
-            }
-            pair_key = lvl;
-        }
+        /* 配网键长按 3 s：未开窗则进入配网，已开窗则退出（§12.2 的"再长按一次退出"）。
+         * 板载键（t138）：ADC 电阻梯 K1–K4，任一键长按都算；采样与基线判定在 gw_hw.c，
+         * 这里只取「按下/松开」电平，与外接键走同一个 pair_key_step()。 */
+#if GW_KEY_ENABLE_BOARD
+        gw_hw_key_tick(now);
+        pair_key_step(&s_board_key, (uint8_t)gw_hw_key_pressed(), now);
+#endif
+#if GW_KEY_ENABLE_EXTERNAL
+        pair_key_step(&s_ext_key, (uint8_t)((gw_plat_pairkey_level() == 0) ? 1u : 0u), now);
+#endif
         {
             gw_event_t ev = gw_motion_tick(&s_motion, (uint64_t)now);
             if (ev != GW_EV_NONE) {
@@ -1751,7 +1780,14 @@ static void gw_main_entry(void)
     if (gw_plat_uart0_init() != 0) {
         printf("[%s] UART0 初始化失败：与汇聚的链路不可用\n", GW_LOG_TAG);
     }
+#if GW_KEY_ENABLE_EXTERNAL
     (void)gw_plat_pairkey_init();
+#endif
+#if GW_KEY_ENABLE_BOARD
+    /* 板载键（t138）：ADC 初始化 + 进入 2 s 基线采集窗口（在 tick 任务里累计，
+     * 不阻塞这里；失败只降级不退出——配网还有外接键与串口两条入口）。 */
+    (void)gw_hw_key_init();
+#endif
     gw_alarm_init(&s_alarm);
 
     /* 2) 协议与规则状态机 */
@@ -1805,6 +1841,10 @@ static void gw_main_entry(void)
      * 先装回调表再注册命令——注册是同步的，装反了第一条命令就会报"板级回调未接"。 */
     gw_wifi_set_ops(&s_wifi_ops);
     gw_wifi_shell_register();
+
+    /* 8.2) 板载键诊断（t138）：`keys` 打印 ADC 各通道 raw/mV 与按下判定依据，
+     * 用于烧板后逐键标定（通道号/阈值不猜，实测回填配网实现说明）。 */
+    gw_keys_shell_register();
 
     /* 9) 任务 */
     if (task_create(uart_task, NULL, GW_TASK_STACK_UART, GW_TASK_PRIO_UART, "gwUart") != LOS_OK) {

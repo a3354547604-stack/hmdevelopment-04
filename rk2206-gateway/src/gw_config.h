@@ -276,4 +276,50 @@
 #define GW_PROV_DEVICE_MAX          63u
 #define GW_PROV_SECRET_MAX          63u
 
+/* ------------------------------------------------------------------ *
+ * 11. 板载按键（t138）：K1–K4 走 ADC 电阻梯，替代外接轻触开关
+ *
+ * 依据与口径（**重要：别把文档值当实测值**）：
+ *   - 原理图网名 `USER_KEY_ADC`（底板原理图 PDF 文本）；官方样例
+ *     `samples/b1_adc/adc_example.c` 用 `GPIO0_PC5` → `SRADC5`；
+ *   - 文档值（出处：小凌派课件 b1 ADC 按键示例；本板**尚未实测**）：
+ *       空闲 ≈2.3 V；K1 0.01 V；K2 0.55 V；K3 1.00 V；K4 1.65 V
+ *     → 分档边界取「中心值 ±0.2 V」留白，见下面的 GW_KEY_BAND_*；
+ *   - 本板实测：**待回填**（烧板后按 `keys` 逐键按一遍，把实测 mV 写进
+ *     rk2206-gateway/配网实现说明.md 的「板载按键标定」小节）。
+ *
+ * 为什么「按下」用相对基线而不是绝对电压：电阻梯分压依赖 3.3 V 轨与贴装，
+ * 绝对阈值差几十 mV 就会变成「按了没反应」或「没按一直进配网」；
+ * 相对基线只需开机安静 2 s。
+ * ------------------------------------------------------------------ */
+#define GW_KEY_ENABLE_BOARD         1       /* 板载按键作为配网入口（默认开） */
+#define GW_KEY_ENABLE_EXTERNAL      1       /* 外接 EX_GPIO_A3 保留可用（默认开） */
+#define GW_KEY_ADC_CHANNEL          5u      /* 文档值：GPIO0_PC5 = SRADC5；本板实测待回填 */
+#define GW_KEY_BASELINE_MS          2000u   /* 开机静默采基线窗口 */
+#define GW_KEY_PRESS_DELTA_MV       300u    /* 低于基线 ≥ 这个值 → 候选按下（可配置） */
+#define GW_KEY_RELEASE_DELTA_MV     120u    /* 回升到「基线-这个值」以上 → 松开（滞回） */
+#define GW_KEY_DEBOUNCE_MS          50u     /* 候选状态要连续保持这么久；tick 周期 100 ms，
+                                             * 即「至少两个采样点都低」才算真按下 */
+#define GW_KEY_LONG_MS              GW_PAIRKEY_LONG_MS  /* 长按 3 s，与外接键同一个值 */
+#define GW_KEY_DRIFT_Q8             8u      /* 未按下时基线跟踪速度 ≈3%/采样：
+                                             * 1 mV/采样的慢漂移稳态约落后 32 mV，远小于阈值 */
+#define GW_KEY_BASELINE_MIN_MV      100u    /* 基线低于此值 → 判「通道没接/被短接」 */
+#define GW_KEY_BASELINE_MAX_MV      3000u   /* 基线高于此值 → 判「通道悬空」 */
+#define GW_KEY_BASELINE_SPREAD_WARN_MV 200u /* 采基线期间峰峰值超此值 → 提示「有人在按键」 */
+
+/* 绝对分档（只用于日志/诊断里「这是哪个键」，不参与按下判定）。
+ * 文档值中心 ±0.2 V：K1 0.01、K2 0.55、K3 1.00、K4 1.65，空闲 2.3 V。 */
+#define GW_KEY_BAND_K1_MAX_MV       300u
+#define GW_KEY_BAND_K2_MAX_MV       780u
+#define GW_KEY_BAND_K3_MAX_MV       1330u
+#define GW_KEY_BAND_K4_MAX_MV       1950u
+#define GW_KEY_BAND_IDLE_MIN_MV     2000u
+
+/* 诊断命令 `keys` 的通道扫描区间。ch0/ch1 不扫：调试串口是 UART1_M1
+ *（SDK `board/uart.c:34` `#define UART_DEBUG_PORT 1 // 串口调试口，uart1`），
+ * 这两个脚若是 M1 复用，切到 ADC 会丢控制台——现场等于失明。 */
+#define GW_KEY_ADC_SCAN_FIRST       2u
+#define GW_KEY_ADC_SCAN_LAST        7u
+#define GW_KEY_REPORT_MAX           1400u   /* `keys` 输出缓冲（含 6 行通道扫描） */
+
 #endif /* GW_CONFIG_H */

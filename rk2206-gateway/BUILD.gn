@@ -35,7 +35,10 @@ static_library("gateway_app") {
         "gw_store.c",       # 配网持久化：Wi-Fi 凭证 + 绑定白名单（Vendor Flash）
         "gw_kvcfg.c",       # 设备凭证 KV：编解码 + 写入/读回校验 + 串口命令本体（纯逻辑）
         "gw_wifi_shell.c",  # 串口 `wifi show/set/scan` 命令本体（纯逻辑，回调表注入）
-        "gw_kvcfg_shell.c", # 把 `gwkv` / `wifi` 挂到 SDK 自带 shell（板级，主机自测不编）
+        "gw_key.c",         # 板载按键判定：基线/去抖/长按/分档（纯逻辑，主机可测，t138）
+        "gw_hw_adc.c",      # 片上 SARADC：通道→引脚复用→raw/mV + 通道扫描（板级，t138）
+        "gw_hw.c",          # 板载键采样与 `keys` 诊断文本（板级聚合层，t138）
+        "gw_kvcfg_shell.c", # 把 `gwkv` / `wifi` / `keys` 挂到 SDK 自带 shell（板级，主机自测不编）
     ]
 
     include_dirs = [
