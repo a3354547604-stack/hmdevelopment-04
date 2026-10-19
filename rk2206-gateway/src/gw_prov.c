@@ -288,9 +288,27 @@ int gw_prov_enter(gw_prov_t *p, uint32_t now_ms)
     p->ind_start_ms = now_ms;
     p->ind_phase = 0u;
     /* 契约 §12.2 要求的串口行。AP 口令可以打印（§12.3 明说允许贴纸/串口给出），
-     * 家庭 Wi-Fi 口令则永远不打印（§12.6）——两条口令的纪律不同，别顺手统一。 */
-    printf("[PROV] enter AP mode ssid=%s psk=%s remain=%u url=http://<ap_ip>/\n",
-           p->ap_ssid, p->ap_psk, (unsigned)GW_PROV_WINDOW_S);
+     * 家庭 Wi-Fi 口令则永远不打印（§12.6）——两条口令的纪律不同，别顺手统一。
+     *
+     * t137：地址能拿到就打真实地址。第一次配网的人只有一根手机线，靠的就是串口/贴纸
+     * 上的这一行——留 `http://<ap_ip>/` 这种占位符等于让他猜（DHCP 服务常比 SoftAP
+     * 晚 1–2 s 就绪，所以拿不到时明确说"稍后那行会给地址"，而不是沉默）。 */
+    {
+        char apip[24];
+
+        apip[0] = '\0';
+        if (p->ops->ap_ip != NULL) {
+            (void)p->ops->ap_ip(apip, (uint32_t)sizeof(apip));
+        }
+        if (apip[0] != '\0') {
+            printf("[PROV] enter AP mode ssid=%s psk=%s remain=%u url=http://%s/\n",
+                   p->ap_ssid, p->ap_psk, (unsigned)GW_PROV_WINDOW_S, apip);
+        } else {
+            printf("[PROV] enter AP mode ssid=%s psk=%s remain=%u url=http://<ap_ip>/"
+                   "（地址见稍后的 `[PROV] 本地配网服务就绪` 行）\n",
+                   p->ap_ssid, p->ap_psk, (unsigned)GW_PROV_WINDOW_S);
+        }
+    }
     return 0;
 }
 
@@ -319,6 +337,58 @@ int gw_prov_toggle(gw_prov_t *p, uint32_t now_ms)
         return 0;
     }
     return gw_prov_enter(p, now_ms);
+}
+
+/* ============================== t137 首次配网 ============================== */
+/* 全新网关（Flash 里没有家庭 Wi-Fi 凭据）开机自动开配网窗口。
+ *
+ * 为什么"只判定一次"而不一直盯着：射频只有一套，配网窗口期间 STA 要停；
+ * 如果每次 tick 都问一句"还没配，要不要开窗"，那么"用户不想配 Wi-Fi、
+ * 只想用串口 gwkv 走有线/别的联网方式"的机器会被反复打断，连路由都连不上。
+ * 所以：有凭据 → 永不开；没凭据 → 开一次（AP 起不来就重试几次），之后不再自动开。
+ *
+ * 为什么由 tick 调用而不是在 gw_main_entry 里直接开：SoftAP 要 wifi 服务先就绪，
+ * 开机早期调 wifi 接口会拿到"设备忙"（gw_net 的 net_wifi_on 首次会失败）。
+ */
+int gw_prov_auto_boot(gw_prov_t *p, uint32_t now_ms, int wifi_configured)
+{
+    if (p == NULL) {
+        return 0;
+    }
+    if (p->auto_state == GW_PROV_AUTO_DONE) {
+        return 0;
+    }
+    if (wifi_configured != 0) {
+        /* 配过了就不再自动开：现场"忘了密码"的正确入口是长按配网键/串口 wifi set，
+         * 不是每次上电都把 AP 抢过去。 */
+        p->auto_state = GW_PROV_AUTO_DONE;
+        printf("[PROV] 已有家庭 Wi-Fi 凭据：不自动开配网窗口（长按配网键 3 s 或串口 `wifi set` 可手动配）\n");
+        return 0;
+    }
+    if (p->window_open) {
+        p->auto_state = GW_PROV_AUTO_DONE;      /* 已经有人在配了（手动入口） */
+        return 0;
+    }
+    if (p->auto_tries != 0u && p->auto_last_try_ms != 0u &&
+        (uint32_t)(now_ms - p->auto_last_try_ms) < GW_PROV_AUTO_RETRY_MS) {
+        return 0;                               /* 重试间隔没到 */
+    }
+    if (gw_prov_enter(p, now_ms) == 0) {
+        p->auto_state = GW_PROV_AUTO_DONE;
+        printf("[PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 %u min"
+               "（手机连 Wi-Fi「%s」，口令 %s，浏览器打开配置页，一次填完 Wi-Fi 与云端凭据）\n",
+               (unsigned)(GW_PROV_WINDOW_S / 60u), p->ap_ssid, p->ap_psk);
+        return 1;
+    }
+    p->auto_tries++;
+    p->auto_last_try_ms = now_ms;
+    if (p->auto_tries >= GW_PROV_AUTO_MAX_TRIES) {
+        p->auto_state = GW_PROV_AUTO_DONE;
+        printf("[PROV] ⚠ 自动配网开窗失败 %u 次（SoftAP 起不来），不再自动重试："
+               "串口敲 `wifi set ssid=<名称> psk=<口令>` 仍可联网\n",
+               (unsigned)p->auto_tries);
+    }
+    return 0;
 }
 
 /* ============================== 指示（LED/蜂鸣） ============================== */
@@ -503,6 +573,99 @@ static int prov_fail(char *out, uint32_t cap, uint64_t ts, int http, int code,
     return http;
 }
 
+/* 带 detail 的失败响应（t137）：页面要能直接说"哪一步错了"，而不是只给一个 reason 枚举。
+ * detail 只放我们自己写的中文说明/枚举，**绝不放用户填的密钥**。 */
+static int prov_fail_detail(char *out, uint32_t cap, uint64_t ts, int http, int code,
+                            const char *msg, const char *reason, const char *detail)
+{
+    char data[224];
+
+    if (reason == NULL) {
+        snprintf(data, sizeof(data), "{}");
+    } else if (detail == NULL) {
+        snprintf(data, sizeof(data), "{\"reason\":\"%s\"}", reason);
+    } else {
+        snprintf(data, sizeof(data), "{\"reason\":\"%s\",\"detail\":\"%s\"}", reason, detail);
+    }
+    (void)prov_env(out, cap, code, msg, data, ts);
+    return http;
+}
+
+/* 云凭据字段的字符集：可见 ASCII，且不含空格 / 双引号 / 反斜杠 / 冒号。
+ * 为什么这么收：这两个字会进 JSON 与 gw_kvcfg 的文本 KV 块，挡在落盘之前，
+ * 比事后从串口 dump 里猜"为什么连不上"便宜得多。冒号由 host:port 拆分单独处理。 */
+static int prov_bad_chars(const char *s)
+{
+    uint32_t i;
+
+    if (s == NULL) {
+        return -1;
+    }
+    for (i = 0; s[i] != '\0'; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c <= 0x20u || c >= 0x7Fu) {
+            return -1;
+        }
+        if (c == '"' || c == '\\' || c == ':') {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/* host 支持 "域名:端口"（控制台给的接入地址是域名，端口常要自己带）。
+ * 显式 port 字段优先，但两者都给了且不一致时直接拒——"我明明填了 8883" 这类
+ * 现场事故十有八九是两处各写了一个。返回 0 = 成功（host 已去掉端口）。 */
+static int prov_host_split(const char *in, char *host, uint32_t cap,
+                           uint16_t *port, int *has_port)
+{
+    const char *c;
+    const char *digits;
+    uint32_t n;
+    uint32_t d;
+    uint32_t i;
+    long v;
+
+    if (in == NULL || host == NULL || port == NULL || has_port == NULL || cap == 0u) {
+        return -1;
+    }
+    *has_port = 0;
+    c = strchr(in, ':');
+    if (c == NULL) {
+        if (strlen(in) + 1u > cap) {
+            return -1;
+        }
+        snprintf(host, cap, "%s", in);
+        return 0;
+    }
+    if (strchr(c + 1, ':') != NULL) {
+        return -1;                  /* 多个冒号：IPv6 不在本版支持范围（KV 也存不下） */
+    }
+    n = (uint32_t)(c - in);
+    if (n == 0u || n + 1u > cap) {
+        return -1;
+    }
+    memcpy(host, in, n);
+    host[n] = '\0';
+    digits = c + 1;
+    d = (uint32_t)strlen(digits);
+    if (d == 0u || d > 5u) {
+        return -1;
+    }
+    for (i = 0; i < d; i++) {
+        if (digits[i] < '0' || digits[i] > '9') {
+            return -1;
+        }
+    }
+    v = strtol(digits, NULL, 10);
+    if (v < 1 || v > 65535) {
+        return -1;
+    }
+    *port = (uint16_t)v;
+    *has_port = 1;
+    return 0;
+}
+
 /* ============================== §12.5 status ============================== */
 uint32_t gw_prov_remain_s(const gw_prov_t *p, uint32_t now_ms)
 {
@@ -527,9 +690,16 @@ uint32_t gw_prov_remain_s(const gw_prov_t *p, uint32_t now_ms)
 
 int gw_prov_api_status(gw_prov_t *p, uint32_t now_ms, char *out, uint32_t cap)
 {
-    char data[512];
+    char data[768];
     char sta_ssid[GW_PROV_AP_SSID_LEN];
     char ip[24];
+    /* t137：云凭据回显。页面刷新后要能显示"已配置"，但密钥只回布尔值——
+     * 连长度/指纹都不给：站在 AP 口上的任何人都能拿指纹对拍离线爆破。 */
+    char c_host[GW_PROV_HOST_MAX + 1u];
+    char c_dev[GW_PROV_DEVICE_MAX + 1u];
+    uint16_t c_port = 0u;
+    int c_secret = 0;
+    int c_src = -1;
     uint32_t used;
     int st = prov_guard(p, now_ms, out, cap);
 
@@ -538,6 +708,12 @@ int gw_prov_api_status(gw_prov_t *p, uint32_t now_ms, char *out, uint32_t cap)
     }
     sta_ssid[0] = '\0';
     ip[0] = '\0';
+    c_host[0] = '\0';
+    c_dev[0] = '\0';
+    if (p->ops->cloud_load != NULL) {
+        c_src = p->ops->cloud_load(c_host, (uint32_t)sizeof(c_host), &c_port,
+                                   c_dev, (uint32_t)sizeof(c_dev), &c_secret);
+    }
     if (p->sta_connected) {
         if (p->ops->sta_ssid != NULL) {
             (void)p->ops->sta_ssid(sta_ssid, sizeof(sta_ssid));
@@ -567,6 +743,17 @@ int gw_prov_api_status(gw_prov_t *p, uint32_t now_ms, char *out, uint32_t cap)
     JAPP("\"hub_online\":%s,\"bound_count\":%lu,\"slots_free\":%lu",
          prov_hub_online(p, now_ms) ? "true" : "false",
          (unsigned long)p->bound_count, (unsigned long)prov_slots_free(p));
+    /* t137（契约字段表的**追加项**，不改任何既有字段语义）：
+     *   iotda.configured = 凭据来自 Flash（用户配过）而不是编译期默认值；
+     *   iotda.secret_set = 密钥非空，仅此而已（内容永不出现在任何响应里）。
+     *   wifi_saved = 家庭 Wi-Fi 已配置但当下没连上（页面据此显示"已配置（未连接）"）。 */
+    JAPP(",\"iotda\":{\"configured\":%s,\"host\":\"%s\",\"port\":%u,"
+         "\"device_id\":\"%s\",\"secret_set\":%s}",
+         (c_src == 1) ? "true" : "false", c_host, (unsigned)c_port, c_dev,
+         (c_secret != 0) ? "true" : "false");
+    if (sta_ssid[0] == '\0' && p->ops->cred_probe != NULL && p->ops->cred_probe() == 1) {
+        JAPP(",\"wifi_saved\":true");
+    }
     if (p->busy == GW_PROV_BUSY_SCAN) {
         JAPP(",\"busy\":\"scan\"");
     } else if (p->busy == GW_PROV_BUSY_CONNECT) {
@@ -579,6 +766,15 @@ int gw_prov_api_status(gw_prov_t *p, uint32_t now_ms, char *out, uint32_t cap)
 }
 
 /* ============================== §12.6 wifi ============================== */
+/* t137：本接口现在一次收完「家庭 Wi-Fi + 华为云 IoTDA 三件套（接入地址/设备 ID/密钥）」。
+ *
+ * 为什么不去新开一个 /api/cloud 端点：
+ *   1) 手机在 AP 口上只能提交一次表单——Wi-Fi 一提交，STA 就起来、AP 准备退场，
+ *      分两次提交会多出一个"只配了一半"的中间态，而且中间态期间谁也连不上；
+ *   2) §12.4 的路由表是契约的一部分，加一条路由要走契约变更，能不动就不动。
+ * 所以：云凭据字段**可缺省**（老页面/老脚本照旧只发 Wi-Fi）；一旦出现就要求三件套齐全。
+ * 三件套也可以**单独**提交（ssid 缺省 + 已配过 Wi-Fi），用于现场只换云端设备/密钥。
+ */
 int gw_prov_api_wifi(gw_prov_t *p, uint32_t now_ms, const char *body, char *out, uint32_t cap)
 {
     cJSON *root;
@@ -587,10 +783,25 @@ int gw_prov_api_wifi(gw_prov_t *p, uint32_t now_ms, const char *body, char *out,
     cJSON *j_open;
     cJSON *j_hidden;
     cJSON *j_timeout;
-    const char *ssid;
+    cJSON *j_host;
+    cJSON *j_port;
+    cJSON *j_dev;
+    cJSON *j_dev2;
+    cJSON *j_secret;
+    const char *ssid = NULL;
     const char *pwd = NULL;
+    const char *device = NULL;
+    const char *secret = NULL;
+    char host_buf[GW_PROV_HOST_MAX + 1u];
+    uint16_t mqtt_port = 1883u;
+    int has_port = 0;
+    uint8_t cloud_given = 0u;
+    uint8_t cloud_only = 0u;
+    uint8_t cloud_saved = 0u;
     uint32_t timeout_s = GW_PROV_WIFI_TIMEOUT_DEF_S;
-    char data[256];
+    char data[448];
+    char err[80];
+    uint32_t used = 0u;
     int pre = -1;
     int rssi = 0;
     int ch = 0;
@@ -606,59 +817,201 @@ int gw_prov_api_wifi(gw_prov_t *p, uint32_t now_ms, const char *body, char *out,
     if (root == NULL) {
         return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST, "bad_request", NULL);
     }
-    j_ssid = cJSON_GetObjectItem(root, "ssid");
-    j_pwd = cJSON_GetObjectItem(root, "password");
-    j_open = cJSON_GetObjectItem(root, "open");
+    host_buf[0] = '\0';
+    j_ssid   = cJSON_GetObjectItem(root, "ssid");
+    j_pwd    = cJSON_GetObjectItem(root, "password");
+    j_open   = cJSON_GetObjectItem(root, "open");
     j_hidden = cJSON_GetObjectItem(root, "hidden");
-    j_timeout = cJSON_GetObjectItem(root, "timeout_s");
-    if (j_ssid == NULL || !cJSON_IsString(j_ssid) ||
-        j_ssid->valuestring[0] == '\0' ||
-        strlen(j_ssid->valuestring) > GW_PROV_SSID_MAX) {
-        cJSON_Delete(root);
-        return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST, "bad_request", "bad_ssid");
+    j_timeout= cJSON_GetObjectItem(root, "timeout_s");
+    j_host   = cJSON_GetObjectItem(root, "host");
+    j_port   = cJSON_GetObjectItem(root, "port");
+    j_dev    = cJSON_GetObjectItem(root, "device_id");
+    j_dev2   = cJSON_GetObjectItem(root, "device");        /* 两种写法都收，免得页面/脚本各写一套 */
+    j_secret = cJSON_GetObjectItem(root, "secret");
+
+    /* ---------- 1) 云凭据：出现任意一个字段就要求三件套齐全 ---------- */
+    if (j_host != NULL || j_port != NULL || j_dev != NULL || j_dev2 != NULL || j_secret != NULL) {
+        cloud_given = 1u;
     }
-    ssid = j_ssid->valuestring;
-    if (j_pwd != NULL && cJSON_IsString(j_pwd)) {
-        pwd = j_pwd->valuestring;
-    }
-    /* §12.6（v1.2 定版）：不支持开放网络——空口令、缺 password、open=true 都拒，
-     * 且必须在"落盘之前"拒，否则 Flash 里会留下一条永远连不上的记录。 */
-    if (pwd == NULL || pwd[0] == '\0' || (j_open != NULL && cJSON_IsBool(j_open) && cJSON_IsTrue(j_open))) {
-        cJSON_Delete(root);
-        return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
-                         "wifi_failed", "open_not_supported");
-    }
-    if (strlen(pwd) < GW_PROV_PSK_MIN || strlen(pwd) > GW_PROV_PSK_MAX) {
-        cJSON_Delete(root);
-        return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
-                         "wifi_failed", "bad_password");
-    }
-    if (j_timeout != NULL && cJSON_IsNumber(j_timeout)) {
-        if (j_timeout->valueint < (int)GW_PROV_WIFI_TIMEOUT_MIN_S ||
-            j_timeout->valueint > (int)GW_PROV_WIFI_TIMEOUT_MAX_S) {
+    if (cloud_given != 0u) {
+        if (j_host == NULL || !cJSON_IsString(j_host) || j_host->valuestring[0] == '\0') {
             cJSON_Delete(root);
             return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
-                             "bad_request", "bad_timeout");
+                             "bad_request", "bad_host");
         }
-        timeout_s = (uint32_t)j_timeout->valueint;
+        if (j_dev != NULL && cJSON_IsString(j_dev) && j_dev->valuestring[0] != '\0') {
+            device = j_dev->valuestring;
+        } else if (j_dev2 != NULL && cJSON_IsString(j_dev2) && j_dev2->valuestring[0] != '\0') {
+            device = j_dev2->valuestring;
+        }
+        if (device == NULL) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_device");
+        }
+        if (j_secret == NULL || !cJSON_IsString(j_secret) || j_secret->valuestring[0] == '\0') {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_secret");
+        }
+        secret = j_secret->valuestring;
+        /* 长度先挡一遍：KV 是定长块（host[64]/device[64]/secret[64]），超了会被 gw_kvcfg
+         * 笼统地报"字段太长"，页面看不出是哪个字段。 */
+        if (strlen(j_host->valuestring) > GW_PROV_HOST_MAX) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_host_len");
+        }
+        if (strlen(device) > GW_PROV_DEVICE_MAX) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_device_len");
+        }
+        if (strlen(secret) > GW_PROV_SECRET_MAX) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_secret_len");
+        }
+        if (prov_host_split(j_host->valuestring, host_buf, (uint32_t)sizeof(host_buf),
+                            &mqtt_port, &has_port) != 0) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_host");
+        }
+        if (j_port != NULL && cJSON_IsNumber(j_port)) {
+            if (j_port->valueint < 1 || j_port->valueint > 65535) {
+                cJSON_Delete(root);
+                return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                                 "bad_request", "bad_port");
+            }
+            if (has_port != 0u && (uint16_t)j_port->valueint != mqtt_port) {
+                cJSON_Delete(root);
+                return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                                 "bad_request", "bad_port");
+            }
+            mqtt_port = (uint16_t)j_port->valueint;
+        }
+        if (prov_bad_chars(host_buf) != 0) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_host_char");
+        }
+        if (prov_bad_chars(device) != 0) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_device_char");
+        }
+        if (prov_bad_chars(secret) != 0) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_secret_char");
+        }
     }
-    /* 预检：§12.6 要求"目标不在列表且 hidden=false → 400/1602 not_found 且不落盘" */
-    if (p->ops->scan_ap != NULL) {
-        pre = p->ops->scan_ap(ssid, &rssi, &ch);
-    }
-    p->pre_found = (uint8_t)((pre == 1) ? 1u : 0u);
-    p->pre_rssi = (int16_t)rssi;
-    p->pre_ch = (int8_t)ch;
-    if (pre == 0 && (j_hidden == NULL || !cJSON_IsBool(j_hidden) || !cJSON_IsTrue(j_hidden))) {
+
+    /* ---------- 2) Wi-Fi 字段：可整段缺省，但只在"已经配过 Wi-Fi"时才允许 ---------- */
+    if (j_ssid == NULL || !cJSON_IsString(j_ssid) || j_ssid->valuestring[0] == '\0') {
+        if (cloud_given == 0u) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_ssid");
+        }
+        if (p->ops->cred_probe == NULL || p->ops->cred_probe() != 1) {
+            /* 没有任何 Wi-Fi 凭据还不给 ssid：这台机器配完也没有网，必须整段一起填 */
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                             "bad_request", "bad_ssid");
+        }
+        cloud_only = 1u;
+    } else if (strlen(j_ssid->valuestring) > GW_PROV_SSID_MAX) {
         cJSON_Delete(root);
-        return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
-                         "wifi_failed", "not_found");
+        return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                         "bad_request", "bad_ssid");
+    } else {
+        ssid = j_ssid->valuestring;
     }
-    /* 落盘（§12.6 第 2 条：写 Flash 前加密，具体算法由 gw_store.c 负责；这里只保证不打印） */
+
+    if (cloud_only == 0u) {
+        if (j_pwd != NULL && cJSON_IsString(j_pwd)) {
+            pwd = j_pwd->valuestring;
+        }
+        /* §12.6（v1.2 定版）：不支持开放网络——空口令、缺 password、open=true 都拒，
+         * 且必须在"落盘之前"拒，否则 Flash 里会留下一条永远连不上的记录。 */
+        if (pwd == NULL || pwd[0] == '\0' ||
+            (j_open != NULL && cJSON_IsBool(j_open) && cJSON_IsTrue(j_open))) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
+                             "wifi_failed", "open_not_supported");
+        }
+        if (strlen(pwd) < GW_PROV_PSK_MIN || strlen(pwd) > GW_PROV_PSK_MAX) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
+                             "wifi_failed", "bad_password");
+        }
+        if (j_timeout != NULL && cJSON_IsNumber(j_timeout)) {
+            if (j_timeout->valueint < (int)GW_PROV_WIFI_TIMEOUT_MIN_S ||
+                j_timeout->valueint > (int)GW_PROV_WIFI_TIMEOUT_MAX_S) {
+                cJSON_Delete(root);
+                return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_BAD_REQUEST,
+                                 "bad_request", "bad_timeout");
+            }
+            timeout_s = (uint32_t)j_timeout->valueint;
+        }
+        /* 预检：§12.6 要求"目标不在列表且 hidden=false → 400/1602 not_found 且不落盘" */
+        if (p->ops->scan_ap != NULL) {
+            pre = p->ops->scan_ap(ssid, &rssi, &ch);
+        }
+        p->pre_found = (uint8_t)((pre == 1) ? 1u : 0u);
+        p->pre_rssi = (int16_t)rssi;
+        p->pre_ch = (int8_t)ch;
+        if (pre == 0 && (j_hidden == NULL || !cJSON_IsBool(j_hidden) || !cJSON_IsTrue(j_hidden))) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
+                             "wifi_failed", "not_found");
+        }
+    }
+
+    /* ---------- 3) 云凭据落盘（放在 Wi-Fi 预检之后：预检失败时什么都没写，语义最干净） ---------- */
+    if (cloud_given != 0u) {
+        err[0] = '\0';
+        if (p->ops->cloud_save == NULL ||
+            p->ops->cloud_save(host_buf, mqtt_port, device, secret, err, (uint32_t)sizeof(err)) != 0) {
+            printf("[PROV] 云凭据落盘失败：%s\n", (err[0] != '\0') ? err : "cloud_save 不可用");
+            cJSON_Delete(root);
+            return prov_fail_detail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
+                                    "cloud_failed", "save_failed",
+                                    (err[0] != '\0') ? err : "写 Flash 失败");
+        }
+        cloud_saved = 1u;
+        /* 串口日志：接入地址与设备 ID 可以打（现场要靠它们核对是不是填错了实例/设备），
+         * 密钥只报长度、内容永不出现在日志里。 */
+        printf("[PROV] 收到 IoTDA 云凭据 host=%s:%u device=%s（密钥 %u 字节，不回显）\n",
+               host_buf, (unsigned)mqtt_port, device, (unsigned)strlen(secret));
+    }
+
+    /* ---------- 4) 只更新云凭据：不动家庭 Wi-Fi ---------- */
+    if (cloud_only != 0u) {
+        used = japp(data, sizeof(data), 0u,
+                    "{\"saved\":true,\"connecting\":false,"
+                    "\"iotda\":{\"saved\":true,\"host\":\"%s\",\"port\":%u,\"device_id\":\"%s\","
+                    "\"secret_set\":true},\"note\":\"只更新了云凭据（家庭 Wi-Fi 未改动）\"}",
+                    host_buf, (unsigned)mqtt_port, device);
+        if (used == 0u) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 500, GW_PROV_CODE_TOO_LARGE,
+                             "internal_error", "response_too_large");
+        }
+        data[used] = '\0';
+        cJSON_Delete(root);
+        (void)prov_env(out, cap, GW_PROV_CODE_OK, "ok", data, prov_epoch_now(p));
+        return 200;
+    }
+
+    /* ---------- 5) 家庭 Wi-Fi 落盘 + 发起连接（§12.6 第 2 条：写 Flash 前加密由 gw_store 负责） ---------- */
     if (p->ops->cred_save != NULL && p->ops->cred_save(ssid, pwd) != 0) {
         cJSON_Delete(root);
-        return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
-                         "wifi_failed", "save_failed");
+        return prov_fail_detail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
+                                "wifi_failed", "save_failed",
+                                (cloud_saved != 0u) ? "云凭据已保存，家庭 Wi-Fi 未保存" : NULL);
     }
     snprintf(p->pend_ssid, sizeof(p->pend_ssid), "%s", ssid);
     snprintf(p->pend_psk, sizeof(p->pend_psk), "%s", pwd);
@@ -669,16 +1022,42 @@ int gw_prov_api_wifi(gw_prov_t *p, uint32_t now_ms, const char *body, char *out,
     if (p->ops->sta_start == NULL || p->ops->sta_start(ssid, pwd) != 0) {
         prov_bound_clear_psk(p);
         p->busy = GW_PROV_BUSY_NONE;
+        p->connect_pending = 0u;
         cJSON_Delete(root);
-        return prov_fail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
-                         "wifi_failed", "internal");
+        return prov_fail_detail(out, cap, prov_epoch_now(p), 400, GW_PROV_CODE_WIFI_FAIL,
+                                "wifi_failed", "internal",
+                                (cloud_saved != 0u) ? "云凭据已保存；Wi-Fi 已写入，但连接发起失败"
+                                                    : "连接发起失败");
     }
-    /* 响应里只有 SSID 与预检结果，口令一个字节都不出现（§12.6） */
-    snprintf(data, sizeof(data),
-             "{\"saved\":true,\"connecting\":true,\"ssid\":\"%s\",\"settle_s\":%u,"
-             "\"precheck\":{\"ap_found\":%s,\"rssi\":%d,\"ch\":%d}}",
-             ssid, (unsigned)GW_PROV_SETTLE_S, p->pre_found ? "true" : "false",
-             (int)p->pre_rssi, (int)p->pre_ch);
+    /* 响应里只有 SSID、预检结果与云凭据的"已保存"——两条口令一个字节都不出现（§12.6） */
+    used = japp(data, sizeof(data), 0u,
+                "{\"saved\":true,\"connecting\":true,\"ssid\":\"%s\",\"settle_s\":%u,"
+                "\"precheck\":{\"ap_found\":%s,\"rssi\":%d,\"ch\":%d}",
+                ssid, (unsigned)GW_PROV_SETTLE_S, p->pre_found ? "true" : "false",
+                (int)p->pre_rssi, (int)p->pre_ch);
+    if (used == 0u) {
+        cJSON_Delete(root);
+        return prov_fail(out, cap, prov_epoch_now(p), 500, GW_PROV_CODE_TOO_LARGE,
+                         "internal_error", "response_too_large");
+    }
+    if (cloud_saved != 0u) {
+        used = japp(data, sizeof(data), used,
+                    ",\"iotda\":{\"saved\":true,\"host\":\"%s\",\"port\":%u,\"device_id\":\"%s\","
+                    "\"secret_set\":true}",
+                    host_buf, (unsigned)mqtt_port, device);
+        if (used == 0u) {
+            cJSON_Delete(root);
+            return prov_fail(out, cap, prov_epoch_now(p), 500, GW_PROV_CODE_TOO_LARGE,
+                             "internal_error", "response_too_large");
+        }
+    }
+    used = japp(data, sizeof(data), used, "}");
+    if (used == 0u) {
+        cJSON_Delete(root);
+        return prov_fail(out, cap, prov_epoch_now(p), 500, GW_PROV_CODE_TOO_LARGE,
+                         "internal_error", "response_too_large");
+    }
+    data[used] = '\0';
     printf("[PROV] 收到 Wi-Fi ssid=%s（口令不回显），开始连接，timeout=%us\n", ssid, (unsigned)timeout_s);
     cJSON_Delete(root);   /* ssid/pwd 指在 root 里，任何打印都必须在释放之前 */
     (void)prov_env(out, cap, GW_PROV_CODE_OK, "ok", data, prov_epoch_now(p));
@@ -1210,7 +1589,6 @@ int gw_prov_cloud_bind(gw_prov_t *p, uint32_t now_ms, const char *op,
                        const char *sn, const char *mac, char *paras, uint32_t cap)
 {
     char err[GW_PROV_REASON_LEN];
-    char bound[896];
     uint32_t used;
     uint32_t i;
     int32_t idx;

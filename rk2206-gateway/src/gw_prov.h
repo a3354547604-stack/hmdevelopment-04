@@ -141,7 +141,26 @@ typedef struct {
                          char *err, uint32_t cap);
     uint32_t (*now_ms)(void);       /* 单调毫秒（窗口/超时用） */
     uint64_t (*epoch_ms)(void);     /* unix 毫秒（ts/scanned_at 用；未校时返回 0）——必须 64 位 */
+
+    /* ---- t137：首次配网与云端凭据（都加在表尾：上板那份 ops 是位置初始化，
+     *      插在中间会把后面每一项都错位，而且是静默错位——别图好看往前塞）----
+     * cred_probe：Flash 里是否已有家庭 Wi-Fi 凭据（1 = 有）。开机据此决定要不要
+     *   自动开配网窗口。为 NULL 时按"没有凭据"处理：宁可多开一次窗（用户关掉就行），
+     *   也不能让全新网关因为探不到而永远开不出配网入口。
+     * cloud_save：把 IoTDA 接入地址/设备 ID/设备密钥落盘。实现必须与串口 `gwkv set`
+     *   写**同一份存储**（否则两个入口各写各的，先写的那份会被覆盖），并且
+     *   **密钥不打印、不回显**；失败把原因写进 err（≤64 B，可给中文）。返回 0 = 成功。
+     * cloud_load：读回当前云凭据给 status 回显（页面刷新后要能显示"已配置"）。
+     *   **不许把 secret 写进 out**——has_secret 只回答"密钥非空"，不回答内容。
+     *   返回 1 = 来自 Flash（用户配过），0 = 编译期默认值，-1 = 读不到。 */
+    int      (*cred_probe)(void);
+    int      (*cloud_save)(const char *host, uint16_t port, const char *device,
+                           const char *secret, char *err, uint32_t cap);
+    int      (*cloud_load)(char *host, uint32_t host_cap, uint16_t *port,
+                           char *device, uint32_t dev_cap, int *has_secret);
 } gw_prov_ops_t;
+/* 加字段后的编译期护栏：上板那份 gw_prov_ops_t 支持"整表初始化 + 少写尾部"，
+ * 少写的一项会是 NULL 而不是随机地址（gw_main.c 的注释里记着这个坑）。 */
 
 typedef struct {
     const gw_prov_ops_t *ops;
@@ -200,7 +219,20 @@ typedef struct {
     uint8_t    full_sync_done;      /* 上电后用 0x22 op=list 重建过汇聚白名单 */
     uint8_t    resync_wanted;       /* 汇聚刚回来：需要按本地白名单重建它那边的表 */
     uint8_t    resync_idx;          /* 重建进度：0=先发 op=list，之后每条白名单一次 add */
+
+    /* ---- t137：首次配网的自动开窗（只判定一次）----
+     * auto_state 三态：待判定 / 已开过（含放弃）/ 不需要（已有凭据或已有手动窗口）。
+     * 为什么用"判定一次"而不是"一直盯"：详见 gw_config.h 第 10 节。 */
+    uint8_t    auto_state;          /* GW_PROV_AUTO_IDLE / _DONE */
+    uint8_t    auto_tries;          /* AP 起不来时的重试次数 */
+    uint32_t   auto_last_try_ms;
 } gw_prov_t;
+
+/* gw_prov_t.auto_state */
+enum {
+    GW_PROV_AUTO_IDLE = 0,          /* 还没判定过 */
+    GW_PROV_AUTO_DONE = 1,          /* 已了结：开过窗 / 不需要 / 重试用尽 */
+};
 
 /* ------------------------------ 生命周期 ------------------------------ */
 void gw_prov_init(gw_prov_t *p, const gw_prov_ops_t *ops,
@@ -210,6 +242,13 @@ int  gw_prov_active(const gw_prov_t *p);
 /* 长按 3 s 触发：未开窗则进入，已开窗则退出（§12.2 的"再长按一次退出"） */
 int  gw_prov_toggle(gw_prov_t *p, uint32_t now_ms);
 int  gw_prov_enter(gw_prov_t *p, uint32_t now_ms);
+/* t137：全新网关的自动配网入口——由 tick 周期调用（不能放在 gw_main_entry 里：
+ * SoftAP 要 wifi 服务先起来，开机早期调 wifi 接口会拿到"设备忙"）。
+ * wifi_configured：Flash 里是否已有家庭 Wi-Fi 凭据（1 = 有），板级探测一次后传进来。
+ * 规则：已有凭据 → 不开（保持"配过就不再自动开"）；没凭据且还没了结 → 开窗；
+ *       AP 起不来按 GW_PROV_AUTO_RETRY_MS / GW_PROV_AUTO_MAX_TRIES 重试，用尽即放弃并
+ *       在串口打印下一步（串口 `wifi set`）。返回 1 = 本次真的开了窗。 */
+int  gw_prov_auto_boot(gw_prov_t *p, uint32_t now_ms, int wifi_configured);
 void gw_prov_exit(gw_prov_t *p, uint32_t now_ms);
 /* 100 ms 周期：窗口/settle 超时、扫描超时、指示灯节拍 */
 void gw_prov_tick(gw_prov_t *p, uint32_t now_ms);
@@ -217,7 +256,8 @@ const char *gw_prov_last_reason(const gw_prov_t *p);
 int  gw_prov_last_bind_result(const gw_prov_t *p);
 
 /* ------------------------------ 本地 API（§12.4） ------------------------------ */
-/* 返回 HTTP 状态码；响应体（JSON 信封）写进 out。cap 建议 ≥512。 */
+/* 返回 HTTP 状态码；响应体（JSON 信封）写进 out。cap 建议 ≥512（status 自 t137 起
+ * 还会带 iotda 回显，实测 ≤640，调用方给 ≥768 更稳）。 */
 int gw_prov_api_status(gw_prov_t *p, uint32_t now_ms, char *out, uint32_t cap);
 int gw_prov_api_wifi(gw_prov_t *p, uint32_t now_ms, const char *body, char *out, uint32_t cap);
 int gw_prov_api_scan(gw_prov_t *p, uint32_t now_ms, const char *body, char *out, uint32_t cap);

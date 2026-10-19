@@ -220,7 +220,9 @@
 #define GW_NET_AUTH_FAIL_POLLS      30u
 #define GW_PROV_WIFI_BACK_AP_S      30u     /* §12.6 连接失败后 30 s 内退回 AP 并重置窗口 */
 #define GW_PROV_HTTP_PORT           80u     /* §12.1 域 http://<ap>/api（HTTP，不是 HTTPS） */
-#define GW_PROV_HTTP_MAX_REQ        512u    /* 请求体上限：最大是 bind 的 ~160 B，留 3 倍余量 */
+#define GW_PROV_HTTP_MAX_REQ        768u    /* 请求体上限：t137 起 wifi 请求还要带
+                                             * IoTDA 三件套（host≤63 + 设备ID≤63 + 密钥≤63
+                                             * 加转义），实测最大 ~420 B，留 1.8 倍余量 */
 #define GW_PROV_HTTP_TASK_STACK  4096u     /* 本地 HTTP 服务：单请求串行，缓冲在静态区 */
 #define GW_PROV_HTTP_TASK_PRIO   28u        /* 比 tick(25)/net(26) 更低：配网不能抢告警与上报 */
 #define GW_PROV_TASK_STACK          6144u   /* HTTP 任务：socket + cJSON + 响应体都在这个栈上 */
@@ -252,5 +254,26 @@
                                              * 反复 AddDeviceConfig 会把 SDK 的配置表撑满 */
 #define GW_NET_REASON_LEN           16u     /* "auth"/"timeout"/"internal"/"busy"/"not_found" */
 #define GW_NET_LIST_MAX             12u     /* wifi scan 最多列 12 个 2.4 G 热点 */
+
+/* ------------------------------------------------------------------ *
+ * 10. 首次配网（t137）：Flash 里没有任何家庭 Wi-Fi 凭据时自动开窗 +
+ *     配置页一次收完「家庭 Wi-Fi + 华为云 IoTDA 凭据」
+ *
+ * 现场事实（2026-10-19）：整机没有外接配网按键，串口 `wifi set` 能救急，
+ * 但"全新网关开机就能配"才是产品路径——否则每换一个现场都要先接串口线。
+ * 为什么自动开窗只做一次：射频只有一套，配网窗口期间 STA 要停；若用户
+ * 不想配（比如已经用 `wifi set` 配好了却不小心清了 KV），反复自动开窗会
+ * 让网关永远连不上路由。所以判定一次，之后只认长按/串口两条手动入口。
+ * ------------------------------------------------------------------ */
+#define GW_PROV_AUTO_RETRY_MS       5000u   /* AP 起不来时的重试间隔 */
+#define GW_PROV_AUTO_MAX_TRIES      3u      /* 只试 3 次（≈15 s）：开机早期 wifi 服务
+                                             * 可能还没就绪，等一会儿就好；三次还起不来
+                                             * 就是射频/驱动问题，再试只是刷屏 */
+/* 云凭据的三段上限与 gw_kvcfg 的 KV 布局对齐（mqtt_host[64]/device_id[64]/secret[64]，
+ * 减去 NUL 各剩 63）。在这里再挡一道，是为了让页面拿到的是"哪个字段错了"，
+ * 而不是 gw_kvcfg 那句笼统的"字段太长"。 */
+#define GW_PROV_HOST_MAX            63u
+#define GW_PROV_DEVICE_MAX          63u
+#define GW_PROV_SECRET_MAX          63u
 
 #endif /* GW_CONFIG_H */

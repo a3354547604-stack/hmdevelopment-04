@@ -3,6 +3,8 @@
 > 这份只验**配网**（长按进配网 → 手机连 SoftAP → 打开网页 → 调本地 API）。
 > **烧录**不在这里重复：见 `rk2206-gateway/施工单-网关上板与上云验证.md` 的 §2（填占位值 + 重编）与 §3（烧录）。
 > 本施工单用到的现成固件就是那份固件（同一颗 Firmware.img），不需要额外改配置。
+> **t137 补充（2026-10-19）**：全新网关（Flash 里没有家庭 Wi-Fi 凭据）**上电后会自动开配网窗口**，
+> 不需要按键（§3.5）；配置页上**同一个表单**可以一次填完「家庭 Wi-Fi + 华为云 IoTDA 三件套」（§4.5）。
 
 ## 0. 这次要验的三条判据
 
@@ -11,6 +13,8 @@
 | J1 | 长按配对键 3 s 能进配网模式，SoftAP 出现 | 串口出现 `[PROV] enter AP mode ssid=ElderCare-XXXX psk=… remain=600 url=http://<AP地址>/`，且手机 Wi-Fi 列表里能看到 `ElderCare-XXXX` |
 | J2 | 本地 5 个 API 可调，网页能打开 | 手机浏览器打开 `http://<串口打印的 AP 地址>/` 能看到配网页；页面里能查到状态、能提交 Wi-Fi |
 | J3 | 窗口行为正确（600 s 超时 / 再长按 3 s 退出 / 提交 Wi-Fi 后 90 s 内 SoftAP 消失） | 串口出现对应 `[gw] [PROV] …` 日志，`remain_s` 在网页上倒数 |
+| J4 | **全新网关不按键也会自己进配网**（t137） | 串口出现 `[PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 10 min（手机连 Wi-Fi「ElderCare-XXXX」…）`；手机 Wi-Fi 列表里直接出现热点 |
+| J5 | **一次填完 Wi-Fi + 云端三件套**，页面刷新只显示「已配置（不回显）」（t137） | 串口出现 `[PROV] 收到 IoTDA 云凭据 host=… device=…（密钥 N 字节，不回显）`；刷新页面看到「华为云 IoTDA：已配置」，**密钥框永远空着** |
 
 **扫描/绑定（网页上的"扫描节点"/"绑定"）需要汇聚板在线**。当前汇聚固件还没上板，
 页面会显示"汇聚离线"（HTTP `409` / `1605`）——那是**预期结果**，记录即可，不算本卡失败。
@@ -94,6 +98,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 它可能比 enter 行早或晚出现（HTTP 任务与 tick 任务是并行的）。
 同时板上 LED 双闪 2 次（不响）。
 
+## 3.5 首次上电：不按键也会自己进配网（t137，3 步）
+
+> 为什么有这一节：现场那台网关是**全新的**（Flash 里一条 Wi-Fi 凭据都没有），
+> 而 `EX_GPIO_A3` 那根线常常没人接。t137 让它在"从没配过"的情况下开机自己开窗——
+> **只在没凭据时开一次**，配过之后就不再抢热点（忘了口令只能长按或串口 `wifi set`）。
+
+1. 先**别按任何键**，只给板子上电，同时抓 40 秒串口：
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Port COM20 -Seconds 40 -Out rk2206-gateway\out\prov-auto-COM20.log
+   ```
+
+2. **成功标志**：串口出现这两行（顺序固定，`enter` 那行在 `ready` 之后几十毫秒到几秒不等）：
+
+   ```
+   [PROV] ready: sn=M0-3F1A2B ap_ssid=ElderCare-1A2B bound=0 keepalive=600s
+   [PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 10 min（手机连 Wi-Fi「ElderCare-1A2B」，口令 echub8888，浏览器打开配置页，一次填完 Wi-Fi 与云端凭据）
+   ```
+
+   然后 `[PROV] enter AP mode …` / `[gw] [PROV] 本地配网服务就绪 http://<AP地址>/`，
+   手机 Wi-Fi 列表里出现 `ElderCare-XXXX`。
+
+3. **失败怎么办**（三种，照串口原文对号）：
+
+   | 串口看到 | 含义 | 怎么办 |
+   |---|---|---|
+   | `[PROV] 已有家庭 Wi-Fi 凭据：不自动开配网窗口…` | 这块板**之前配过**（Flash 里有凭据） | 正常行为；要重配就长按 3 s 或串口 `wifi set` |
+   | `[PROV] ⚠ 自动配网开窗失败 3 次（SoftAP 起不来），不再自动重试…` | 开机早期 Wi-Fi 服务还没就绪 | 断电重上电一次；仍不行就串口 `wifi set ssid=… psk=…` 先联网，再长按 3 s 进配网 |
+   | 40 秒内一条 `[PROV]` 都没有 | 刷的不是这一版固件 | 回 §8 看固件指纹，重烧 `out/gateway-Firmware.img` |
+
 ## 4. 用手机调本地 API（3 步）
 
 1. 手机连 SoftAP：Wi-Fi 列表找 `ElderCare-XXXX`，口令 `echub8888`（占位值，见 §5 CAL-16）。
@@ -145,6 +179,59 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 > 说明：`2)` 的 `precheck.ap_found=false` 是**允许**的（AP 模式下驱动可能不放行并发扫描，实现选择"放行不堵用户"）；
 > `3)`/`4)` 在汇聚板不在线时会是 `{"code":1605,"message":"hub_offline","data":{},"ts":…}`——**预期结果，记录即可**（汇聚固件还没上板）。
 
+## 4.5 在同一个页面上把云端凭据也填完（t137，3 步）
+
+> 为什么要一起填：手机连在网关的 AP 上，**Wi-Fi 一提交、STA 一起来，AP 就准备退场**，
+> 分两次提交会多出一个"只配了一半"的窗口——所以 t137 让一个表单收完两件事。
+> 云端三件套是**可缺省**的：只填 Wi-Fi 时行为与老版本完全一样（老脚本、简化流程都还能用）。
+
+1. 在第 4 步那个页面上，继续填「**第二步：华为云 IoTDA**」三个框（都从华为云控制台抄，
+   每个值在哪抄见 `docs/执行/IoTDA建产品与设备指引.md` §4/§5）：
+
+   | 框 | 填什么 | 例子（**占位**） |
+   |---|---|---|
+   | 接入地址 | 控制台「总览 → 接入信息」里的 MQTT 域名；带端口就在后面加 `:1883` | `xxxxxx.iot-mqtts.cn-north-4.myhuaweicloud.com` |
+   | 设备 ID | 控制台「设备 → 所有设备 → 点设备 → 详情」里的设备 ID | `<device_id>` |
+   | 设备密钥 | 同一页的密钥（只显示一次；丢了点「重置密钥」） | `<secret>` |
+
+   然后点**同一个**「提交并连接」按钮。
+
+2. **成功标志**：串口出现（**密钥只报长度，内容永不出现**）：
+
+   ```
+   [PROV] 收到 IoTDA 云凭据 host=xxxxxx.iot-mqtts.cn-north-4.myhuaweicloud.com:1883 device=<device_id>（密钥 32 字节，不回显）
+   [PROV] 收到 Wi-Fi ssid=<你的SSID>（口令不回显），开始连接，timeout=30s
+   ```
+
+   注意这两行的**先后**：云凭据先落盘、再发起 Wi-Fi 连接（预检不过的话一条都不写）。
+
+   云凭据保存后**自动推进**（不需要重启）：串口接着应看到这条链，
+   顺序固定，缺哪一步就停在"联网 → 取时 → 连云"的那一环（对号方法见 §6）：
+
+   ```
+   [PROV] Wi-Fi 已连接 ssid=<你的SSID>，90s 后关闭 SoftAP（App 掉线是预期）
+   [gw] 取时成功(NTP) epoch=…          ← 或 取时成功(HTTP) epoch=…（time= 指向服务器时）
+   [gw] IoTDA 已连接 clientId=<设备ID>_0_1_<YYYYMMDDHH>
+   ```
+
+   **没取到时间就不会连 IoTDA**（契约 §4.1.1：S=1 要先校时），所以"卡在取时"时先看 Wi-Fi 真的通不通。
+
+3. **刷新页面**再看状态卡（这一步就是验收点）：
+
+   - 「家庭 Wi-Fi」显示 `已配置（未连接）` 或 `已连接 <你的SSID> / <IP>`；
+   - 「华为云 IoTDA」显示 `已配置：<接入地址>:1883 / <设备 ID>（密钥不回显）`，
+     **三个输入框都是空的**——页面从设计上就拿不到已存的密钥。
+
+   期望的接口原文（主机模拟器实跑，`<...>` 是现场值）：
+
+   ```
+   {"code":0,"message":"ok","data":{"mode":"ap","ssid":"ElderCare-1A2B","device_sn":"M0-3F1A2B","firmware":"0.1.0","remain_s":600,"hub_online":true,"bound_count":0,"slots_free":8,"iotda":{"configured":true,"host":"xxxxxx.iot-mqtts.cn-north-4.myhuaweicloud.com","port":1883,"device_id":"<device_id>","secret_set":true},"wifi_saved":true},"ts":…}
+   ```
+
+   三个字段读法：`configured=true` = 凭据来自 Flash（用户配过，不是编译期默认值）；
+   `secret_set=true` = 密钥非空（**只有布尔值，没有内容、没有指纹**）；
+   `wifi_saved=true` = 家庭 Wi-Fi 已配置但当下没连上。
+
 ## 5. 退出与收尾（2 步）
 
 1. **退出**：再长按 3 秒。串口期望（`mode`/`bound` 随现场变，SoftAP 随之消失）：
@@ -178,19 +265,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 4. 手机浏览器里页面的一句话描述 / 截图（有截图最好，能看出状态卡的数字）。
 5. 若走了命令行：五条 `curl` 的原样输出。
 6. 这段期间你**实际按了几次键、每次多长**（只看日志也能推，但你对一下更准）。
+7. §3.5 的 `prov-auto-COM20.log`（**不按键**首次上电那 40 秒）——这一条专门验 t137 的自动开窗。
+8. §4.5 刷新页面后状态卡的两行文字（家庭 Wi-Fi / 华为云 IoTDA 各一行），以及**云端三个框是不是空的**。
+9. 若只填 Wi-Fi、不填云端：页面应照老流程走完（这是回归项，证明云端那三项真的"可缺省"）。
 
 ## 8. 现场前提与已知偏差（务必先读）
 
-- **现场 2.4 G Wi-Fi 的 SSID 与口令要提前定好**：网关"平时联网"走的是 SDK 编译期配置
-  （`config_network.h`），配网接口把 SSID/口令写进板子的 Vendor Flash，**切换由后续任务（t34 凭证工具）决定**。
-  本卡验的是"能写进去、能连上"，不是"重启后自动用新口令联网"。
+- **现场 2.4 G Wi-Fi 的 SSID 与口令要提前定好**：t136 之后**开机联网读的就是这份 Flash 凭据**
+  （`net_wifi_boot()`：有凭据 → `gw_net_sta_connect_wait()`；**没有凭据就直接返回**，
+  不再调 SDK 的 `SetWifiModeOn()`——它读的是另一个我们从不写的 Vendor 槽，只会多一条 `wlan0 not connected` 噪音，
+  而且会和配网 SoftAP 抢射频）。所以"配一次，以后开机自己连"这件事现在是成立的；串口 `wifi show` 可随时复查。
+- **云端三件套写的是同一份 KV**：配置页提交走 `ops->cloud_save` → `gw_main.c` 里落到 `gw_kvcfg`
+  （与串口 `gwkv set host=… device=… secret=…` 同一块 Flash、同一份结构）。
+  两个入口谁后写谁生效，不会各存一份；写完 `gw_cloud_init` 会用新凭据重连（不必重启）。
 - **CAL-12（重要）**：**地址口径 = 待上板实测确认（地址由板级驱动决定，占位 `192.168.4.1`）**。契约 §12.3 写 `192.168.4.1/24`、DHCP `100–199`，但那个地址不是实现事实，但 RK2206 的 SoftAP 由预编译库实现，
   **地址与 DHCP 池由驱动决定**（官方样例实测是 `192.168.2.1`，客户端 `192.168.2.10`），改不了。
   所以：**手机浏览器用串口打印的那个 IP**；H5 页面用的是相对路径，不写死地址。
   另外"最多 1 个客户端"也无法硬性限制（SDK 的 `GetStationList()` 是空壳），现场请只连一台手机。
 - **CAL-16**：SoftAP 口令是占位值 `echub8888`（契约要求"值待用户确认、仓库不写死"）。
   要改成你们的现场口令，告我，我改 `gw_config.h` 的 `GW_PROV_AP_PSK` 重编。
-- 本固件指纹（就是你该烧的那颗，2026-10-18 08:43 构建）：
+> **下面这段指纹是 2026-10-18 那一次构建的**，只用于说明"怎么判断是不是带配网的固件"。
+> t137 之后固件已重编，**以 `rk2206-gateway/out/build-gateway.evidence.txt` 里的当次值为准**
+> （RK2206 镜像不可跨次复现：同源两次构建体积相同、sha256 不同，判据以「体积 + 提交号」为主）。
+
+- 固件指纹（2026-10-18 08:43 那一次构建）：
 
   ```
   文件 rk2206-gateway/out/gateway-Firmware.img   2097152 字节
@@ -230,6 +328,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 | 绑定成功 | `[PROV] 绑定 sn=%s mac=%s（白名单 %lu 条，0x23 已确认）` | `src/gw_prov.c:1112` |
 | 汇聚拒绝回滚 | `[PROV] 汇聚拒绝绑定 sn=%s（%s）→ 已回滚白名单` | `src/gw_prov.c:1087` |
 | 白名单重建 | `[PROV] 汇聚白名单重建完成（%lu 条）` | `src/gw_prov.c:1499` |
+| **首次配网自动开窗** | `[PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 %u min（手机连 Wi-Fi「%s」，口令 %s，浏览器打开配置页，一次填完 Wi-Fi 与云端凭据）` | `src/gw_prov.c:378` |
+| 已有凭据（不自动开） | `[PROV] 已有家庭 Wi-Fi 凭据：不自动开配网窗口（长按配网键 3 s 或串口 `wifi set` 可手动配）` | `src/gw_prov.c:365` |
+| 自动开窗失败放弃 | `[PROV] ⚠ 自动配网开窗失败 %u 次（SoftAP 起不来），不再自动重试：串口敲 `wifi set ssid=<名称> psk=<口令>` 仍可联网` | `src/gw_prov.c:387` |
+| **收到云端凭据** | `[PROV] 收到 IoTDA 云凭据 host=%s:%u device=%s（密钥 %u 字节，不回显）` | `src/gw_prov.c:987` |
+| 云端凭据落盘失败 | `[PROV] 云凭据落盘失败：%s` | `src/gw_prov.c:978` |
 | 每个 HTTP 请求 | `[HTTP] %s %s -> %d (%u B)` | `src/gw_http.c:268` |
 | HTTP 连接来源 | `[HTTP] 连接来自 %s:%u` | `src/gw_http.c:287` |
 
@@ -238,6 +341,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
 ## 10. 没有硬件时能自证到哪一步（我这个仓库里的）
 
-- 逻辑与接口：`bash rk2206-gateway/test/run-prov-sim.sh` → `用例 通过 100 / 失败 0`（含真 TCP 回环、五个接口的 curl 形态、窗口/扫描/绑定/回滚/重建）。
+- 逻辑与接口：`bash rk2206-gateway/test/run-prov-sim.sh` → `用例 通过 129 / 失败 0`（含真 TCP 回环、五个接口的 curl 形态、窗口/扫描/绑定/回滚/重建，以及 t137 的自动开窗与云端凭据）。
 - 页面：`python3 rk2206-gateway/web/gen-h5-header.py --check`（真源与 `src/gw_h5.h` 一致）+ `node --check`（JS 语法）。
 - 真机只差三件：SoftAP 能不能起来、手机能不能连、现场 Wi-Fi 能不能连上 —— 这三件就是 §0 的三条判据。

@@ -157,6 +157,10 @@ static int dec_u64(uint64_t v, char *out, int cap)
 static gw_kvcfg_t s_creds;
 static int s_creds_from_kv;            /* 1 = 来自 Flash KV；0 = 编译期默认值 */
 static char s_creds_reason[96];
+/* t137：配置页写完新凭据后置位，由 net_task 在"它自己那一侧"重装会话。
+ * 为什么不在 HTTP 任务里直接重装：gw_cloud_init 会改写 s_cloud 的 client_id/username/
+ * password 缓冲，而 net_task 可能正拿着它们跑 paho（重连/收包）——跨任务撕裂。 */
+static volatile uint8_t s_creds_dirty;
 
 static void creds_init(void)
 {
@@ -929,6 +933,95 @@ static int prov_op_bound_load(gw_prov_bound_t *list, uint32_t cap, uint32_t *n)
 {
     return gw_store_bound_load(list, cap, n);
 }
+/* ---- t137：配置页收上来的云端凭据 ----
+ * 落盘复用 gw_kvcfg 的 KV 块：与串口 `gwkv set` 是**同一份存储**（两个入口不会各写各的），
+ * 也复用同一套字段校验与写后读回比对，不另开一套 Flash 布局。 */
+static const char *creds_kv_reason(int rc)
+{
+    switch (rc) {
+    case GW_KVCFG_E_PARAM:  return "字段缺失或含不认识的键";
+    case GW_KVCFG_E_LEN:    return "字段太长（接入地址/设备 ID ≤63 字节）";
+    case GW_KVCFG_E_CHAR:   return "含非法字符（空格/引号/中文标点）";
+    case GW_KVCFG_E_PORT:   return "端口不在 1..65535";
+    case GW_KVCFG_E_SECRET: return "密钥太短（<8 字节；华为云一般是 32 位十六进制）";
+    case GW_KVCFG_E_FLASH:  return "Flash 擦写失败";
+    case GW_KVCFG_E_VERIFY: return "写入后读回不一致";
+    default:                return "写入失败（串口 `gwkv show` 看详情）";
+    }
+}
+
+static int prov_op_cloud_save(const char *host, uint16_t port, const char *device,
+                              const char *secret, char *err, uint32_t cap)
+{
+    char line[GW_KVCFG_LINE_MAX];
+    char out[512];
+    int rc;
+
+    if (host == NULL || device == NULL || secret == NULL ||
+        host[0] == '\0' || device[0] == '\0' || secret[0] == '\0') {
+        if (err != NULL && cap > 0u) {
+            snprintf(err, cap, "%s", "接入地址/设备 ID/密钥都不能为空");
+        }
+        return -1;
+    }
+    (void)snprintf(line, sizeof(line), "set host=%s port=%u device=%s secret=%s",
+                   host, (unsigned)port, device, secret);
+    out[0] = '\0';
+    rc = gw_kvcfg_cmd(line, out, (uint32_t)sizeof(out));
+    memset(line, 0, sizeof(line));          /* 这一行里带着密钥：用完即擦 */
+    if (rc != 0) {
+        if (err != NULL && cap > 0u) {
+            snprintf(err, cap, "%s", creds_kv_reason(rc));
+        }
+        return -1;
+    }
+    s_creds_dirty = 1u;
+    printf("[%s] 配置页写入 IoTDA 凭据：host=%s:%u device=%s（密钥不回显），net_task 稍后重连\n",
+           GW_LOG_TAG, host, (unsigned)port, device);
+    return 0;
+}
+
+/* status 回显用。刻意现场读一遍 KV 而不是读 s_creds：配置页刚写完的那一刻，
+ * s_creds 还是旧值，页面刷新后却应该看到"已配置"。
+ * 返回 1 = 来自 Flash（用户配过），0 = 编译期默认值，-1 = 读不了。 */
+static int prov_op_cloud_load(char *host, uint32_t host_cap, uint16_t *port,
+                              char *device, uint32_t dev_cap, int *has_secret)
+{
+    gw_kvcfg_t c;
+    char err[96];
+    int rc;
+
+    if (host == NULL || device == NULL || port == NULL || has_secret == NULL ||
+        host_cap == 0u || dev_cap == 0u) {
+        return -1;
+    }
+    memset(&c, 0, sizeof(c));
+    err[0] = '\0';
+    rc = gw_kvcfg_load(&c, err, (uint32_t)sizeof(err));   /* 失败时已自动填编译期默认值 */
+    (void)snprintf(host, host_cap, "%s", c.mqtt_host);
+    (void)snprintf(device, dev_cap, "%s", c.device_id);
+    *port = c.mqtt_port;
+    *has_secret = (c.secret[0] != '\0') ? 1 : 0;
+    memset(&c, 0, sizeof(c));               /* 栈上不留密钥 */
+    return (rc == GW_KVCFG_OK) ? 1 : 0;
+}
+
+/* Flash 里有没有家庭 Wi-Fi 凭据（决定开机要不要自动开配网窗口）。
+ * 只读不打印：SSID 由 net_task 自己那一行打，这里问一句就走。 */
+static int prov_op_cred_probe(void)
+{
+    char ssid[GW_PROV_SSID_MAX + 1u];
+    char psk[GW_PROV_PSK_LEN];
+
+    ssid[0] = '\0';
+    psk[0] = '\0';
+    if (gw_store_cred_load(ssid, (uint32_t)sizeof(ssid), psk, (uint32_t)sizeof(psk)) != 0) {
+        return 0;
+    }
+    memset(psk, 0, sizeof(psk));
+    return 1;
+}
+
 static uint32_t prov_op_now_ms(void)    { return gw_now_ms(); }
 /* unix 毫秒：未校时时 gw_time_ms 返回 0，契约 §12.8 的 scanned_at 就报 0（不编假时间） */
 static uint64_t prov_op_epoch_ms(void)  { return gw_time_ms(gw_now_ms()); }
@@ -1070,7 +1163,15 @@ static const gw_prov_ops_t s_prov_ops = {
     prov_op_hub_bind,
     prov_op_now_ms,
     prov_op_epoch_ms,
+    /* t137：尾巴三项（位置初始化，顺序必须与 gw_prov_ops_t 一致） */
+    prov_op_cred_probe,
+    prov_op_cloud_save,
+    prov_op_cloud_load,
 };
+
+/* t137：首次配网的两个一次性状态（tick 任务独占，无需加锁） */
+static uint8_t s_wifi_probed;
+static int     s_wifi_configured;
 
 /* 本地配网 HTTP 任务（§12.1：只绑 AP 口）。
  * 监听 fd 打开一次就常驻，不随窗口开关反复关——关一个正被 accept 阻塞的 fd 是
@@ -1120,6 +1221,14 @@ static void tick_task(void *arg)
 
         /* 配网状态机（契约 §12.2）：窗口/settle/扫描超时、STA 连接推进、指示灯节拍 */
         gw_prov_tick(&s_prov, now);
+        /* t137：全新网关自动进配网窗口。放 tick 任务里（不是 gw_main_entry）：
+         * SoftAP 要 wifi 服务先就绪，开机早期直接调 wifi 接口会拿到"设备忙"。
+         * 凭据探测只做一次——gw_store_cred_load 是 Flash 读，没必要每 10 ms 问一遍。 */
+        if (s_wifi_probed == 0u) {
+            s_wifi_probed = 1u;
+            s_wifi_configured = (s_prov_ops.cred_probe != NULL) ? s_prov_ops.cred_probe() : 0;
+        }
+        (void)gw_prov_auto_boot(&s_prov, now, s_wifi_configured);
         if (gw_prov_active(&s_prov)) {
             /* 配网期间 LED 让位给配网指示（同一 GPIO 两处写会互相打架）；
              * 蜂鸣器只在"配网成功"时短响一次，且尊重 mute_alarm（§12.2 可静音）。 */
@@ -1177,11 +1286,11 @@ static void net_wifi_boot(void)
     ssid[0] = '\0';
     psk[0] = '\0';
     if (gw_store_cred_load(ssid, (uint32_t)sizeof(ssid), psk, (uint32_t)sizeof(psk)) != 0) {
-        printf("[%s] 未配置家庭 Wi-Fi：串口敲 `wifi set ssid=<名称> psk=<口令>`，"
-               "或长按配网键 3 s 进网页配网\n", GW_LOG_TAG);
-        /* 兼容路径：SDK 槽里若被写过硬编码的 SSID（出厂镜像），SetWifiModeOn 仍能连上 */
-        SetWifiModeOn();
-        LOS_Msleep(GW_WIFI_BOOT_SETTLE_MS);
+        printf("[%s] 未配置家庭 Wi-Fi：正在等首次配网自动开窗（见稍后的 [PROV] 首次配网 行），"
+               "串口 `wifi set ssid=<名称> psk=<口令>` 也可直接配\n", GW_LOG_TAG);
+        /* 不再调 SetWifiModeOn()：它读的是 SDK 自己的 Vendor 槽（我们从来没往那里写过），
+         * 而且现在"开机没凭据"的产品路径就是自动开配网窗口（tick 任务里）。
+         * 让它和 SoftAP 同时抢射频，只会给现场多一条 wlan0 not connected 的噪音。 */
         return;
     }
     printf("[%s] 联网：使用 Flash 里的家庭 Wi-Fi ssid=%s（口令不回显）\n", GW_LOG_TAG, ssid);
@@ -1240,6 +1349,11 @@ static void net_wifi_retry(uint32_t now, uint32_t *last_ms, uint8_t *tries)
     memset(psk, 0, sizeof(psk));
 }
 
+/* 前置声明：net_task 里重装云端会话要用 on_cmd，而 on_cmd 定义在它后面。
+ * （历史版本里 net_task 不碰 gw_cloud_init，所以没有这条；t137 的凭据热重载把它提前了。） */
+static void on_cmd(void *arg, const char *request_id, const char *command_name,
+                   const char *paras_json);
+
 static void net_task(void *arg)
 {
     uint32_t now;
@@ -1252,6 +1366,19 @@ static void net_task(void *arg)
 
     for (;;) {
         now = gw_now_ms();
+
+        /* 配置页刚写进来的 IoTDA 凭据：在这里重装会话（本任务独占 s_cloud，安全）。
+         * 已连着旧凭据也要断开重装——现场"把网关换到另一台设备上"就是这种情形。 */
+        if (s_creds_dirty != 0u) {
+            s_creds_dirty = 0u;
+            if (gw_cloud_is_connected(&s_cloud)) {
+                gw_cloud_disconnect(&s_cloud);
+            }
+            creds_init();
+            (void)gw_cloud_init(&s_cloud, s_creds.mqtt_host, s_creds.mqtt_port,
+                                s_creds.device_id, s_creds.secret, on_cmd, NULL);
+            last_try_ms = 0;        /* 立刻按新凭据试一次，不吃 30 s 退避 */
+        }
 
         if (!gw_cloud_is_connected(&s_cloud)) {
             net_wifi_retry(now, &last_wifi_ms, &wifi_tries);

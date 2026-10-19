@@ -88,6 +88,16 @@ static char   s_cred_ssid[64];
 static char   s_cred_psk[64];
 static int    s_cred_saved = 0;
 
+/* t137：云凭据（模拟 Vendor Flash 里的那份）。s_cloud_src：1 = 来自 Flash、
+ * 0 = 编译期默认值、-1 = 读不到 —— 与板级 cloud_load 的返回值语义严格一致。 */
+static char   s_cloud_host[64];
+static char   s_cloud_dev[64];
+static char   s_cloud_secret[64];
+static uint16_t s_cloud_port = 1883u;
+static int    s_cloud_src = -1;
+static int    s_cloud_save_calls = 0;
+static int    s_cloud_save_fail = 0;
+
 static gw_prov_t g_prov;
 
 /* ---------------------------------------------------------------- 假 ops */
@@ -201,6 +211,46 @@ static int sim_bound_load(gw_prov_bound_t *list, uint32_t cap, uint32_t *n)
     return 0;
 }
 
+/* t137：Flash 里有没有家庭 Wi-Fi 凭据。板上读 Vendor Flash，这里读上面那个 s_cred_saved。
+ * 注意：连过一次之后的用例里它已经是 1，所以"全新网关"用例必须先把 s_cred_saved 清零
+ * 再重新 gw_prov_init —— 见 t_auto_boot()。 */
+static int sim_cred_probe(void)
+{
+    return (s_cred_saved > 0) ? 1 : 0;
+}
+
+/* t137：云凭据落盘。板上走 gw_kvcfg（与串口 `gwkv set` 同一份 KV）；
+ * 这里只记到变量里，方便断言"页面提交的到底是什么"。
+ * 刻意不打印 secret —— 连主机自测的日志里也不留口令，省得有人把日志贴出去。 */
+static int sim_cloud_save(const char *host, uint16_t port, const char *device,
+                          const char *secret, char *err, uint32_t cap)
+{
+    s_cloud_save_calls++;
+    if (s_cloud_save_fail) {
+        snprintf(err, cap, "模拟写 Flash 失败");
+        return -1;
+    }
+    snprintf(s_cloud_host, sizeof(s_cloud_host), "%s", host);
+    snprintf(s_cloud_dev, sizeof(s_cloud_dev), "%s", device);
+    snprintf(s_cloud_secret, sizeof(s_cloud_secret), "%s", secret);
+    s_cloud_port = port;
+    s_cloud_src = 1;
+    return 0;
+}
+
+static int sim_cloud_load(char *host, uint32_t host_cap, uint16_t *port,
+                          char *device, uint32_t dev_cap, int *has_secret)
+{
+    if (s_cloud_src < 0) {
+        return -1;
+    }
+    snprintf(host, host_cap, "%s", s_cloud_host);
+    snprintf(device, dev_cap, "%s", s_cloud_dev);
+    *port = s_cloud_port;
+    *has_secret = (s_cloud_secret[0] != '\0') ? 1 : 0;
+    return s_cloud_src;
+}
+
 /* 汇聚收到 0x20 → 回 0x21（§3.4 的 payload 原文） */
 static void sim_fire_scan_rsp(void)
 {
@@ -299,6 +349,10 @@ static void make_ops(gw_prov_ops_t *o)
     o->hub_bind   = sim_hub_bind;
     o->now_ms     = sim_now_ms;
     o->epoch_ms   = sim_epoch_ms;
+    /* t137：三项都加在表尾 —— 板上那份 ops 是位置初始化，中间插一项会静默错位 */
+    o->cred_probe = sim_cred_probe;
+    o->cloud_save = sim_cloud_save;
+    o->cloud_load = sim_cloud_load;
 }
 
 /* ---------------------------------------------------------------- 驱动 */
@@ -739,6 +793,135 @@ static void t_cloud_commands(void)
     s_scan_delay_ms = 0;
 }
 
+
+/* t137：配置页一次填完「家庭 Wi-Fi + 华为云 IoTDA 三件套」。
+ * 这里要盯死三件事：①三件套缺一项就整段拒、且一个字节都不落盘；
+ * ②只换云凭据（ssid 缺省）在不打断 Wi-Fi 的前提下要能成；③密钥永不出现在任何响应里。 */
+static void t_cloud_creds(void)
+{
+    char out[6144];
+    const char *ctype = NULL;
+    const char *lit = NULL;
+    uint32_t lit_len = 0;
+    int st;
+
+    printf("\n[10] 一次填完：云端凭据随配网一起提交（含“只换云凭据”）\n");
+    check(gw_prov_enter(&g_prov, s_mono) == 0, "重新进入配网窗口");
+
+    st = call("GET", "/", NULL, out, sizeof(out), &ctype, &lit, &lit_len, 1);
+    check(st == 200 && lit != NULL && has(lit, "id='iot_host'") && has(lit, "id='iot_dev'") &&
+          has(lit, "id='iot_sec'"), "配置页有三个云端输入框（地址/设备 ID/密钥）");
+    check(lit != NULL && has(lit, "已配置"), "配置页有“已配置（不回显）”的回显位");
+    check(lit != NULL && strchr(lit, '"') == NULL, "改完的页面仍然没有双引号");
+
+    /* ① 三件套缺一项 → 整段拒，且不落盘 */
+    st = call("POST", "/api/provision/wifi",
+              "{\"host\":\"iot.example.com\",\"secret\":\"s3cret123\"}",
+              out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 400 && has(out, "bad_device"), "有地址有密钥、缺设备 ID → 400/bad_device");
+    st = call("POST", "/api/provision/wifi",
+              "{\"host\":\"iot.example.com\",\"device_id\":\"D1\"}",
+              out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 400 && has(out, "bad_secret"), "缺密钥 → 400/bad_secret");
+    check(s_cloud_save_calls == 0, "半套凭据一个字段都不落盘");
+
+    /* ② 地址里的端口：能解析、多个冒号要拒、与 port 字段打架要拒 */
+    st = call("POST", "/api/provision/wifi",
+              "{\"host\":\"a:b:c\",\"device_id\":\"D1\",\"secret\":\"s3cret123\"}",
+              out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 400 && has(out, "bad_host"), "地址里多个冒号（IPv6/写错）→ 400/bad_host");
+    st = call("POST", "/api/provision/wifi",
+              "{\"host\":\"1.2.3.4:1884\",\"device_id\":\"D1\",\"secret\":\"s3cret123\",\"port\":1883}",
+              out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 400 && has(out, "bad_port"), "地址里 1884 与 port=1883 打架 → 400/bad_port");
+
+    /* ③ 超长：KV 是定长块，超了要在页面层就说清是哪个字段 */
+    st = call("POST", "/api/provision/wifi",
+              "{\"host\":\"iot.example.com\",\"device_id\":\"D1\","
+              "\"secret\":\"0123456789012345678901234567890123456789012345678901234567890123\"}",
+              out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 400 && has(out, "bad_secret_len"), "密钥 64 B → 400/bad_secret_len（≤63）");
+
+    /* ④ 只换云凭据：ssid 缺省，但 Flash 里已有家庭 Wi-Fi 凭据（前面用例配过） */
+    st = call("POST", "/api/provision/wifi",
+              "{\"host\":\"xxxxxx.iot-mqtts.cn-north-4.myhuaweicloud.com\","
+              "\"device_id\":\"6a1b2c3d4e5f\",\"secret\":\"demo-secret-only-for-test\"}",
+              out, sizeof(out), NULL, NULL, NULL, 0);
+    check(st == 200 && has(out, "\"saved\":true") && has(out, "\"connecting\":false"),
+          "只提交云凭据 → 200/saved、connecting=false（不动 Wi-Fi）");
+    check(s_cloud_save_calls == 1, "云凭据走了 ops->cloud_save（与串口 gwkv 同一份存储）");
+    check(strcmp(s_cloud_host, "xxxxxx.iot-mqtts.cn-north-4.myhuaweicloud.com") == 0,
+          "落盘的接入地址就是页面填的那条域名");
+    check(s_cloud_port == 1883u, "没写端口 → 默认 1883（明文 MQTT）");
+    check(!has(out, "demo-secret-only-for-test"), "响应里没有密钥内容");
+
+    /* ⑤ 刷新页面：只显示“已配置”、密钥不回显 */
+    st = call("GET", "/api/provision/status", NULL, out, sizeof(out), NULL, NULL, NULL, 0);
+    check(st == 200 && has(out, "\"iotda\":{\"configured\":true"), "status → iotda.configured=true");
+    check(has(out, "\"host\":\"xxxxxx.iot-mqtts.cn-north-4.myhuaweicloud.com\""), "status 回显接入地址");
+    check(has(out, "\"secret_set\":true"), "status 只说 secret_set=true");
+    check(!has(out, "demo-secret-only-for-test"), "status 里没有密钥内容（连指纹都不给）");
+
+    /* ⑥ 写 Flash 失败要能说清，且不能把 Wi-Fi 那份也搞坏 */
+    s_cloud_save_fail = 1;
+    st = call("POST", "/api/provision/wifi",
+              "{\"host\":\"1.2.3.4\",\"device_id\":\"D2\",\"secret\":\"s3cret123\"}",
+              out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 400 && has(out, "cloud_failed") && has(out, "模拟写 Flash 失败"),
+          "云凭据落盘失败 → 400/cloud_failed + detail");
+    s_cloud_save_fail = 0;
+
+    /* ⑦ Wi-Fi 与云端一起提交：连接照旧发起，settle 90 s 后转 STA */
+    s_sta_state = 0;
+    st = call("POST", "/api/provision/wifi",
+              "{\"ssid\":\"HOME-2.4G\",\"password\":\"home12345\","
+              "\"host\":\"1.2.3.4\",\"device_id\":\"D3\",\"secret\":\"s3cret123\"}",
+              out, sizeof(out), NULL, NULL, NULL, 0);
+    check(st == 200 && has(out, "\"connecting\":true") && has(out, "\"iotda\":{\"saved\":true"),
+          "Wi-Fi + 云端一次提交 → connecting=true 且 iotda.saved=true");
+    check(!has(out, "s3cret123") && !has(out, "home12345"), "响应里两条口令都不出现");
+    advance(2000);
+    st = call("GET", "/api/provision/status", NULL, out, sizeof(out), NULL, NULL, NULL, 1);
+    check(has(out, "\"mode\":\"ap_sta\"") && has(out, "\"iotda\":{\"configured\":true"),
+          "连上后 mode=ap_sta，云凭据仍在（不因配网结束而丢）");
+    advance(95000);
+}
+
+/* t137：全新网关开机自动开配网窗口。板上由 tick 每拍调一次，
+ * 这里直接调 gw_prov_auto_boot()，把“只判定一次”的语义钉死。 */
+static void t_auto_boot(void)
+{
+    uint32_t i;
+
+    printf("\n[11] 全新网关：开机自动开配网窗口（只开一次、失败重试用尽即放弃）\n");
+    s_cred_saved = 0;          /* 模拟 Flash 里一条凭据都没有 */
+    s_ap_on = 0;
+    gw_prov_init(&g_prov, &g_ops, GW_DEVICE_SN, GW_PROV_FIRMWARE, GW_PROV_AP_PSK,
+                 (uint8_t)GW_PROV_AP_CHANNEL);
+    check(gw_prov_auto_boot(&g_prov, s_mono, 0) == 1, "没有 Wi-Fi 凭据 → 自动开窗");
+    check(s_ap_on == 1 && g_prov.window_open == 1, "SoftAP 已拉起、窗口有效");
+    check(gw_prov_auto_boot(&g_prov, s_mono + 1000u, 0) == 0, "已开过 → 不再重复开窗");
+    (void)gw_prov_exit(&g_prov, s_mono + 2000u);
+
+    s_cred_saved = 1;
+    s_ap_on = 0;
+    gw_prov_init(&g_prov, &g_ops, GW_DEVICE_SN, GW_PROV_FIRMWARE, GW_PROV_AP_PSK,
+                 (uint8_t)GW_PROV_AP_CHANNEL);
+    check(gw_prov_auto_boot(&g_prov, s_mono, 1) == 0 && s_ap_on == 0,
+          "已有凭据 → 绝不抢热点（现场忘了口令用长按/串口 wifi set）");
+
+    s_cred_saved = 0;
+    s_ap_fail = 1;
+    gw_prov_init(&g_prov, &g_ops, GW_DEVICE_SN, GW_PROV_FIRMWARE, GW_PROV_AP_PSK,
+                 (uint8_t)GW_PROV_AP_CHANNEL);
+    for (i = 0; i < GW_PROV_AUTO_MAX_TRIES; i++) {
+        (void)gw_prov_auto_boot(&g_prov, s_mono + i * GW_PROV_AUTO_RETRY_MS, 0);
+    }
+    check(g_prov.auto_state == GW_PROV_AUTO_DONE, "AP 一直起不来 → 试满次数后标记“已了结”");
+    check(s_ap_on == 0, "放弃后不会留下半开的窗口");
+    s_ap_fail = 0;
+}
+
 int main(void)
 {
     printf("=== 网关配网本地 API 主机自测（契约 §12）===\n");
@@ -756,6 +939,8 @@ int main(void)
     t_wifi_fail_back();
     t_window_timeout_and_resync();
     t_cloud_commands();
+    t_cloud_creds();
+    t_auto_boot();
 
     printf("\n=== 通过 %d / 失败 %d ====\n", s_pass, s_fail);   /* 四个等号：与 gw_selftest.c / tools/gw-host-test.sh 的判定串一致 */
     return (s_fail == 0) ? 0 : 1;
