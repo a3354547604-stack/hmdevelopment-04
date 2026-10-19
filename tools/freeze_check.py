@@ -10,7 +10,13 @@
   --quick  不构建、不起容器（只有本来就快的纯 python/秒级检查）→ 日常自检用
   --full   含构建与容器（网关镜像、服务器 pytest、e2e 全链、鸿蒙 HAP）→ 冻结前用
 
-退出码：0 = 所有硬项通过（skip 不算失败）；1 = 有硬项失败（末行列出失败项）；2 = 用法/环境错误。
+退出码：0 = 没有硬项失败（skip 不计失败）；1 = 有硬项失败（末行列出失败项）；2 = 用法/环境错误。
+
+汇总口径（t119 修，防止把「没跑」读成「全绿」）：
+  · 有硬项被跳过（环境门没开、或 --only 只点了别的项）时，末行**不再**打印「所有硬项通过」，
+    而是先列「硬项未跑 N 个：项名 + 原因」，再写清「其余 M 个硬项通过」；
+  · 只有「硬项一个都没被跳过」时才打印全员通过的那句话。
+  · rc 语义不变：跳过仍然不计失败（日常自检要在容器没起时也能过），但**跳过不能被当冻结依据**。
 
 判定口径（重要，避免「假装全绿」）：
   · status=pass   命令 rc=0
@@ -378,8 +384,31 @@ def main(argv: list[str]) -> int:
         for r in hard_fail:
             print("  ✗ %-18s %s" % (r.id, r.reason))
     else:
-        print("所有硬项通过（跳过 %d 项，逐条原因见上表）" % sum(1 for r in results
-                                                                 if r.status == "skip"))
+        # t119：硬项被跳过时禁止写「所有硬项通过」——冻结当天环境门（容器没起、无 hvigorw）
+        # 会把整批硬项变成 skip，若仍打印全员通过，读的人会以为都验过了。
+        skipped_hard = [r for r in results if r.status == "skip" and not r.soft]
+        passed_hard = [r for r in results if r.status == "pass" and not r.soft]
+        if skipped_hard:
+            print("硬项未跑 %d 个（跳过 ≠ 通过，逐条原因如下）：" % len(skipped_hard))
+            for r in skipped_hard:
+                print("  ⏭ %-18s %s" % (r.id, r.reason))
+            print("其余硬项通过 %d 个：%s" % (len(passed_hard),
+                                          "、".join(r.id for r in passed_hard) or "（无）"))
+            # 环境门跳过 = 本该跑却没跑（冻结当天最危险）；模式差异跳过 = --quick 本来就不跑构建项
+            gate_skips = [r for r in skipped_hard if r.reason.startswith("环境门")]
+            if gate_skips:
+                print("⚠ 环境门跳过的硬项（%s）必须补跑后才可当冻结依据："
+                      "先起容器/工具链，再重跑 `bash tools/freeze-check.sh --full`"
+                      % "、".join(r.id for r in gate_skips))
+            else:
+                print("ℹ 以上均为模式差异（--quick 不跑构建/容器项）；"
+                      "冻结前用 `bash tools/freeze-check.sh --full` 覆盖这些项")
+        else:
+            print("所有硬项通过（共 %d 个，无跳过）" % len(passed_hard))
+        soft_skips = [r for r in results if r.status == "skip" and r.soft]
+        if soft_skips:
+            print("soft 项未跑 %d 个：%s" % (len(soft_skips),
+                                          "、".join(r.id for r in soft_skips)))
 
     payload = {
         "task": "t101 freeze-check",
@@ -394,6 +423,9 @@ def main(argv: list[str]) -> int:
                   for r in results],
         "hard_failures": [r.id for r in hard_fail],
         "skips": [r.id for r in results if r.status == "skip"],
+        # t119：把「硬项里被跳过的」单独列出来，机器读也能分辨「跳过 ≠ 通过」
+        "skipped_hard": [r.id for r in results if r.status == "skip" and not r.soft],
+        "passed_hard": [r.id for r in results if r.status == "pass" and not r.soft],
         "exit_code": 1 if hard_fail else 0,
     }
     json_path = os.path.join(OUT, "freeze-%s.json" % ts)
