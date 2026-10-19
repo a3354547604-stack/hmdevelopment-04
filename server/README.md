@@ -79,7 +79,7 @@ curl -s http://127.0.0.1:3000/api/health
 > 后按契约把网关判为离线并生成 `device_offline` 告警——这是**预期行为**，不是故障。演示前重跑一次 `app.seed`，
 > 或用 README §5 示例 21 的属性 webhook 重新上报一次，即可让 `online=true`。
 
-`app.seed` 会创建：演示账号 `demo / demo-pass-123`（**仅 dev**）、网关 `M0-3F1A2B`（已绑定，含 H1/M1/M2/M4 四个节点）、
+`app.seed` 会创建：演示账号 `demo`（口令见 `server/app/seed.py:31` 的 `DEMO_PASSWORD`；**仅 dev**、本机开发默认值、生产必须改）、网关 `M0-3F1A2B`（已绑定，含 H1/M1/M2/M4 四个节点）、
 未绑定网关 `M0-9C2D4E`（用于走绑定流程）、最近 3 天读数（gateway 属性快照 / presence 活动 / gas 背景值 / 一组跌倒）、
 3 条不同状态的告警，并按 §7.9 归并出 `activity_hourly`/`activity_daily`。
 
@@ -115,7 +115,7 @@ bash tools/demo-check.sh                            # 逐条核对 D1–D7；全
 | `WEBHOOK_TOKEN` | `dev-webhook-token-change-me` | 32 字节随机 hex；IoTDA 转发 URL 的 `?token=`（§5.2） |
 | `IOTDA_DISPATCH_MODE` | `mock` | `mock` 只记命令流水（离线可演示）；`real` 走华为云 IoTDA 应用侧接口 |
 | `SCHEDULER_ENABLED` | `1` | 重推/网关离线/报表归并后台线程；pytest 里置 0 |
-| `DB_*` | `eldercare/eldercare/hmprogram-dev-pass` | 生产必须改口令，并保持仅监听 127.0.0.1 |
+| `DB_*` | `eldercare/eldercare/hmprogram-dev-pass`（本机开发默认值，来源 `server/.env.example:25-26` 与 `server/docker-compose.yml:14/17/51`；**生产必须改口令**） | 生产必须改口令，并保持仅监听 127.0.0.1 |
 
 **降级行为**：`IOTDA_DISPATCH_MODE=real` 但缺 `IOTDA_PROJECT_ID`/`APP_ID`/`APP_SECRET` 时，
 下发接口返回 `1205/502`（云端下发失败）而不是抛 500——App 能明确区分「参数没生效」与「服务器炸了」。
@@ -209,8 +209,10 @@ content-type: application/json
 #### 3 注册（HTTP 201）
 
 ```bash
-$ curl -s -X POST http://127.0.0.1:3000/api/auth/register -H 'Content-Type: application/json' -d '{"username":"demo_1792246174","password":"pass-123456","phone":"13800000000"}'
+$ curl -s -X POST http://127.0.0.1:3000/api/auth/register -H 'Content-Type: application/json' -d '{"username":"demo_1792246174","password":"<演示口令>","phone":"13800000000"}'
 ```
+
+> 示例口令用占位符 `<演示口令>`：本仓库**演示账号**的口令定义在 `server/app/seed.py:30-31`（`DEMO_USERNAME = "demo"` / `DEMO_PASSWORD`，仅 dev、上线前必须改）；注册示例的口令由调用方自定，不要照抄示例值。
 
 ```json
 {
@@ -227,10 +229,10 @@ $ curl -s -X POST http://127.0.0.1:3000/api/auth/register -H 'Content-Type: appl
 
 `HTTP 201`
 
-#### 4 登录（演示账号 demo/demo-pass-123）
+#### 4 登录（演示账号 `demo`；口令见 `server/app/seed.py:31`）
 
 ```bash
-$ curl -s -X POST http://127.0.0.1:3000/api/auth/login -H 'Content-Type: application/json' -d '{"username":"demo","password":"demo-pass-123"}'
+$ curl -s -X POST http://127.0.0.1:3000/api/auth/login -H 'Content-Type: application/json' -d '{"username":"demo","password":"<演示口令>"}'
 ```
 
 ```json
