@@ -1423,15 +1423,17 @@
    "line": 192,
    "kind": "联系-手机号",
    "frag": "13800000000",
-   "text": "$ curl -s -X POST http://127.0.0.1:3000/api/auth/register -H 'Content-Type: application/json' -d '{\"username\":\"demo_1792246174\",\"password\":\"pass-123456\",\"phone\":\"13800000000\"}'",
+   "text": "$ curl -s -X POST http://127.0.0.1:3000/api/auth/register -H 'Content-Type: application/json' -d '{\"username\":\"demo_1792246174\",\"password\":\"<口令已脱敏>\",\"phone\":\"13800000000\"}'",
+   "redacted": "明文口令已脱敏（PM 指令 t115）",
    "benign": false
   },
   {
    "path": "server/README.md",
    "line": 285,
    "kind": "凭据-JWT",
-   "frag": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwidXNlcm5hbWUiOiJkZW1vXzE3OTIyNDYxNzQiLCJpYXQiOjE3OTIyNDYxNzQsImV4cCI6MTc5Mjg1MDk3NH0.gjNhkfdDfo22H5NLNJefmNfdG1RQxyIq07adTuqsUbM",
-   "text": "$ curl -s -X POST http://127.0.0.1:3000/api/devices/bind -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyIiwidXNlcm5h",
+   "frag": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<载荷>.<签名>（示例已脱敏）",
+   "text": "$ curl -s -X POST http://127.0.0.1:3000/api/devices/bind -H 'Content-Type: application/json' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.<载荷>.<签名>（示例已脱敏）",
+   "redacted": "令牌串已脱敏（PM 指令 t115）",
    "benign": false
   },
   {
