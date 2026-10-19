@@ -1645,6 +1645,8 @@ static const char *s_wf_connect_reason = "auth";
 static int         s_wf_sta_ok;
 static int         s_wf_scan_n;
 static int         s_wf_save_calls;
+static int         s_wf_clear_calls;    /* t137：`wifi clear` 被调用几次 */
+static int         s_wf_clear_fail;
 static int         s_wf_connect_calls;
 static char        s_wf_last_psk[GW_WIFI_PSK_CAP];
 
@@ -1721,8 +1723,29 @@ static int wf_progress(char *out, uint32_t cap)
     return 0;
 }
 
+/* t137：`wifi clear` 的假实现（真机上就是 gw_store_cred_clear） */
+static int wf_cred_clear(void)
+{
+    s_wf_clear_calls++;
+    if (s_wf_clear_fail) {
+        return -1;
+    }
+    s_wf_ssid[0] = '\0';
+    s_wf_psk[0] = '\0';
+    s_wf_configured = 0;
+    return 0;
+}
+
+/* 用指定初始化：t137 在表尾追加了 cred_clear，位置初始化漏一个成员不会报错，
+ * 但会静默把后面的回调错位——这类错在真机上只表现为"命令行为莫名变了"。 */
 static const gw_wifi_ops_t wf_ops = {
-    wf_cred_load, wf_cred_save, wf_connect, wf_sta_info, wf_scan, wf_progress
+    .cred_load = wf_cred_load,
+    .cred_save = wf_cred_save,
+    .connect   = wf_connect,
+    .sta_info  = wf_sta_info,
+    .scan      = wf_scan,
+    .progress  = wf_progress,
+    .cred_clear = wf_cred_clear,
 };
 
 #define GW_WF_PSK   "hunter2secret"     /* 明文口令：全程不得出现在任何输出里 */
@@ -1875,6 +1898,21 @@ static void test_wifi_cmd(void)
     rc = gw_wifi_cmd(NULL, out, sizeof(out));
     t_ok(rc == -1 && strstr(out, "用法") != NULL, "line=NULL → 打用法并拒绝");
 
+    /* ⑩ t137：`wifi clear` —— 验收第 1 条（无凭据 → 自动进配网）的复现开关 */
+    s_wf_clear_calls = 0;
+    s_wf_clear_fail = 0;
+    rc = gw_wifi_cmd("wifi clear", out, sizeof(out));
+    t_ok(rc == 0 && s_wf_clear_calls == 1 && s_wf_configured == 0 &&
+         strstr(out, "已清除家庭 Wi-Fi 凭据") != NULL,
+         "clear：调一次板级清除、凭据状态归零、并说明「复位后自动进配网」");
+    t_ok(strstr(out, GW_WF_PSK) == NULL, "clear 的输出里也绝不出现口令");
+    rc = gw_wifi_cmd("wifi show", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "未配置家庭 Wi-Fi") != NULL, "clear 之后 show 必须回到「未配置」");
+    s_wf_clear_fail = 1;
+    rc = gw_wifi_cmd("wifi clear", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "清除失败") != NULL,
+         "Flash 清除失败 → 明确报错（不能假装清掉了，否则用户复位后仍进不了配网）");
+    s_wf_clear_fail = 0;
     gw_wifi_set_ops(NULL);
 }
 

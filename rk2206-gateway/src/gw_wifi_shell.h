@@ -43,6 +43,10 @@ typedef struct {
     int (*scan)(char *out, uint32_t cap);
     /* 「取时 → 连云」进度一行（`wifi set` 收尾用）：0 = 成功写好 */
     int (*progress)(char *out, uint32_t cap);
+    /* 清空家庭 Wi-Fi 凭据（`wifi clear`）：0 = 已清；-1 = 失败。
+     * 产品上这条命令的意义是"把这块板子变回出厂状态"，t137 的验收第 1 条
+     * （无凭据 → 自动进配网）就靠它复现，否则烧过的板子永远测不到那条路径。 */
+    int (*cred_clear)(void);
 } gw_wifi_ops_t;
 
 /* 装/换回调表（板级在注册 shell 命令前调用一次；NULL = 清空，之后命令只会报内部错误） */

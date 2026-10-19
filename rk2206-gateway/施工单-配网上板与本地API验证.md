@@ -15,6 +15,7 @@
 | J3 | 窗口行为正确（600 s 超时 / 再长按 3 s 退出 / 提交 Wi-Fi 后 90 s 内 SoftAP 消失） | 串口出现对应 `[gw] [PROV] …` 日志，`remain_s` 在网页上倒数 |
 | J4 | **全新网关不按键也会自己进配网**（t137） | 串口出现 `[PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 10 min（手机连 Wi-Fi「ElderCare-XXXX」…）`；手机 Wi-Fi 列表里直接出现热点 |
 | J5 | **一次填完 Wi-Fi + 云端三件套**，页面刷新只显示「已配置（不回显）」（t137） | 串口出现 `[PROV] 收到 IoTDA 云凭据 host=… device=…（密钥 N 字节，不回显）`；刷新页面看到「华为云 IoTDA：已配置」，**密钥框永远空着** |
+| J6 | **`wifi clear` 能恢复出厂**（t137 补），复位后重新自动开窗 | 串口 `wifi clear` 回 `[wifi] 已清除家庭 Wi-Fi 凭据…`；`wifi show` 变 `未配置家庭 Wi-Fi`；断电冷启动后重新出现 `[PROV] 首次配网：…` |
 
 **扫描/绑定（网页上的"扫描节点"/"绑定"）需要汇聚板在线**。当前汇聚固件还没上板，
 页面会显示"汇聚离线"（HTTP `409` / `1605`）——那是**预期结果**，记录即可，不算本卡失败。
@@ -124,9 +125,40 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
    | 串口看到 | 含义 | 怎么办 |
    |---|---|---|
-   | `[PROV] 已有家庭 Wi-Fi 凭据：不自动开配网窗口…` | 这块板**之前配过**（Flash 里有凭据） | 正常行为；要重配就长按 3 s 或串口 `wifi set` |
+   | `[PROV] 已有家庭 Wi-Fi 凭据：不自动开配网窗口…` | 这块板**之前配过**（Flash 里有凭据） | 正常行为；要重配就长按 3 s、串口 `wifi set`，或 **`wifi clear` 后复位**（等价于恢复出厂，见 §3.6） |
    | `[PROV] ⚠ 自动配网开窗失败 3 次（SoftAP 起不来），不再自动重试…` | 开机早期 Wi-Fi 服务还没就绪 | 断电重上电一次；仍不行就串口 `wifi set ssid=… psk=…` 先联网，再长按 3 s 进配网 |
    | 40 秒内一条 `[PROV]` 都没有 | 刷的不是这一版固件 | 回 §8 看固件指纹，重烧 `out/gateway-Firmware.img` |
+
+## 3.6 把板子变回"出厂状态"，再验一次自动配网（3 步）
+
+> 为什么需要这一节：自动开窗**只在 Flash 里没有 Wi-Fi 凭据时**触发。板子配过一次之后就再也不开了，
+> 所以"验收第 1 条"在这块板上只能靠 `wifi clear` 复现（t137 补的命令）。
+
+1. 串口敲 `wifi clear`（不用复位，命令立即生效）：
+
+   ```
+   OHOS # wifi clear
+     [wifi] 已清除家庭 Wi-Fi 凭据（SSID/口令都已从 Flash 抹掉）
+     复位后本机将自动进入配网窗口（手机连 SoftAP 打开配置页重新填）
+   ```
+
+   想再确认一遍就敲 `wifi show`，第一行必须变成 `[wifi] 未配置家庭 Wi-Fi`。
+
+2. **断电再上电**（必须是冷启动，不是按复位键以外的软重启），抓 40 秒串口：
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Port COM20 -Seconds 40 -Out rk2206-gateway\out\prov-auto-again-COM20.log
+   ```
+
+3. **成功标志**：串口重新出现
+
+   ```
+   [PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 10 min（…）
+   [PROV] enter AP mode ssid=ElderCare-1A2B psk=echub8888 remain=600 url=http://<AP地址>/
+   ```
+
+   手机 Wi-Fi 列表里重新出现 `ElderCare-1A2B`。
+   若敲 `wifi clear` 提示 `清除失败：Flash 写入异常` → 别继续测，把串口原文回传（说明 vendor 槽坏了）。
 
 ## 4. 用手机调本地 API（3 步）
 
@@ -330,6 +362,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 | 白名单重建 | `[PROV] 汇聚白名单重建完成（%lu 条）` | `src/gw_prov.c:1499` |
 | **首次配网自动开窗** | `[PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 %u min（手机连 Wi-Fi「%s」，口令 %s，浏览器打开配置页，一次填完 Wi-Fi 与云端凭据）` | `src/gw_prov.c:378` |
 | 已有凭据（不自动开） | `[PROV] 已有家庭 Wi-Fi 凭据：不自动开配网窗口（长按配网键 3 s 或串口 `wifi set` 可手动配）` | `src/gw_prov.c:365` |
+| **恢复出厂（t137 补）** | `[wifi] 已清除家庭 Wi-Fi 凭据（SSID/口令都已从 Flash 抹掉）` | `src/gw_wifi_shell.c:341` |
+| 恢复出厂失败 | `[wifi] 清除失败：Flash 写入异常（串口 `gwkv show` 可看存储状态）` | `src/gw_wifi_shell.c:337` |
 | 自动开窗失败放弃 | `[PROV] ⚠ 自动配网开窗失败 %u 次（SoftAP 起不来），不再自动重试：串口敲 `wifi set ssid=<名称> psk=<口令>` 仍可联网` | `src/gw_prov.c:387` |
 | **收到云端凭据** | `[PROV] 收到 IoTDA 云凭据 host=%s:%u device=%s（密钥 %u 字节，不回显）` | `src/gw_prov.c:987` |
 | 云端凭据落盘失败 | `[PROV] 云凭据落盘失败：%s` | `src/gw_prov.c:978` |

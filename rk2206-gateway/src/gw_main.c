@@ -1692,6 +1692,17 @@ static int wifi_op_sta_info(char *ssid, uint32_t ssid_cap, char *ip, uint32_t ip
     return 1;
 }
 
+/* `wifi clear`：把行业务侧的 Wi-Fi 凭据清掉（与 `wifi set`/配网页写的是同一份
+ * gw_store 块），让这块板子回到"出厂无凭据"——t137 自动配网的验收路径靠它复现。 */
+static int wifi_op_cred_clear(void)
+{
+    if (gw_store_cred_clear() != 0) {
+        return -1;
+    }
+    s_wifi_configured = 0u;     /* 让 tick 里那次"只探测一次"的判定也跟着回退 */
+    return 0;
+}
+
 /* 「取时 → 连云」进度：真正的判据是串口那两行日志，这里只让人少敲一次 show */
 static int wifi_op_progress(char *out, uint32_t cap)
 {
@@ -1711,6 +1722,7 @@ static const gw_wifi_ops_t s_wifi_ops = {
     .sta_info  = wifi_op_sta_info,
     .scan      = gw_net_scan_list,
     .progress  = wifi_op_progress,
+    .cred_clear = wifi_op_cred_clear,
 };
 
 static UINT32 task_create(TSK_ENTRY_FUNC fn, void *arg, UINT32 stack, UINT16 prio, const char *name)

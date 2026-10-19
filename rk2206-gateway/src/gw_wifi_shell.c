@@ -80,6 +80,7 @@ static void usage(char *out, uint32_t cap)
         "    wifi show                              看已保存的 SSID 与 STA 状态（口令不回显）\n"
         "    wifi set ssid=<名称> psk=<口令>        存进 Flash 并立即联网（SSID 1–32 B，口令 8–63 B）\n"
         "    wifi scan                              列 2.4 GHz 热点（SSID / RSSI / 信道）\n"
+        "    wifi clear                             清掉已保存的家庭 Wi-Fi（重启后自动进配网）\n"
         "  说明：口令里不要带空格；口令只写不读，写进去就再也打不出来（这是有意的）。\n"
         "        与长按配网键 3 s 的流程共用同一份 Flash 凭据，先写的被后写的覆盖。\n");
 }
@@ -323,6 +324,25 @@ static int cmd_scan(char *out, uint32_t cap)
 
 /* ------------------------------------------------------------------ 入口 */
 
+/* `wifi clear`：把板子变回"出厂无凭据"状态。
+ * 为什么值得单独一条命令：t137 的自动配网只在"Flash 里没有 Wi-Fi 凭据"时才触发，
+ * 而配过一次之后靠普通重启是回不去的——没有这条命令，验收那条路径在烧过的板子上不可复现。 */
+static int cmd_clear(char *out, uint32_t cap)
+{
+    if (s_ops == NULL || s_ops->cred_clear == NULL) {
+        app(out, cap, "  [wifi] 本版本的板级实现不支持清除凭据\n");
+        return -1;
+    }
+    if (s_ops->cred_clear() != 0) {
+        app(out, cap, "  [wifi] 清除失败：Flash 写入异常（串口 `gwkv show` 可看存储状态）\n");
+        return -1;
+    }
+    app(out, cap,
+        "  [wifi] 已清除家庭 Wi-Fi 凭据（SSID/口令都已从 Flash 抹掉）\n"
+        "  复位后本机将自动进入配网窗口（手机连 SoftAP 打开配置页重新填）\n");
+    return 0;
+}
+
 int gw_wifi_cmd(const char *line, char *out, uint32_t cap)
 {
     char buf[GW_WIFI_LINE_MAX];
@@ -364,6 +384,9 @@ int gw_wifi_cmd(const char *line, char *out, uint32_t cap)
     }
     if (strcmp(argv[base], "scan") == 0) {
         return cmd_scan(out, cap);
+    }
+    if (strcmp(argv[base], "clear") == 0) {
+        return cmd_clear(out, cap);
     }
     app(out, cap, "  [wifi] 不认识的子命令 `%s`\n", argv[base]);
     usage(out, cap);
