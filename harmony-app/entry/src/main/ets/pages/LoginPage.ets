@@ -9,6 +9,7 @@
  *    真实服务器部署后该提示由 AppConfig.MOCK_MODE 关掉。
  */
 
+import { router } from '@kit.ArkUI';
 import { AuthViewModel, LoginState } from '../viewmodel/AuthViewModel';
 import { AppConfig } from '../common/AppConfig';
 import { AppTheme } from '../common/AppTheme';
