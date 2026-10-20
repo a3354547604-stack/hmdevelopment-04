@@ -22,7 +22,9 @@ import {
   NodeItem, PushRegisterResult, ReadingListResult, RegisterResult, SummaryReport, TrendReport
 } from '../ets/model/Types';
 import { SettingsItems, TrendCompare } from '../ets/model/Types';
-import { DEMO_EVENTS, SETTING_SPECS } from '../ets/common/SettingsSchema';
+import {
+  DEMO_EVENTS, SETTING_SPECS, SettingSpec, clampSetting, patchOf, settingValueOr, specOf, stepSetting
+} from '../ets/common/SettingsSchema';
 import { HttpPort, HttpRequest, HttpResponse } from '../ets/service/HttpClient';
 import { Formatter } from '../ets/common/Formatter';
 import { GatewayApiService, normalizeGatewayUrl } from '../ets/service/GatewayApiService';
@@ -106,6 +108,37 @@ interface Case {
   code: number;
   httpStatus: number;
   detail: string;
+}
+
+/**
+ * 记录型传输层（t153 自检专用）：包一层真 MockTransport，把最近一次请求的
+ * method/url/body 抄下来，用来断言「只提交了要改的那一个键」。
+ *
+ * 为什么不能只看返回值：§6.10 是**局部更新**接口，整表回写也会返回 200 ——
+ * 只比对响应值发现不了「顺手把其它 20 个键覆盖成 App 的旧快照」这种事故。
+ */
+class RecordingTransport implements HttpPort {
+  private inner: HttpPort;
+  lastMethod: string = '';
+  lastUrl: string = '';
+  lastBody: string = '';
+  /** 最近一次 PUT 的请求体：断言「只提交一个键」时必须看 PUT 那次，
+   *  否则会被随后的 GET（body 为空）覆盖掉。 */
+  lastPutBody: string = '';
+
+  constructor(inner: HttpPort) {
+    this.inner = inner;
+  }
+
+  async request(req: HttpRequest): Promise<HttpResponse> {
+    this.lastMethod = req.method;
+    this.lastUrl = req.url;
+    this.lastBody = req.body;
+    if (req.method === 'PUT') {
+      this.lastPutBody = req.body;
+    }
+    return this.inner.request(req);
+  }
 }
 
 class Runner {
@@ -590,11 +623,11 @@ class Runner {
       code: 0, httpStatus: 200,
       detail: `'192.168.2.1/'→${n1} 'http://192.168.4.1/api'→${n2} 'https://gw.local'→${n3} ''→${n4}`
     });
-    this.case150();
+    await this.case150();
   }
 
   /** t150：普通用户界面的四条机械断言（手机号、主界无技术词、地址可配、登录态切换）。 */
-  private case150(): void {
+  private async case150(): Promise<void> {
     // #44 手机号校验：只收 11 位数字（卡面：非 11 位提示「请输入 11 位手机号」）
     const v: string[] = ['13800000000', '1380000000', '138000000001', '1380000000a', '', ' 13800000000'];
     const want: boolean[] = [true, false, false, false, false, false];
@@ -658,6 +691,74 @@ class Runner {
       seq: 47, name: '登录/退出触发界面重建（authSeq）', contract: 't150',
       ok: after >= before + 2 && name === '', code: 0, httpStatus: 200,
       detail: `authSeq ${before}→${after}（登录+1、退出+1） clearedUser='${name}'`
+    });
+
+    // #48 无活动时长的边界与非法值（t153：高级区「长时间没动静就提醒我」的取值规则）
+    //      纯函数断言：界面点 +/- 走的正是 clampSetting/stepSetting，
+    //      所以这里红了就等于现场点不到 5/120 或会越界。
+    const nm: SettingSpec | undefined = specOf('no_motion_min');
+    let ok48: boolean = false;
+    let d48: string = 'spec not found';
+    if (nm !== undefined) {
+      const input: number[] = [4, 121, 30, 5, 120];
+      const want: number[] = [5, 120, 30, 5, 120];
+      let allClamp: boolean = true;
+      for (let i = 0; i < input.length; i++) {
+        if (clampSetting(input[i], nm) !== want[i]) {
+          allClamp = false;
+        }
+      }
+      const nan: number = clampSetting(Number.NaN, nm);
+      const up: number = stepSetting(120, 1, nm);
+      const down: number = stepSetting(5, -1, nm);
+      const mid: number = stepSetting(30, 1, nm);
+      ok48 = allClamp && nan === nm.defaultValue && up === 120 && down === 5 && mid === 35
+        && nm.min === 5 && nm.max === 120 && nm.step === 5;
+      d48 = `clamp 4→5 121→120 30→30 5→5 120→120 NaN→${nan}; step 120+→${up} 5-→${down} 30+→${mid}; `
+        + `范围 ${nm.min}–${nm.max} 步长 ${nm.step} 默认 ${nm.defaultValue}`;
+    }
+    this.cases.push({
+      seq: 48, name: '无活动时长 5/120 边界与非法值（t153）', contract: '§8.5',
+      ok: ok48, code: 0, httpStatus: 200, detail: d48
+    });
+
+    // #49 只提交 no_motion_min 一个键 + 离线（mock）下改完立即生效
+    MockTransport.setFault('none');
+    const rec: RecordingTransport = new RecordingTransport(new MockTransport());
+    const api2: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', rec);
+    const r49: ApiResult<DeviceSettings> = await api2.putSettings(1, patchOf('no_motion_min', 90));
+    let keys49: number = -1;
+    if (rec.lastPutBody.length > 0) {
+      const flat: Record<string, Object> = JSON.parse(rec.lastPutBody) as Record<string, Object>;
+      const items: Record<string, Object> = flat['items'] as Record<string, Object>;
+      keys49 = Object.keys(items).length;
+    }
+    const g49: ApiResult<DeviceSettings> = await api2.getSettings(1);
+    let now49: number = -1;
+    if (g49.ok && g49.data !== undefined && nm !== undefined) {
+      now49 = settingValueOr(g49.data.items, nm);
+    }
+    const ok49: boolean = r49.ok && keys49 === 1
+      && rec.lastPutBody.indexOf('"no_motion_min":90') >= 0 && now49 === 90;
+    this.cases.push({
+      seq: 49, name: '无活动时长只提交该键且离线立即生效（t153）', contract: '§6.10',
+      ok: ok49, code: r49.code, httpStatus: 200,
+      detail: `PUT items 键数=${keys49} body=${rec.lastPutBody} `
+        + `→ 再查（GET）items.no_motion_min=${now49}`
+    });
+
+    // #50 越界值服务端也拒（1002）= 界面夹边界只是第一道闸，不是唯一一道
+    const bad: ApiResult<DeviceSettings> = await api2.putSettings(1, patchOf('no_motion_min', 3));
+    const hi: ApiResult<DeviceSettings> = await api2.putSettings(1, patchOf('no_motion_min', 120));
+    const after50: ApiResult<DeviceSettings> = await api2.getSettings(1);
+    let v50: number = -1;
+    if (after50.ok && after50.data !== undefined && nm !== undefined) {
+      v50 = settingValueOr(after50.data.items, nm);
+    }
+    this.cases.push({
+      seq: 50, name: '越界值被 1002 拒、上限 120 可提交（t153）', contract: '§6.10/§9.2',
+      ok: bad.code === 1002 && hi.ok && v50 === 120, code: bad.code, httpStatus: 400,
+      detail: `3→code=${bad.code}（'${bad.message}'）; 120→ok=${hi.ok}; 再查=${v50}`
     });
   }
 

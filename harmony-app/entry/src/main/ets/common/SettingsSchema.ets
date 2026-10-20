@@ -148,6 +148,40 @@ export function specOf(key: string): SettingSpec | undefined {
 }
 
 /**
+ * 把用户给的值夹到规格范围内（t153：高级区「长时间没动静就提醒我」用它）。
+ *
+ * 三条判定顺序不能颠倒：
+ *  ① 非法值（NaN / Infinity / 非数字）→ 回落**契约默认值**，而不是最小值：
+ *     用户误触清空输入框时，界面不该突然变成「5 分钟」这种最激进的值；
+ *  ② 先按小数位取整，再夹边界 —— 反过来会出现 119.96 被夹成 120 再取整这种错觉；
+ *  ③ 最后夹到 [min, max]（§8.5 的 5–120 等范围由 spec 携带，本函数不硬编码）。
+ * 纯函数、不碰界面状态，因此无设备自检可以直接断言边界（t153 #48）。
+ */
+export function clampSetting(value: number, spec: SettingSpec): number {
+  if (!Number.isFinite(value)) {
+    return spec.defaultValue;
+  }
+  const factor: number = spec.decimals > 0 ? Math.pow(10, spec.decimals) : 1;
+  let v: number = Math.round(value * factor) / factor;
+  if (v < spec.min) {
+    v = spec.min;
+  }
+  if (v > spec.max) {
+    v = spec.max;
+  }
+  return v;
+}
+
+/**
+ * 按「步数」加减（步长取自 spec，不写死在界面里）；越界即停在边界。
+ * `steps` 为整数步数（-1 / +1），方向由正负决定。
+ */
+export function stepSetting(current: number, steps: number, spec: SettingSpec): number {
+  const base: number = clampSetting(current, spec);
+  return clampSetting(base + steps * spec.step, spec);
+}
+
+/**
  * §6.9 的 **21 个合法键名**（v1.2 闭集，逐字抄自契约 §6.9 示例）。
  * 为什么单独列：mock 要区分「越界(1002)」与「未知键(1003)」，
  * 而 SETTING_SPECS 只有可编辑的 20 项，用它的长度当键集合会把 alert_repush_s 误判成未知。

@@ -155,6 +155,18 @@ export class UserCopy {
   static readonly ADVANCED_SAVED: string = '已保存';
   static readonly ADVANCED_HINT: string = '仅维护人员使用；改错了会连不上服务器';
   static readonly ADVANCED_GATEWAY: string = '小盒子本地地址';
+  /**
+   * 无活动时长（t153）：D3「长时间没动静」的演示入口。
+   *
+   * 为什么不放主界面：这是给维护人员改的节奏参数，子女日常不该看到；
+   * 但 D3 必须能现场改值（5–120 分钟），否则演示只能靠提前灌数据。
+   * 文案刻意避开「阈值/节点」这类词 —— 同一份文案会被自检 #45 扫。
+   */
+  static readonly NO_MOTION_LABEL: string = '长时间没动静就提醒我';
+  static readonly NO_MOTION_HINT: string = '超过这么久没有活动，就发一条提醒（5–120 分钟）';
+  static readonly NO_MOTION_LOADING: string = '正在读取当前设置…';
+  static readonly NO_MOTION_SAVED: string = '已保存，立即生效';
+  static readonly NO_MOTION_FAIL: string = '没保存成功，请稍后再试';
 
   /**
    * 所有**主界**文案（供自检机械断言「无技术词」）。

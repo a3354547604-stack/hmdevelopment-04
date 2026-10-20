@@ -19,6 +19,8 @@ import { SwitchRow } from '../components/SettingRows';
 import { SessionStore } from '../service/SessionStore';
 import { ServiceHub } from '../service/ServiceHub';
 import { ApiResult } from '../model/Result';
+import { DeviceSettings } from '../model/Types';
+import { SettingSpec, clampSetting, patchOf, settingValueOr, specOf, stepSetting } from '../common/SettingsSchema';
 
 @Component
 export struct ProfilePage {
@@ -29,6 +31,12 @@ export struct ProfilePage {
   @State mockOn: boolean = true;
   @State savedTip: string = '';
   @State demoBusy: boolean = false;
+  /**
+   * 无活动时长（t153，高级区）。默认 30 = 契约 §8.5 的默认值；
+   * 进页面时先从服务器（或 mock）读当前值，读不到就用默认值，绝不显示 0。
+   */
+  @State noMotion: number = 30;
+  @State noMotionBusy: boolean = false;
 
   aboutToAppear(): void {
     this.mockOn = RuntimeConfig.mockMode();
@@ -40,6 +48,63 @@ export struct ProfilePage {
     if (this.taps >= AppConfig.ADVANCED_TAP_COUNT && !this.advanced) {
       this.advanced = true;
       this.savedTip = '';
+      // 高级区一展开就去读当前值：否则控件会一直显示默认 30，
+      // 维护人员改过之后再看还是 30，会以为没生效。
+      this.loadNoMotion();
+    }
+  }
+
+  /**
+   * 读当前「无活动时长」（契约 §6.9 的 `no_motion_min`）。
+   *
+   * 失败时不报错、只回落默认值：这是高级区的次要控件，
+   * 网络抖动不该在「我的」页弹一个红条；用户点 +/- 时会再暴露真实错误。
+   */
+  private async loadNoMotion(): Promise<void> {
+    const spec: SettingSpec | undefined = specOf('no_motion_min');
+    if (spec === undefined || this.deviceId <= 0) {
+      return;
+    }
+    const r: ApiResult<DeviceSettings> = await ServiceHub.api().getSettings(this.deviceId);
+    if (r.ok && r.data !== undefined) {
+      this.noMotion = clampSetting(settingValueOr(r.data.items, spec), spec);
+    }
+  }
+
+  /**
+   * 加减一步并**立即**提交（t153：演示要「改完就生效」，所以不做二次确认）。
+   *
+   * 三个刻意的取舍：
+   *  ① 先本地夹边界再提交：到 5 或 120 时不再发请求，避免「点了一下没变化」的困惑；
+   *  ② 提交成功才更新界面值，失败保留原值 + 给一句可读提示（不静默吞错）；
+   *  ③ 只提交 `no_motion_min` 一个键（契约 §6.10）：整表回写会把别人改过的
+   *     其它 20 个键一起覆盖成 App 的旧快照。
+   */
+  private async applyNoMotion(steps: number): Promise<void> {
+    if (this.noMotionBusy) {
+      return;
+    }
+    const spec: SettingSpec | undefined = specOf('no_motion_min');
+    if (spec === undefined) {
+      return;
+    }
+    const next: number = stepSetting(this.noMotion, steps, spec);
+    if (next === this.noMotion) {
+      return;
+    }
+    if (this.deviceId <= 0) {
+      this.savedTip = UserCopy.NO_MOTION_FAIL;
+      return;
+    }
+    this.noMotionBusy = true;
+    const r: ApiResult<DeviceSettings> =
+      await ServiceHub.api().putSettings(this.deviceId, patchOf('no_motion_min', next));
+    this.noMotionBusy = false;
+    if (r.ok) {
+      this.noMotion = next;
+      this.savedTip = UserCopy.NO_MOTION_SAVED;
+    } else {
+      this.savedTip = r.message.length > 0 ? r.message : UserCopy.NO_MOTION_FAIL;
     }
   }
 
@@ -146,6 +211,59 @@ export struct ProfilePage {
       }
       .width('100%')
       .opacity(this.demoBusy ? 0.5 : 1)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /**
+   * 无活动时长控件（t153）：只在高级区出现。
+   *
+   * 用「− / 值 / ＋」而不是滑杆：手机滑杆在 5–120 这种跨度上很难精确停到 30，
+   * 而答辩现场要当着评委把 30 改成 5 再等报警，误差一分钟都会被追问。
+   */
+  @Builder
+  noMotionRow() {
+    Column({ space: 6 }) {
+      Text(UserCopy.NO_MOTION_LABEL)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+      Text(UserCopy.NO_MOTION_HINT)
+        .fontSize(AppTheme.FONT_CAPTION - 1)
+        .fontColor(AppTheme.COLOR_TEXT_HINT)
+        .width('100%')
+      Row({ space: 8 }) {
+        Text('−')
+          .fontSize(AppTheme.FONT_SECTION)
+          .fontColor(AppTheme.COLOR_PRIMARY)
+          .textAlign(TextAlign.Center)
+          .width(56)
+          .height(40)
+          .borderRadius(AppTheme.BTN_RADIUS)
+          .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
+          .onClick(() => {
+            this.applyNoMotion(-1);
+          })
+        Text(`${this.noMotion} 分钟`)
+          .fontSize(AppTheme.FONT_BODY)
+          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+          .textAlign(TextAlign.Center)
+          .layoutWeight(1)
+        Text('＋')
+          .fontSize(AppTheme.FONT_SECTION)
+          .fontColor(AppTheme.COLOR_PRIMARY)
+          .textAlign(TextAlign.Center)
+          .width(56)
+          .height(40)
+          .borderRadius(AppTheme.BTN_RADIUS)
+          .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
+          .onClick(() => {
+            this.applyNoMotion(1);
+          })
+      }
+      .width('100%')
+      .opacity(this.noMotionBusy ? 0.5 : 1)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -314,6 +432,9 @@ export struct ProfilePage {
                 onToggle: (on: boolean) => this.cycleMock(on)
               })
               this.demoRow()
+              Divider()
+                .color(AppTheme.COLOR_DIVIDER)
+              this.noMotionRow()
               Row({ space: AppTheme.CARD_GAP }) {
                 PrimaryButton({
                   text: '保存',
