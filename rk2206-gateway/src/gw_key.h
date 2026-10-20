@@ -61,6 +61,7 @@ typedef struct {
     uint32_t base_n;
     uint8_t  base_ready;
     uint8_t  disabled;          /* 基线异常 → 停止判定（宁可没按键，也不要天天误触发） */
+    uint8_t  rail_idle;         /* 基线在满量程附近：常开电阻梯按键（空闲=3V3，按下才接地） */
     uint16_t base_spread_mv;    /* 采集期间的最大-最小，用于「基线不稳」提示 */
     uint32_t baseline_mv;
 

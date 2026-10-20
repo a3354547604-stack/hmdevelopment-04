@@ -113,6 +113,9 @@ static void key_baseline_finish(uint32_t now_ms)
         printf("[%s] ⚠ %s。用串口 `keys` 看各通道读数；确认后改 gw_config.h 的 "
                "GW_KEY_ADC_CHANNEL\n", GW_LOG_TAG, warn);
         s_warned = 1u;
+    } else if (s_key.rail_idle != 0u) {
+        printf("[%s] 板载键空闲电平=满量程（常开电阻梯：不按键经 R17 拉到 3V3，按下才接地），"
+               "按下降判定；实测 K1≈6 / K2≈554 / K3≈1063 / K4≈1669 mV\n", GW_LOG_TAG);
     } else if (s_key.base_spread_mv > GW_KEY_BASELINE_SPREAD_WARN_MV) {
         printf("[%s] ⚠ 板载键基线不稳（跨度 %u mV > %u mV）：可能有人在开机时按键，"
                "判定阈值已按中位数继续用\n", GW_LOG_TAG, s_key.base_spread_mv,

@@ -107,10 +107,16 @@ uint32_t gw_key_baseline_finish(gw_key_t *k)
     k->baseline_mv = key_median(k->base_buf, k->base_n);
     k->base_ready = 1u;
     k->disabled = 0u;
-    /* 恒 0 / 恒满量程：ADC 通道没接、被短接、或者引脚没切到 ADC。此时任何阈值
-     * 判定都只会误触发，直接停判并让调用方打印警告（验收要求「不许静默失败」）。 */
-    if (k->baseline_mv <= k->cfg.baseline_min_mv || k->baseline_mv >= k->cfg.baseline_max_mv) {
+    k->rail_idle = 0u;
+    /* 恒 0：通道没接/被短接/引脚没切到 ADC → 停判（任何阈值都只会误触发）。
+     * 恒满量程：小凌派底板的 K1–K4 是「常开电阻梯」——不按键时该网络经 R17 拉到
+     * 3V3，按下才把梯形节点接地（实测 6 / 554 / 1063 / 1669 mV，2026-10-20）。
+     * 所以这是正常空闲态而非悬空，按「相对基线下降」照常判定，只置 rail_idle 供
+     * 日志/文档说明（见 gw_key_warn_text 与 gw_hw.c 的基线打印）。 */
+    if (k->baseline_mv <= k->cfg.baseline_min_mv) {
         k->disabled = 1u;
+    } else if (k->baseline_mv >= k->cfg.baseline_max_mv) {
+        k->rail_idle = 1u;
     }
     /* 边界值恰好为 0.0–3.3 V 时也视为异常（uint16 截断后仍能看出来） */
     if (k->baseline_mv == 0u) {

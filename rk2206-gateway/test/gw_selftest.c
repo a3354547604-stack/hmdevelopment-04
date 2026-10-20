@@ -2158,10 +2158,18 @@ static void test_key_events(void)
     ev = gw_key_feed(&k, 1000u, 0u);
     t_ok(ev == GW_KEY_EV_NONE && gw_key_is_pressed(&k) == 0, "停判后不再产生任何按下事件");
 
-    /* 7) 基线恒 3300 mV（悬空/上拉缺失）→ 同样停判 */
+    /* 7) 基线恒 3300 mV：不是异常而是「常开电阻梯」的正常空闲态（2026-10-20 实机定标：
+     *    小凌派底板不按键时 USER_KEY_ADC 经 R17 被拉到 3V3，按下才接地）。
+     *    此时不能停判，而要按「相对基线下降」继续工作。 */
     gw_key_init(&k, &cfg, &band);
     key_take_baseline(&k, 3300u, 0xFFFFFFFFu, 0u);
-    t_ok(k.disabled == 1, "基线恒满量程 → 停止判定");
+    t_ok(k.disabled == 0, "基线恒满量程 → 不停判（常开电阻梯的空闲态）");
+    t_ok(k.rail_idle == 1, "基线满量程 → 置 rail_idle 供日志说明");
+    t_ok(gw_key_warn_text(&k) == NULL, "rail_idle 不再给「悬空」警告");
+    ev = gw_key_feed(&k, 1000u, 1669u);           /* K4 实测电平 */
+    t_ok(ev == GW_KEY_EV_NONE, "低于基线 300 mV 先进入候选（去抖未满）");
+    ev = gw_key_feed(&k, 1060u, 1669u);
+    t_ok(ev == GW_KEY_EV_PRESS && gw_key_is_pressed(&k) == 1, "rail_idle 下按 K4 能正常判按下");
 
     /* 8) 绝对分档只影响可读性，不参与按下判定 */
     t_ok(strcmp(gw_key_band_name(&band, 100u), "K1") == 0, "分档：100 mV → K1");
