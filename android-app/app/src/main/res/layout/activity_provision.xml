@@ -66,6 +66,25 @@
             <CheckBox android:id="@+id/cbEchoPassword" android:layout_width="match_parent"
                 android:layout_height="wrap_content" android:text="@string/action_echo_password" />
 
+            <!-- ③.5 华为云 IoTDA 三件套（F4，可跳过） -->
+            <TextView style="@style/CardTitle" android:layout_width="wrap_content"
+                android:layout_height="wrap_content" android:text="@string/step_iotda_title" />
+            <TextView style="@style/CardBody" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:text="@string/msg_iotda_skip" />
+            <EditText android:id="@+id/etIotdaHost" style="@style/Field"
+                android:hint="@string/hint_iotda_host" android:inputType="textUri" />
+            <EditText android:id="@+id/etIotdaPort" style="@style/Field"
+                android:hint="@string/hint_iotda_port" android:inputType="number" />
+            <EditText android:id="@+id/etIotdaDevice" style="@style/Field"
+                android:hint="@string/hint_iotda_device" android:inputType="text" />
+            <EditText android:id="@+id/etIotdaSecret" style="@style/Field"
+                android:hint="@string/hint_iotda_secret" android:inputType="textPassword" />
+            <Button android:id="@+id/btnSubmitIotda" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:layout_marginTop="4dp"
+                android:text="@string/action_submit_iotda" />
+            <TextView android:id="@+id/tvIotdaState" style="@style/CardBody"
+                android:layout_width="match_parent" android:layout_height="wrap_content" />
+
             <!-- ③ 绑定账号 -->
             <TextView style="@style/CardTitle" android:layout_width="wrap_content"
                 android:layout_height="wrap_content" android:text="@string/step3_title" />

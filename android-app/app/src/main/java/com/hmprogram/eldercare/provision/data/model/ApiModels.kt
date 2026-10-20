@@ -1,5 +1,7 @@
 package com.hmprogram.eldercare.provision.data.model
 
+import com.google.gson.JsonObject
+
 /** 契约 §6.1 统一信封里的 `data`，按接口拆成独立数据类。字段名必须与契约逐字一致。 */
 
 // ---------- §6.3 注册 ----------
@@ -65,6 +67,12 @@ data class DeviceStatusData(
     val nodes: List<NodeStatus> = emptyList(),
     val pending_alerts: Int = 0,
     val server_ts: Long = 0,
+    /**
+     * §4.3 的 14 个属性。**故意保留成 JsonObject 而不是强类型字段**：
+     * 属性会随 P0/P1 增减（`lpg`/`co` 在 P1 才有），强类型模型每加一个属性都要改类；
+     * 而宽容解析（缺键=未上报、数字/布尔/字符串互转）集中在 [DeviceProps.of] 一处。
+     */
+    val properties: JsonObject = JsonObject(),
 )
 
 // ---------- §12.5 配网状态 ----------
@@ -81,6 +89,10 @@ data class ProvisionStatus(
     val slots_free: Int = 0,
     /** `scan` / `connect`；空闲时网关不返回该字段 → null */
     val busy: String? = null,
+    /** §12.6/F4：云凭据回显（**不含密钥原文**，只有 secret_set 布尔） */
+    val iotda: IotdaCreds? = null,
+    /** 上一次失败原因（§12.5 可选，auth/timeout/not_found/open_not_supported/internal） */
+    val last_error: String? = null,
 ) {
     val inProvisionWindow: Boolean get() = mode == "ap" || mode == "ap_sta"
 
@@ -117,6 +129,10 @@ data class ProvisionWifiData(
     val ssid: String = "",
     val settle_s: Int = 0,
     val precheck: WifiPrecheck = WifiPrecheck(),
+    /** 同一次提交里带的云凭据回执（F4）。只回 secret_set，不回密钥原文 */
+    val iotda: IotdaCreds? = null,
+    /** 网关给的一句人话（例如「只更新了云凭据（家庭 Wi-Fi 未改动）」） */
+    val note: String? = null,
 )
 
 // ---------- §12.7 触发扫描 ----------
@@ -182,3 +198,49 @@ data class PairBindData(
     val slots_free: Int = 0,
     val connected: Boolean? = null,
 )
+
+// ---------- F4 华为云 IoTDA 三件套 ----------
+/**
+ * 云凭据回执。**密钥只进请求、不回显**：网关与服务器都只回 `secret_set` 布尔，
+ * App 侧也不落盘，避免「投屏时把设备密钥显示出来」这类事故。
+ */
+data class IotdaCreds(
+    val saved: Boolean = false,
+    val configured: Boolean = false,
+    val host: String = "",
+    val port: Int = 1883,
+    val device_id: String = "",
+    val secret_set: Boolean = false,
+) {
+    fun summary(): String = if (host.isBlank() && device_id.isBlank()) {
+        "云凭据未配置"
+    } else {
+        "接入地址 $host:$port｜设备 $device_id｜密钥" + if (secret_set) "已保存" else "未保存"
+    }
+}
+
+// ---------- 检查单 F2：/api/scan 的 Wi-Fi 缓存列表 ----------
+data class ScanAp(
+    val ssid: String = "",
+    val rssi: Int = 0,
+    val ch: Int = 0,
+) {
+    fun label(): String = "$ssid（${rssi} dBm，ch$ch）"
+}
+
+/**
+ * 网关 `GET /api/scan` 的缓存列表（t143 固件已实现，契约表尚未收录）。
+ *
+ * `cached=false` 或 `list` 为空都是**正常情况**：刚从 AP 模式起来、或者用户还没点过扫描。
+ * 这时 App 必须退回手输 SSID（检查单 F2：空则手输），而不是卡在空下拉里。
+ */
+data class WifiScanData(
+    val cached: Boolean = false,
+    val scanned_at: Long = 0,
+    val age_ms: Long = 0,
+    val count: Int = 0,
+    val limit: Int = 0,
+    val list: List<ScanAp> = emptyList(),
+) {
+    val isEmpty: Boolean get() = list.isEmpty()
+}

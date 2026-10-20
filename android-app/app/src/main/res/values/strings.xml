@@ -137,6 +137,100 @@
     <string name="msg_bind_ok">绑定成功：%1$s（id=%2$d）</string>
     <string name="msg_bind_account_needs_internet">本步走公网服务器，必须先切回家庭 Wi-Fi 或蜂窝网络（网关 SoftAP 已关闭，本地地址 192.168.4.1 不再可达）。</string>
     <string name="msg_need_switch_network">先把手机 Wi-Fi 切回家里/蜂窝网络：网关已切到 STA，本地配网地址不可达。</string>
+
+    <!-- ===== F7 首页 / 通用 ===== -->
+    <string name="pull_hint">下拉刷新</string>
+    <string name="pull_release">松开刷新</string>
+    <string name="pull_loading">正在刷新…</string>
+    <string name="offline_banner">网络不可用：下面是上次拿到的数据；恢复后下拉刷新即可</string>
+    <string name="err_token_expired">登录已过期，请重新登录</string>
+    <string name="err_no_device_selected">还没选设备：先到「设备」页绑定或选择一台</string>
+    <string name="label_no_device">未选择设备</string>
+    <string name="label_properties">属性（契约 §4.3 共 14 项，未上报的显示「未上报」）</string>
+    <string name="label_nodes">节点</string>
+    <string name="title_alerts">告警</string>
+    <string name="title_alert_detail">告警详情</string>
+    <string name="title_report">周报 / 月报</string>
+    <string name="title_settings">设置</string>
+    <string name="title_smoke">接口自检</string>
+    <string name="label_dispositions">处置记录</string>
+    <string name="label_dispose_action">处置动作</string>
+    <string name="label_readings_around">事发前后读数</string>
+    <string name="label_compare">对比</string>
+    <string name="label_summary">汇总</string>
+    <string name="label_activity_series">活动分布</string>
+    <string name="label_thresholds">阈值与周期（21 项）</string>
+    <string name="label_mute">告警静音（App 本机）</string>
+    <string name="label_demo">演示事件</string>
+    <string name="label_mock">Mock 模式</string>
+    <string name="label_device_online">在线</string>
+    <string name="label_device_offline">离线</string>
+    <string name="label_battery">电池</string>
+    <string name="demo_note">只支持 gas / fall / sos（契约 §6.12）；door / presence 不是合法事件</string>
+    <string name="action_open_alerts">告警列表</string>
+    <string name="action_open_report">周报 / 月报</string>
+    <string name="action_open_settings">设置</string>
+    <string name="action_open_devices">设备绑定</string>
+    <string name="action_bind_new">绑定新设备</string>
+    <string name="action_load_more">加载更多</string>
+    <string name="action_period_week">周报（7 天）</string>
+    <string name="action_period_month">月报（30 天）</string>
+    <string name="action_contacted">已联系老人</string>
+    <string name="action_checked">已上门查看</string>
+    <string name="action_false_alarm">误报</string>
+    <string name="action_other">其他</string>
+    <string name="action_save_all">保存全部阈值</string>
+    <string name="action_dispatch_settings">下发到网关</string>
+    <string name="action_mute_30">静音 30 分钟</string>
+    <string name="action_mute_60">静音 60 分钟</string>
+    <string name="action_unmute">取消静音</string>
+    <string name="action_demo_gas">燃气演示</string>
+    <string name="action_demo_fall">跌倒演示</string>
+    <string name="action_demo_sos">紧急求助演示</string>
+    <string name="action_smoke_test">开始自检</string>
+    <string name="hint_dispose_note">备注（≤200 字，可空）</string>
+    <string name="report_no_data">暂无数据</string>
+    <string name="smoke_idle">点「开始自检」逐个请求接口，逐条显示通/不通</string>
+    <string name="compare_today">今日：%1$s</string>
+    <string name="compare_yesterday">昨日：%1$s</string>
+    <string name="compare_delta">变化：%1$s</string>
+    <string name="settings_source_fmt">设置来源：%1$s</string>
+    <string name="msg_mute_on">已静音 %1$d 分钟（App 本机不弹告警横幅）</string>
+    <string name="msg_mute_off">已取消静音</string>
+    <string name="msg_mute_left">静音中：剩余 %1$d 分钟</string>
+    <string name="msg_not_muted">未静音</string>
+    <string name="msg_dispose_ok">处置已提交：%1$s</string>
+    <string name="msg_saved_settings">已保存（source=%1$s）</string>
+    <string name="msg_demo_sent">演示事件已下发：%1$s</string>
+    <string name="msg_mock_on">已开启 Mock 模式（假数据，返回上一页生效）</string>
+    <string name="msg_mock_off">已关闭 Mock 模式（走真实服务器）</string>
+    <string name="msg_online_ok">已连上服务器</string>
+    <string name="using_mock">当前为 Mock 模式：数据全部是内置假数据，可无服务器演示</string>
+    <string name="alert_filter_all">全部状态</string>
+    <string name="alert_status_pending">待处置</string>
+    <string name="alert_status_confirmed">已确认</string>
+    <string name="alert_status_resolved">已处置</string>
+    <string name="type_all">全部类型</string>
+    <string name="type_fall">跌倒</string>
+    <string name="type_gas">燃气</string>
+    <string name="type_sos">紧急求助</string>
+    <string name="type_no_motion">无活动</string>
+    <string name="type_node_offline">节点离线</string>
+    <string name="type_device_offline">网关离线</string>
+    <string name="type_door_left">门未关</string>
+    <string name="type_env">温湿度</string>
+
+    <!-- ===== F4 华为云 IoTDA 三件套 ===== -->
+    <string name="step_iotda_title">④ 华为云 IoTDA 三件套（可跳过）</string>
+    <string name="msg_iotda_skip">跳过也能在局域网内跑；填了平台侧才看得到设备。只提交云凭据不会动家庭 Wi-Fi。</string>
+    <string name="hint_iotda_host">IoTDA 接入地址（如 xxx.st1.iotda-device.cn-north-4.myhuaweicloud.com）</string>
+    <string name="hint_iotda_port">端口（默认 1883）</string>
+    <string name="hint_iotda_device">设备 ID</string>
+    <string name="hint_iotda_secret">设备密钥</string>
+    <string name="action_submit_iotda">提交云凭据</string>
+    <string name="msg_iotda_ok">云凭据已保存：%1$s</string>
+    <string name="msg_iotda_none">网关尚未配置云凭据</string>
+    <string name="action_refresh">刷新</string>
 </resources>
 
 

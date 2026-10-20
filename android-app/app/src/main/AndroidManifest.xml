@@ -73,5 +73,12 @@
             android:exported="false"
             android:label="@string/title_dev_settings"
             android:windowSoftInputMode="adjustResize" />
+
+        <activity android:name="ui.DevicesActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name="ui.AlertListActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name="ui.AlertDetailActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name="ui.ReportsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name="ui.SettingsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name="ui.SmokeActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

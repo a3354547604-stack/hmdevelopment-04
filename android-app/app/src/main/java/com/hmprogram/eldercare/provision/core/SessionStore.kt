@@ -60,6 +60,40 @@ class SessionStore(context: Context) : Session {
         get() = prefs.getString(KEY_GATEWAY_SN, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_GATEWAY_SN, value).apply()
 
+    /** 当前查看的主设备（`GET /api/devices` 里选的那台），首页/告警/报表都按它取数 */
+    var deviceId: Long
+        get() = prefs.getLong(KEY_DEVICE_ID, 0L)
+        set(value) = prefs.edit().putLong(KEY_DEVICE_ID, value).apply()
+
+    var deviceName: String
+        get() = prefs.getString(KEY_DEVICE_NAME, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_DEVICE_NAME, value).apply()
+
+    /**
+     * 本机静音截止时刻（epoch ms，0=不静音）。
+     *
+     * 为什么是「App 本机静音」而不是给网关下发 `mute_alarm`：契约 §6 没有暴露 mute 的 REST
+     * 接口（`mute_alarm` 只存在于 §4.5 的命令表，云端没有对应路由），App 无法在不改契约的前提下
+     * 让网关闭嘴。这里做的是「App 自己不再弹告警横幅/响铃」，口径写进 BUILD.md，等契约补接口再换。
+     */
+    var muteUntil: Long
+        get() = prefs.getLong(KEY_MUTE_UNTIL, 0L)
+        set(value) = prefs.edit().putLong(KEY_MUTE_UNTIL, value).apply()
+
+    /** 静音 [seconds] 秒；传 0 表示立刻取消静音 */
+    fun setMute(seconds: Int, now: Long = System.currentTimeMillis()) {
+        muteUntil = if (seconds <= 0) 0L else now + seconds * 1000L
+    }
+
+    fun muted(now: Long = System.currentTimeMillis()): Boolean = muteUntil > now
+
+    /** 剩余静音分钟数（向上取整），未静音返回 0 */
+    fun muteLeftMinutes(now: Long = System.currentTimeMillis()): Int {
+        val left = muteUntil - now
+        if (left <= 0) return 0
+        return ((left + 59_999L) / 60_000L).toInt()
+    }
+
     val loggedIn: Boolean get() = token.isNotBlank()
 
     fun clearLogin() {
@@ -78,6 +112,9 @@ class SessionStore(context: Context) : Session {
         private const val KEY_TOKEN = "token"
         private const val KEY_USERNAME = "username"
         private const val KEY_GATEWAY_SN = "gateway_sn"
+        private const val KEY_DEVICE_ID = "device_id"
+        private const val KEY_DEVICE_NAME = "device_name"
+        private const val KEY_MUTE_UNTIL = "mute_until"
 
         /**
          * 允许用户只输 `192.168.1.100`，自动补齐成 `http://192.168.1.100/api`

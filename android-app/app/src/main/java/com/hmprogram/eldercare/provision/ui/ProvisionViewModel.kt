@@ -167,6 +167,20 @@ class ProvisionViewModel(
         return d
     }
 
+    /**
+     * F4 华为云三件套：只更新云凭据，**不碰家庭 Wi-Fi**。
+     * 网关对「body 里有 host/device_id/secret、但没有 ssid」有单独分支，回 `note` 说明只换了云凭据；
+     * 这条路径让用户可以在不重配 Wi-Fi 的前提下补/改 IoTDA 凭据。
+     */
+    suspend fun submitCloud(host: String, port: Int, deviceId: String, secret: String): ProvisionWifiData? {
+        info("提交云凭据：host=$host port=$port device_id=$deviceId secret=••••")
+        val d = run("提交云凭据") { gateway.submitCloudCreds(host, port, deviceId, secret) } ?: return null
+        _state.value = _state.value.copy(wifi = d)
+        d.iotda?.let { ok("云凭据已保存：" + it.summary()) } ?: warn("网关未回传 iotda 字段（固件可能较旧）")
+        d.note?.let { info(it) }
+        return d
+    }
+
     // ------------------------------------------------------------ 扫描节点
     /**
      * 触发网关扫描星闪节点（§12.7，异步受理）。

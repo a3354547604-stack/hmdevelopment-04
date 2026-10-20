@@ -30,6 +30,12 @@ class LoginActivity : BaseActivity() {
         vb.tvServerHint.text = buildString {
             append("服务器：").append(session.serverBase)
             if (session.mockMode) append("（MOCK 模式）")
+            append("\n点此改服务器地址 / 打开 MOCK 模式")
+        }
+        // 登录页是冷启动的第一屏，必须在这里留「改服务器 + Mock」的入口：
+        // 没有服务器时用户根本走不到设置页（F12 要求无设备也能演示全流程）
+        vb.tvServerHint.setOnClickListener {
+            startActivity(Intent(this, DevSettingsActivity::class.java))
         }
 
         vb.btnSubmit.setOnClickListener { submit() }
@@ -38,8 +44,9 @@ class LoginActivity : BaseActivity() {
             applyMode()
         }
         vb.btnSkipLogin.setOnClickListener {
-            // 不写入任何 token：跳过就是真的没登录，后面「绑定账号」会明确提示未登录
-            startActivity(Intent(this, MainActivity::class.java))
+            // 不写入任何 token：跳过就是真的没登录，后面「绑定账号」会明确提示未登录。
+            // 跳过直接去配网页：现场不登录也能完成 F1–F4 的配网闭环（契约 §12.1 本地 API 不校验账号）。
+            startActivity(Intent(this, ProvisionActivity::class.java))
             finish()
         }
         applyMode()
@@ -87,6 +94,16 @@ class LoginActivity : BaseActivity() {
             } finally {
                 vb.btnSubmit.isEnabled = true
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从开发者设置回来后服务器地址/Mock 可能变了，提示要跟着变
+        vb.tvServerHint.text = buildString {
+            append("服务器：").append(session.serverBase)
+            if (session.mockMode) append("（MOCK 模式）")
+            append("\n点此改服务器地址 / 打开 MOCK 模式")
         }
     }
 

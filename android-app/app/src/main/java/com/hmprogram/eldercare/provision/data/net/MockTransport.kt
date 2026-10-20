@@ -2,6 +2,7 @@ package com.hmprogram.eldercare.provision.data.net
 
 import com.google.gson.Gson
 import com.hmprogram.eldercare.provision.core.ContractErrors
+import com.hmprogram.eldercare.provision.core.SettingsSchema
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
@@ -21,6 +22,9 @@ class FakeClock(var nowMs: Long = System.currentTimeMillis()) {
  *   1) 演示时 mock 走的是完整链路（信封解析、错误码、字段名），真机换回真实后端只需关掉开关；
  *   2) 单元测试能对着它断言 URL 与请求体（例如必须 CALL `/api/pair/bind` 而不是 `/api/pair/add`）；
  *   3) 契约字段名写错时，mock 与真实后端会一起暴露，不会出现「mock 能过我、真机全错」的假绿。
+ *
+ * 假后端是**有状态**的：告警处置、设置下发、绑定设备都会改内部状态，所以「处置完回列表」这类
+ * 跨页面联动能真的被演示和断言出来，而不是每页各自编一套假数据。
  */
 open class MockTransport(
     private val clock: FakeClock = FakeClock(),
@@ -29,20 +33,38 @@ open class MockTransport(
     /** 便于测试断言：记录每一次 (method, path, body) */
     val calls: MutableList<Triple<String, String, String?>> = mutableListOf()
 
-    private val server = FakeServerBackend()
+    /** 完整 URL（含查询串）。[calls] 只留 path；分页/筛选的断言用这个列表 */
+    val urls: MutableList<String> = mutableListOf()
+
+    private val server = FakeServerBackend(clock)
     private val gateway = FakeGatewayBackend(clock)
 
     override suspend fun execute(method: String, url: String, jsonBody: String?): TransportResponse {
-        val path = runCatching { URL(url).path }.getOrElse { url }
+        val parsed = runCatching { URL(url) }.getOrNull()
+        val path = parsed?.path ?: url
+        // 查询参数必须留着：分页/筛选/period 全靠它，丢了就变成「每次都是第一页」
+        val query = parsed?.query.orEmpty()
         calls += Triple(method.uppercase(), path, jsonBody)
-        val host = runCatching { URL(url).host }.getOrElse { "" }
+        urls += url
+        val host = parsed?.host.orEmpty()
         val body = jsonBody?.let { runCatching { JSONObject(it) }.getOrNull() }
         return if (host == "192.168.4.1") {
             gateway.handle(method.uppercase(), path, body)
         } else {
-            server.handle(method.uppercase(), path, body)
+            server.handle(method.uppercase(), path, parseQuery(query), body)
         }
     }
+}
+
+private fun parseQuery(query: String): Map<String, String> {
+    if (query.isBlank()) return emptyMap()
+    return query.split('&').mapNotNull { pair ->
+        val i = pair.indexOf('=')
+        if (i <= 0) return@mapNotNull null
+        val k = URLDecoder.decode(pair.substring(0, i), "UTF-8")
+        val v = URLDecoder.decode(pair.substring(i + 1), "UTF-8")
+        k to v
+    }.toMap()
 }
 
 private val gson = Gson()
@@ -90,7 +112,7 @@ private fun toPlain(v: Any?): Any? = when (v) {
 // ---------------------------------------------------------------------------
 // §6 服务器 API
 // ---------------------------------------------------------------------------
-private class FakeServerBackend {
+private class FakeServerBackend(private val clock: FakeClock) {
 
     private var tokenIssued = 0
     private val devices = mutableListOf(
@@ -106,25 +128,57 @@ private class FakeServerBackend {
         }
     )
 
-    fun handle(method: String, path: String, body: JSONObject?): TransportResponse = when {
+    /** 服务端设置快照（§6.9）。默认值来自与鸿蒙同一张表 [SettingsSchema] */
+    private val settings = JSONObject().apply {
+        SettingsSchema.defaults().forEach { (k, v) -> put(k, v) }
+        put(SettingsSchema.ARRAY_KEY, JSONArray(SettingsSchema.ARRAY_DEFAULT))
+    }
+    private var settingsSource = "local"
+
+    /** 演示用告警：一条待处置跌倒（级别 2）、一条已处置燃气、一条待处置无活动 */
+    private val alerts = mutableListOf(
+        alert(3, "fall", 2, clock.nowMs - 2 * 3600_000L, "pending", "M1", 2),
+        alert(2, "gas", 1, clock.nowMs - 26 * 3600_000L, "resolved", "M1", 1),
+        alert(1, "no_motion", 1, clock.nowMs - 30 * 60_000L, "pending", "M1", 1),
+    )
+    private val dispositions = mutableMapOf<Long, MutableList<JSONObject>>()
+
+    /** 注册过的账号 → 口令（mock 内存态）：让「注册→登录」在单测/演示里真的能走通 */
+    private val registeredUsers = mutableMapOf<String, String>()
+
+    fun handle(method: String, path: String, query: Map<String, String>, body: JSONObject?): TransportResponse = when {
         path.endsWith("/api/auth/register") -> register(body)
         path.endsWith("/api/auth/login") -> login(body)
         path.endsWith("/api/devices") && method == "GET" -> listDevices()
         path.endsWith("/api/devices/bind") -> bind(body)
-        path.endsWith("/api/health") -> envelope(
-            JSONObject().apply {
-                put("ok", true)
-                put("version", "1.0.0-mock")
-                put("db", "ok")
-            }
-        )
+        path.endsWith("/api/health") -> health()
+        path.endsWith("/api/time") -> time()
+        path.endsWith("/api/push/register") -> pushRegister(body)
+        path.endsWith("/api/reports/activity") -> activity(query)
+        path.endsWith("/api/reports/trend") -> trend(query)
+        path.endsWith("/api/reports/summary") -> summary(query)
+        path.endsWith("/api/alerts") && method == "GET" -> listAlerts(query)
+        PATH_ALERT_DETAIL.matches(path) -> alertDetail(PATH_ALERT_DETAIL.find(path)!!.groupValues[1].toLong())
+        PATH_ALERT_DISPOSITION.matches(path) ->
+            disposition(PATH_ALERT_DISPOSITION.find(path)!!.groupValues[1].toLong(), body)
+        PATH_STATUS.matches(path) -> deviceStatus(PATH_STATUS.find(path)!!.groupValues[1].toLong())
+        PATH_READINGS.matches(path) -> readings(PATH_READINGS.find(path)!!.groupValues[1].toLong(), query)
+        PATH_SETTINGS.matches(path) ->
+            if (method == "PUT") putSettings(body) else getSettings()
+        PATH_CONFIG.matches(path) -> config(body)
+        PATH_DEMO.matches(path) -> demo(body)
         else -> fail(404, 1001, "mock 未实现的服务器接口：$method $path")
     }
 
+    // ---------- 账号 ----------
     private fun register(body: JSONObject?): TransportResponse {
         val username = body?.optString("username").orEmpty()
         val password = body?.optString("password").orEmpty()
         validateAccount(username, password)?.let { return it }
+        if (registeredUsers.containsKey(username)) {
+            return fail(409, ContractErrors.USERNAME_TAKEN, "用户名已存在")
+        }
+        registeredUsers[username] = password
         tokenIssued++
         return envelope(jsonOf(RegisterNone(username = username)))
     }
@@ -134,7 +188,8 @@ private class FakeServerBackend {
         val password = body?.optString("password").orEmpty()
         validateAccount(username, password)?.let { return it }
         // mock 口令：固定 Passw0rd，跟契约示例无关；错口令回 1102，用于演示错误分支
-        if (password != MOCK_PASSWORD) {
+        val expected = registeredUsers[username] ?: MOCK_PASSWORD
+        if (password != expected) {
             return fail(401, ContractErrors.BAD_CREDENTIALS, "账号或密码错误")
         }
         tokenIssued++
@@ -147,6 +202,13 @@ private class FakeServerBackend {
         )
     }
 
+    private fun validateAccount(username: String, password: String): TransportResponse? = when {
+        username.length !in 3..32 -> fail(400, ContractErrors.BAD_PARAM, "参数格式错误")
+        password.length !in 8..64 -> fail(400, ContractErrors.BAD_PARAM, "参数格式错误")
+        else -> null
+    }
+
+    // ---------- 设备 ----------
     private fun listDevices(): TransportResponse = envelope(
         JSONObject().apply {
             put("total", devices.size)
@@ -157,7 +219,17 @@ private class FakeServerBackend {
     private fun bind(body: JSONObject?): TransportResponse {
         val sn = body?.optString("sn").orEmpty()
         val code = body?.optString("bind_code").orEmpty()
-        if (sn.isBlank()) return fail(400, ContractErrors.MISSING_PARAM, "缺少必填参数")
+        if (sn.isBlank() || code.isBlank()) {
+            return fail(400, ContractErrors.MISSING_PARAM, "缺少必填参数", JSONObject().apply {
+                put("missing", JSONArray(listOf(if (sn.isBlank()) "sn" else "bind_code")))
+            })
+        }
+        if (code.length != 6) {
+            return fail(400, ContractErrors.MISSING_PARAM, "参数超出允许范围", JSONObject().apply {
+                put("field", "bind_code")
+                put("allowed", "6 位数字")
+            })
+        }
         if (code != MOCK_BIND_CODE) return fail(400, ContractErrors.BAD_BIND_CODE, "绑定码错误")
         if (devices.any { it.optString("sn") == sn }) {
             return fail(409, ContractErrors.DEVICE_ALREADY_BOUND, "设备已被其他账号绑定")
@@ -168,7 +240,7 @@ private class FakeServerBackend {
             put("name", body?.optString("name").takeUnless { it.isNullOrBlank() } ?: sn)
             put("role", "owner")
             put("online", true)
-            put("last_heartbeat", System.currentTimeMillis())
+            put("last_heartbeat", clock.nowMs)
             put("alarm_state", 0)
             put("unread_alerts", 0)
         }
@@ -181,10 +253,482 @@ private class FakeServerBackend {
         )
     }
 
-    private fun validateAccount(username: String, password: String): TransportResponse? = when {
-        username.length !in 3..32 -> fail(400, ContractErrors.BAD_PARAM, "参数格式错误")
-        password.length !in 8..64 -> fail(400, ContractErrors.BAD_PARAM, "参数格式错误")
-        else -> null
+    /**
+     * §6.7 设备状态。
+     *
+     * **故意省略 `lpg`/`co`**：契约 §4.3 说 P1 未装的属性必须省略键而不是填 null/0，
+     * 首页的「14 属性」因此必须能显示「未上报」而不是崩在缺键上——mock 里常驻这个场景。
+     */
+    private fun deviceStatus(deviceId: Long): TransportResponse {
+        val dev = devices.firstOrNull { it.optLong("id") == deviceId }
+            ?: return fail(404, ContractErrors.DEVICE_NOT_FOUND, "设备不存在")
+        val chatty = clock.nowMs / 60_000 % 2 == 0L
+        return envelope(
+            JSONObject().apply {
+                put("device_id", deviceId)
+                put("online", dev.optBoolean("online"))
+                put("last_heartbeat", clock.nowMs - 12_000)
+                put("alarm_state", if (alerts.any { it.optString("status") == "pending" && it.optInt("level") == 2 }) 2 else 0)
+                put("pending_alerts", alerts.count { it.optString("status") == "pending" })
+                put("server_ts", clock.nowMs)
+                put("nodes", jsonArrayOf(nodes(chatty)))
+                put("properties", properties(chatty))
+            }
+        )
+    }
+
+    private fun nodes(chatty: Boolean): List<Map<String, Any?>> = listOf(
+        mapOf(
+            "sn" to "M1", "type" to "motion", "location" to "卧室", "online" to true,
+            "last_seen" to clock.nowMs - 8_000, "rssi" to -45, "battery" to 100,
+        ),
+        mapOf(
+            "sn" to "M2", "type" to "gas", "location" to "厨房", "online" to chatty,
+            "last_seen" to clock.nowMs - 90_000, "rssi" to -62, "battery" to 12,
+        ),
+    )
+
+    private fun properties(chatty: Boolean): JSONObject = JSONObject().apply {
+        put("presence", chatty)
+        put("last_motion_ts", clock.nowMs - 8 * 60_000L)
+        put("door", !chatty)
+        put("window", false)
+        put("temp", if (chatty) 24.6 else 25.1)
+        put("humi", if (chatty) 56.2 else 58.0)
+        put("smoke", if (chatty) 820 else 1320)
+        // lpg / co 故意不给：P1 才有这两个探头（§4.3）
+        put("nodes_online", JSONObject().apply { put("M1", true); put("M2", chatty) }.toString())
+        put("battery", 255)
+        put("alarm_state", if (chatty) 1 else 0)
+        put("bound_nodes", JSONArray(listOf("M1", "M2")).toString())
+        put("pair_state", if (chatty) "sta" else "ap")
+    }
+
+    private fun readings(deviceId: Long, query: Map<String, String>): TransportResponse {
+        val type = query["type"]
+        val limit = query["limit"]?.toIntOrNull()?.coerceIn(1, 200) ?: 20
+        val base = clock.nowMs
+        val all = (0 until 12).map { i ->
+            val ts = base - i * 60_000L
+            val t = type ?: if (i % 2 == 0) "motion" else "env"
+            JSONObject().apply {
+                put("id", 1000 + i)
+                put("node_sn", "M1")
+                put("type", t)
+                put("ts", ts)
+                put("payload", payloadOf(t, i))
+            }
+        }
+        val items = all.take(limit)
+        return envelope(
+            JSONObject().apply {
+                put("total", items.size)
+                put("items", JSONArray(items))
+            }
+        )
+    }
+
+    private fun payloadOf(type: String, i: Int): JSONObject = when (type) {
+        "motion" -> JSONObject().apply { put("presence", i % 2 == 0); put("distance_mm", 1200 + i * 10) }
+        "env" -> JSONObject().apply { put("temp", 24.5 + i * 0.1); put("humi", 55.0 + i) }
+        "gas" -> JSONObject().apply { put("smoke_mv", 820 + i * 30) }
+        else -> JSONObject().apply { put("seq", i) }
+    }
+
+    // ---------- 设置 ----------
+    private fun getSettings(): TransportResponse = envelope(
+        JSONObject().apply {
+            put("source", settingsSource)
+            put("updated_at", clock.nowMs - 30_000)
+            put("items", JSONObject(settings.toString()))
+        }
+    )
+
+    /** §6.10 局部更新：只合并请求里带的键，未知键按契约回 1003 + `key` 明细 */
+    private fun putSettings(body: JSONObject?): TransportResponse {
+        val items = body?.optJSONObject("items")
+            ?: return fail(400, ContractErrors.MISSING_PARAM, "缺少必填参数", JSONObject().apply {
+                put("missing", JSONArray(listOf("items")))
+            })
+        if (items.length() == 0) {
+            return fail(400, ContractErrors.MISSING_PARAM, "缺少必填参数", JSONObject().apply {
+                put("missing", JSONArray(listOf("items")))
+            })
+        }
+        for (key in items.keys()) {
+            if (!SettingsSchema.isKnownKey(key)) {
+                return fail(400, ContractErrors.UNKNOWN_PARAM, "未知参数名", JSONObject().put("key", key))
+            }
+            val spec = SettingsSchema.specOf(key) ?: continue
+            val v = items.optDouble(key, Double.NaN)
+            if (v.isNaN()) {
+                return fail(400, ContractErrors.BAD_PARAM, "参数格式错误", JSONObject().put("field", key))
+            }
+            if (SettingsSchema.isOutOfRange(spec, v)) {
+                return fail(
+                    400,
+                    ContractErrors.PARAM_OUT_OF_RANGE,
+                    "参数超出允许范围",
+                    JSONObject().apply {
+                        put("field", key)
+                        put("allowed", SettingsSchema.allowedText(spec) + " " + spec.unit)
+                    },
+                )
+            }
+        }
+        for (key in items.keys()) settings.put(key, items.opt(key))
+        // 真实后端会异步下发，source 保持 local 直到网关回执；mock 直接当成「已生效」，
+        // 这样现场能演示「保存后立刻变 device」这条文案，但界面上仍写清「下发≠生效」。
+        settingsSource = "local"
+        return envelope(
+            JSONObject().apply {
+                put("source", settingsSource)
+                put("updated_at", clock.nowMs)
+                put("items", JSONObject(settings.toString()))
+            }
+        )
+    }
+
+    /** §6.11 下发：返回 command_id/accepted/rejected，**绝不说「已成功」** */
+    private fun config(body: JSONObject?): TransportResponse {
+        val keys = body?.optJSONArray("keys")?.let { arr ->
+            (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotBlank() } }
+        } ?: SettingsSchema.ALL_KEYS
+        val accepted = keys.filter { SettingsSchema.isKnownKey(it) }
+        val rejected = keys.filterNot { SettingsSchema.isKnownKey(it) }
+        if (accepted.isNotEmpty()) settingsSource = "device"
+        return envelope(
+            JSONObject().apply {
+                put("command_id", "mock-cmd-" + (clock.nowMs / 1000))
+                put("request_id", "mock-req-" + (clock.nowMs % 100000))
+                put("accepted", JSONArray(accepted))
+                put("rejected", JSONArray(rejected))
+                put("dispatched_at", clock.nowMs)
+                put("timeout_s", 10)
+            }
+        )
+    }
+
+    private fun demo(body: JSONObject?): TransportResponse {
+        val event = body?.optString("event").orEmpty()
+        if (!SettingsSchema.isDemoEvent(event)) {
+            return fail(400, ContractErrors.BAD_DEMO_EVENT, "演示事件非法", JSONObject().apply {
+                put("field", "event")
+                put("allowed", "fall/gas/sos")
+            })
+        }
+        // 演示事件影响首页与告警列表：造一条待处置告警，保证「点演示 → 列表真的多一条」
+        val id = (alerts.maxOfOrNull { it.optLong("id") } ?: 0) + 1
+        alerts += alert(id, event, 2, clock.nowMs, "pending", "M1", 0)
+        return envelope(
+            JSONObject().apply {
+                put("command_id", "mock-cmd-" + id)
+                put("request_id", "mock-req-" + id)
+                put("accepted", JSONArray(listOf("demo_trigger")))
+                put("rejected", JSONArray(emptyList<String>()))
+                put("dispatched_at", clock.nowMs)
+                put("timeout_s", 10)
+                put("event", event)
+            }
+        )
+    }
+
+    // ---------- 告警 ----------
+    private fun listAlerts(query: Map<String, String>): TransportResponse {
+        val status = query["status"] ?: "all"
+        // §6.13：status 只认 all/pending/confirmed/resolved，其它值按 1001 参数格式错误（不是「查无数据」）
+        if (status !in listOf("all", "pending", "confirmed", "resolved")) {
+            return fail(400, ContractErrors.BAD_PARAM, "参数格式错误", JSONObject().apply {
+                put("field", "status")
+                put("allowed", "all/pending/confirmed/resolved")
+            })
+        }
+        val type = query["type"]
+        val limit = query["limit"]?.toIntOrNull()?.coerceIn(1, 200) ?: 50
+        val offset = query["offset"]?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+        val filtered = alerts
+            .filter { status == "all" || it.optString("status") == status }
+            .filter { type.isNullOrBlank() || it.optString("type") == type }
+            .sortedByDescending { it.optLong("ts") }
+        val page = filtered.drop(offset).take(limit)
+        return envelope(
+            JSONObject().apply {
+                put("total", filtered.size)
+                put("items", JSONArray(page))
+            }
+        )
+    }
+
+    private fun alertDetail(alertId: Long): TransportResponse {
+        val a = alerts.firstOrNull { it.optLong("id") == alertId }
+            ?: return fail(404, ContractErrors.ALERT_NOT_FOUND, "告警不存在")
+        // §6.14：告警字段平铺 + 三个同级数组
+        return envelope(
+            JSONObject(a.toString()).apply {
+                put("dispositions", JSONArray(dispositions[alertId] ?: mutableListOf<JSONObject>()))
+                put("readings_before", JSONArray(readingsNear(alertId, -1)))
+                put("readings_after", JSONArray(readingsNear(alertId, 1)))
+            }
+        )
+    }
+
+    private fun readingsNear(alertId: Long, dir: Int): List<JSONObject> {
+        val a = alerts.firstOrNull { it.optLong("id") == alertId } ?: return emptyList()
+        val ts = a.optLong("ts")
+        return (0 until 5).map { i ->
+            JSONObject().apply {
+                put("id", alertId * 100 + i)
+                put("node_sn", a.optString("node_sn"))
+                put("type", if (a.optString("type") == "gas") "gas" else "motion")
+                put("ts", ts + dir * (i + 1) * 10_000L)
+                put("payload", payloadOf(if (a.optString("type") == "gas") "gas" else "motion", i))
+            }
+        }
+    }
+
+    /** §6.15 处置：写 dispositions、把状态改成 resolved，并让 `next_push_at` 消失 */
+    private fun disposition(alertId: Long, body: JSONObject?): TransportResponse {
+        val a = alerts.firstOrNull { it.optLong("id") == alertId }
+            ?: return fail(404, ContractErrors.ALERT_NOT_FOUND, "告警不存在")
+        val action = body?.optString("action").orEmpty()
+        if (action !in SettingsSchema.DISPOSITION_ACTIONS.map { it.first }) {
+            return fail(400, ContractErrors.BAD_DISPOSITION, "处置动作非法", JSONObject().apply {
+                put("field", "action")
+                put("allowed", SettingsSchema.DISPOSITION_ACTIONS.joinToString("/") { it.first })
+            })
+        }
+        val note = body?.optString("note").orEmpty()
+        if (note.length > 200) {
+            return fail(400, ContractErrors.PARAM_OUT_OF_RANGE, "参数超出允许范围", JSONObject().apply {
+                put("field", "note")
+                put("allowed", "200 字符以内")
+            })
+        }
+        if (a.optString("status") == "resolved") {
+            return fail(409, ContractErrors.ALERT_ALREADY_HANDLED, "告警已处置")
+        }
+        val dispoId = (dispositions.values.flatten().maxOfOrNull { it.optLong("id") } ?: 0) + 1
+        val ts = clock.nowMs
+        dispositions.getOrPut(alertId) { mutableListOf() } += JSONObject().apply {
+            put("id", dispoId)
+            put("action", action)
+            if (note.isNotBlank()) put("note", note)
+            put("user_id", 1)
+            put("ts", ts)
+        }
+        a.put("status", "resolved")
+        a.remove("next_push_at")
+        return envelope(
+            JSONObject().apply {
+                put("alert_id", alertId)
+                put("status", "resolved")
+                put("action", action)
+                put("disposition_id", dispoId)
+                put("ts", ts)
+            }
+        )
+    }
+
+    // ---------- 报表 ----------
+    private fun activity(query: Map<String, String>): TransportResponse {
+        val period = query["period"] ?: "week"
+        val (from, to, hourly, daily) = activitySeries(period)
+        return envelope(
+            JSONObject().apply {
+                put("device_id", 1)
+                put("period", period)
+                put("from", from)
+                put("to", to)
+                put("total", daily.sumOf { it["count"] as Int })
+                // §6.16：day 给 24 项 hourly；week=7 / month=30 项 daily。
+                // 两个数组都塞进去会让客户端分不清该画哪个，反而把「周报」显示成 24 小时
+                if (period == "day") put("hourly", jsonArrayOf(hourly)) else put("hourly", JSONArray())
+                put("daily", jsonArrayOf(daily))
+            }
+        )
+    }
+
+    private data class Series(
+        val from: Long,
+        val to: Long,
+        val hourly: List<Map<String, Any?>>,
+        val daily: List<Map<String, Any?>>,
+    )
+
+    private fun activitySeries(period: String): Series {
+        val dayMs = 86_400_000L
+        val to = clock.nowMs
+        val days = when (period) {
+            "day" -> 1
+            "month" -> 30
+            else -> 7
+        }
+        val from = to - days * dayMs
+        // 简单的日拱形：白天多、夜里少，肉眼能看出规律即可（演示数据，不追求真实）
+        val hourly = (0 until 24).map { h ->
+            val count = when (h) {
+                in 6..9 -> 5 + h % 3
+                in 10..17 -> 8 + h % 4
+                in 18..22 -> 4 + h % 3
+                else -> h % 2
+            }
+            mapOf("hour" to h, "count" to count)
+        }
+        val daily = (0 until days).map { i ->
+            val d = days - 1 - i
+            val date = java.time.LocalDate.now().minusDays(d.toLong()).toString()
+            mapOf("date" to date, "count" to (14 + (i * 3) % 11))
+        }
+        return Series(from, to, hourly, daily)
+    }
+
+    /**
+     * §6.17 趋势与对比。
+     *
+     * 演示口径：`days<=7`（默认）给**有昨日基线**的正常形态；
+     * `days>=14` 时**省略 `yesterday`/`delta_pct`/`text`**，专门演示「新设备/统计首日」——
+     * 检查单 F10 要求这种时候 `compare.title` 仍在、页面不崩，mock 里必须能复现。
+     */
+    private fun trend(query: Map<String, String>): TransportResponse {
+        val days = query["days"]?.toIntOrNull()?.coerceIn(1, 90) ?: 7
+        val series = activitySeries(if (days <= 1) "day" else "week").daily.take(days)
+        val today = 18L
+        val compare = JSONObject().apply {
+            put("title", "今日活动频次")
+            put("today", today)
+            if (days <= 7) {
+                val yesterday = 24L
+                val delta = Math.round((today - yesterday) * 100.0 / yesterday).toInt()
+                put("yesterday", yesterday)
+                put("delta_pct", delta)
+                put(
+                    "text",
+                    when {
+                        delta <= -10 -> "较昨日下降 ${-delta}%"
+                        delta >= 10 -> "较昨日上升 $delta%"
+                        else -> "与昨日基本持平"
+                    },
+                )
+            }
+        }
+        return envelope(
+            JSONObject().apply {
+                put("device_id", 1)
+                put("days", days)
+                put("series", jsonArrayOf(series))
+                put("compare", compare)
+            }
+        )
+    }
+
+    private fun summary(query: Map<String, String>): TransportResponse {
+        val period = query["period"] ?: "week"
+        val s = activitySeries(period)
+        val pending = alerts.count { it.optString("status") == "pending" }
+        val resolved = alerts.count { it.optString("status") == "resolved" }
+        return envelope(
+            JSONObject().apply {
+                put("device_id", 1)
+                put("period", period)
+                put("from", s.from)
+                put("to", s.to)
+                put(
+                    "activity",
+                    JSONObject().apply {
+                        put("total", 132)
+                        put("active_days", if (period == "month") 26 else 7)
+                        put("avg_daily", 18.9)
+                        put("peak_hour", 15)
+                        put("min_hour", 3)
+                        put("compare_prev", -6)
+                    },
+                )
+                put(
+                    "alerts",
+                    JSONObject().apply {
+                        put("total", alerts.size)
+                        put("by_type", JSONObject().apply { put("fall", 1); put("gas", 1); put("no_motion", 1) })
+                        put("resolved", resolved)
+                        put("pending", pending)
+                        put("false_alarm", 0)
+                    },
+                )
+                put(
+                    "env",
+                    JSONObject().apply {
+                        put("temp_avg", 24.8)
+                        put("temp_min", 21.2)
+                        put("temp_max", 27.6)
+                        put("humi_avg", 56.4)
+                    },
+                )
+            }
+        )
+    }
+
+    // ---------- 其它 ----------
+    private fun pushRegister(body: JSONObject?): TransportResponse {
+        val token = body?.optString("push_token").orEmpty()
+        if (token.isBlank()) {
+            return fail(400, ContractErrors.MISSING_PARAM, "缺少必填参数", JSONObject().apply {
+                put("missing", JSONArray(listOf("push_token")))
+            })
+        }
+        return envelope(JSONObject().apply { put("registered", true); put("user_id", 1) })
+    }
+
+    private fun health(): TransportResponse = envelope(
+        JSONObject().apply {
+            put("ok", true)
+            put("version", "1.2.0-mock")
+            put("db", "ok")
+            put("iotda_token_expire_at", clock.nowMs + 3_600_000)
+            put("webhook_last_at", clock.nowMs - 120_000)
+            put("clock_source", "server")
+            put("server_ts", clock.nowMs)
+        }
+    )
+
+    private fun time(): TransportResponse = envelope(
+        JSONObject().apply {
+            put("utc_epoch", clock.nowMs / 1000)
+            put("iso8601", java.time.Instant.ofEpochMilli(clock.nowMs).toString())
+        }
+    )
+
+    private fun alert(
+        id: Long,
+        type: String,
+        level: Int,
+        ts: Long,
+        status: String,
+        node: String?,
+        pushCount: Int,
+    ): JSONObject = JSONObject().apply {
+        put("id", id)
+        put("device_id", 1)
+        if (node != null) put("node_sn", node)
+        put("type", type)
+        put("level", level)
+        put("ts", ts)
+        put("status", status)
+        put("push_count", pushCount)
+        if (pushCount > 0) put("last_push_at", ts + 30_000)
+        if (status == "pending") put("next_push_at", clock.nowMs + 120_000)
+        put("summary", summaryText(type, level, node))
+    }
+
+    private fun summaryText(type: String, level: Int, node: String?): String = when {
+        type == "fall" -> "卧室检测到跌倒"
+        type == "gas" && level >= 2 -> "厨房燃气泄漏报警"
+        type == "gas" -> "厨房燃气浓度偏高"
+        type == "sos" -> "收到紧急求助"
+        type == "no_motion" -> "30 分钟未检测到活动"
+        type == "node_offline" -> "节点 ${node ?: "?"} 已离线"
+        type == "device_offline" -> "网关已离线"
+        type == "door_left" -> "门已打开超过 3 分钟"
+        type == "env" -> "室内温湿度异常"
+        else -> type
     }
 
     private data class RegisterNone(val user_id: Long = 1, val username: String, val created_at: Long = System.currentTimeMillis())
@@ -195,6 +739,14 @@ private class FakeServerBackend {
         // 不是任何真实口令或绑定码，也不参与真实配网——扫描工具报「凭据泄漏」时按本行豁免。
         const val MOCK_PASSWORD = "Passw0rd"
         const val MOCK_BIND_CODE = "482913"
+
+        private val PATH_STATUS = Regex("^/api/devices/(\\d+)/status$")
+        private val PATH_READINGS = Regex("^/api/devices/(\\d+)/readings$")
+        private val PATH_SETTINGS = Regex("^/api/devices/(\\d+)/settings$")
+        private val PATH_CONFIG = Regex("^/api/devices/(\\d+)/config$")
+        private val PATH_DEMO = Regex("^/api/devices/(\\d+)/demo$")
+        private val PATH_ALERT_DETAIL = Regex("^/api/alerts/(\\d+)$")
+        private val PATH_ALERT_DISPOSITION = Regex("^/api/alerts/(\\d+)/disposition$")
     }
 }
 
@@ -207,6 +759,25 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
     private var scanState = "idle"
     private var scannedAt = 0L
     private var scanTicksLeft = 0
+
+    /** F4：云凭据保存后的回显（**永不回密钥**，只回 secret_set） */
+    private var iotdaHost = ""
+    private var iotdaPort = 1883
+    private var iotdaDev = ""
+    private var iotdaSecretSet = false
+    private var iotdaFromFlash = false
+
+    /**
+     * F2 的 `/api/scan` 缓存。真固件是「用户点过扫描才有缓存」，这里给一份固定值，
+     * 让「下拉选 SSID」这条正常路径在无设备时也能演示；空缓存的兜底路径由单测的
+     * ScriptedTransport 覆盖（见 SettingsAndReportTest）。
+     */
+    private var wifiCache: List<ScanApSeed> = listOf(
+        ScanApSeed("HOME-2.4G", -52, 6),
+        ScanApSeed("TP-LINK_8A2C", -61, 11),
+        ScanApSeed("CMCC-2.4G", -78, 3),
+    )
+    private var wifiCacheAt = clock.nowMs
 
     /** 契约 §12.9：扫描结果默认 15 s 收工，这里按「轮询次数」折算，mock 不需要真等 15 s */
     private val nodes = mutableListOf(
@@ -223,6 +794,7 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
         path.endsWith("/api/pair/scan") -> startScan(body)
         path.endsWith("/api/pair/nodes") -> pairNodes()
         path.endsWith("/api/pair/bind") -> pairBind(body)
+        path.endsWith("/api/scan") -> wifiScan()
         else -> fail(404, 1600, "mock 未实现的本地接口：$method $path")
     }
 
@@ -238,6 +810,31 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
             put("bound_count", bound.size)
             put("slots_free", 8 - bound.size)
             if (scanState == "scanning") put("busy", "scan")
+            put(
+                "iotda",
+                JSONObject().apply {
+                    put("configured", iotdaFromFlash)
+                    put("host", iotdaHost)
+                    put("port", iotdaPort)
+                    put("device_id", iotdaDev)
+                    put("secret_set", iotdaSecretSet)
+                },
+            )
+        }
+    )
+
+    /** F2：只读缓存，不触发新扫描（t143 固件口径） */
+    private fun wifiScan(): TransportResponse = envelope(
+        JSONObject().apply {
+            put("cached", wifiCache.isNotEmpty())
+            put("scanned_at", wifiCacheAt)
+            put("age_ms", clock.nowMs - wifiCacheAt)
+            put("count", wifiCache.size)
+            put("limit", 24)
+            put(
+                "list",
+                jsonArrayOf(wifiCache.map { mapOf("ssid" to it.ssid, "rssi" to it.rssi, "ch" to it.ch) }),
+            )
         }
     )
 
@@ -245,7 +842,25 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
         val ssid = body?.optString("ssid").orEmpty()
         val password = body?.optString("password").orEmpty()
         val hidden = body?.optBoolean("hidden", false) ?: false
-        if (ssid.isBlank()) return fail(400, ContractErrors.MISSING_PARAM, "缺少必填参数")
+
+        // F4：云凭据与 Wi-Fi 同级键（固件 cJSON_GetObjectItem(root,"host") 等）
+        val cloud = readCloud(body)
+        if (cloud is CloudProblem) {
+            return fail(400, ContractErrors.BAD_PARAM, "参数格式错误", JSONObject().put("reason", cloud.reason))
+        }
+        if (ssid.isBlank()) {
+            // 只更新云凭据：不动家庭 Wi-Fi（固件同款分支）
+            if (cloud == null) return fail(400, ContractErrors.MISSING_PARAM, "缺少必填参数")
+            saveCloud(cloud as CloudOk)
+            return envelope(
+                JSONObject().apply {
+                    put("saved", true)
+                    put("connecting", false)
+                    put("iotda", iotdaJson(saved = true))
+                    put("note", "只更新了云凭据（家庭 Wi-Fi 未改动）")
+                }
+            )
+        }
         if (ssid.length > 32) return fail(400, ContractErrors.PARAM_OUT_OF_RANGE, "参数超出允许范围")
         if (!hidden && ssid.contains("5G", ignoreCase = true)) {
             // 契约 §12.6：预检看不到该 SSID → 1602/not_found；这里用名字含 5G 模拟现场最容易犯的错
@@ -255,6 +870,7 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
         if (!open && password.length !in 8..63) {
             return fail(400, ContractErrors.PARAM_OUT_OF_RANGE, "参数超出允许范围")
         }
+        if (cloud != null) saveCloud(cloud as CloudOk)
         return envelope(
             JSONObject().apply {
                 put("saved", true)
@@ -267,10 +883,47 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
                         put("ap_found", true)
                         put("rssi", -52)
                         put("ch", 6)
-                    }
+                    },
                 )
+                if (cloud != null) put("iotda", iotdaJson(saved = true))
             }
         )
+    }
+
+    private sealed interface CloudResult
+    private data class CloudOk(val host: String, val port: Int, val deviceId: String, val secret: String) : CloudResult
+    private data class CloudProblem(val reason: String) : CloudResult
+
+    private fun readCloud(body: JSONObject?): CloudResult? {
+        if (body == null) return null
+        val hasAny = body.has("host") || body.has("device_id") || body.has("device") || body.has("secret")
+        if (!hasAny) return null
+        val host = body.optString("host").trim()
+        val dev = body.optString("device_id").ifBlank { body.optString("device") }.trim()
+        val secret = body.optString("secret").trim()
+        val port = body.optInt("port", 1883).let { if (it == 0) 1883 else it }
+        if (host.isBlank() || host.length > 64) return CloudProblem("bad_host")
+        if (dev.isBlank() || dev.length > 64) return CloudProblem("bad_device")
+        if (secret.isBlank() || secret.length > 64) return CloudProblem("bad_secret")
+        if (port !in 1..65535) return CloudProblem("bad_port")
+        return CloudOk(host, port, dev, secret)
+    }
+
+    private fun saveCloud(creds: CloudOk) {
+        iotdaHost = creds.host
+        iotdaPort = creds.port
+        iotdaDev = creds.deviceId
+        iotdaSecretSet = true
+        iotdaFromFlash = true
+    }
+
+    private fun iotdaJson(saved: Boolean): JSONObject = JSONObject().apply {
+        if (saved) put("saved", true)
+        put("configured", iotdaFromFlash)
+        put("host", iotdaHost)
+        put("port", iotdaPort)
+        put("device_id", iotdaDev)
+        put("secret_set", iotdaSecretSet)
     }
 
     private fun startScan(body: JSONObject?): TransportResponse {
@@ -322,7 +975,7 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
                                 put("last_seen", if (isBound) clock.nowMs else JSONObject.NULL)
                             }
                         }
-                    )
+                    ),
                 )
             }
         )
@@ -368,4 +1021,5 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
 
     private data class NodeSeed(val sn: String, val mac: String, val rssi: Int, val alias: String? = null)
     private data class BoundNone(val sn: String, val mac: String, val alias: String?)
+    private data class ScanApSeed(val ssid: String, val rssi: Int, val ch: Int)
 }

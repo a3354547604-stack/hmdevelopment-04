@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 接口自检（F12）：逐个打 18 个接口 + /api/time，本机没有设备/服务器也能说明「哪条通、哪条不通」 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/tvOfflineBanner"
+        style="@style/CardBody"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/err_bg"
+        android:padding="8dp"
+        android:text="@string/offline_banner"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tvSummary"
+        style="@style/CardBody"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/smoke_idle" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <LinearLayout
+            android:id="@+id/listSmoke"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <Button
+        android:id="@+id/btnRun"
+        style="@style/Field"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/action_smoke_test" />
+</LinearLayout>

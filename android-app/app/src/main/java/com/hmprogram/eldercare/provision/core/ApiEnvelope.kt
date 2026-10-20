@@ -18,26 +18,34 @@ sealed class ApiResult<out T> {
      * @param code    契约 §9.2 业务码；响应体不可解析时为 [TransportError.UNPARSABLE]
      * @param message 服务器给的 message，或本地兜底文案
      * @param reason  §12.6 的 `reason`（`not_found`/`auth`/`timeout`），只有 Wi-Fi 失败才有
+     * @param details §9.2 错误 `data` 里的明细（`field`/`allowed`/`missing`/`key`）。有就必须显示——
+     *                只回「参数错误」，现场等于没有提示
      */
     data class Err(
         val http: Int,
         val code: Int,
         val message: String,
         val reason: String? = null,
+        val details: ErrorDetails? = null,
         val raw: String = "",
     ) : ApiResult<Nothing>() {
-        /** 给用户看的一行：契约提示 + 具体动作 */
+        /** 给用户看的完整文案：服务器 message + 契约提示 + data 明细（各占一行） */
         fun display(): String {
             val base = if (message.isNotBlank()) message else ContractErrors.describe(code)
             val hint = ContractErrors.hint(code)
-            return when {
+            val head = when {
                 hint != null -> "$base\n→ $hint"
                 http > 0 -> "$base（HTTP $http / code $code）"
                 else -> base
             }
+            val detailLines = details?.lines().orEmpty()
+            return if (detailLines.isEmpty()) head else head + "\n" + detailLines.joinToString("\n")
         }
 
         fun isCredentialProblem(): Boolean = ContractErrors.isCredentialProblem(code)
+
+        /** 连服务器都没连上（DNS/超时/拒绝）：界面要显示「离线」而不是「参数错误」 */
+        fun isTransportProblem(): Boolean = code == TRANSPORT_ERROR
     }
 
     companion object {
@@ -88,8 +96,16 @@ object Envelope {
         val code = obj.optInt("code", ApiResult.UNPARSABLE)
         val message = obj.optString("message", "")
         if (code != ContractErrors.OK) {
-            val reason = obj.optJSONObject("data")?.optString("reason")?.takeIf { it.isNotBlank() }
-            return ApiResult.Err(http = http, code = code, message = message, reason = reason, raw = raw)
+            val data = obj.optJSONObject("data")
+            val reason = data?.optString("reason")?.takeIf { it.isNotBlank() }
+            return ApiResult.Err(
+                http = http,
+                code = code,
+                message = message,
+                reason = reason,
+                details = ErrorDetails.from(data),
+                raw = raw,
+            )
         }
         val data = obj.optJSONObject("data") ?: org.json.JSONObject()
         return ApiResult.Ok(data, raw)

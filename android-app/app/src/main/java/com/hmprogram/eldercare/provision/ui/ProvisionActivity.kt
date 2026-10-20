@@ -16,6 +16,7 @@ import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
 import com.hmprogram.eldercare.provision.R
+import com.hmprogram.eldercare.provision.data.api.GatewayApi
 import com.hmprogram.eldercare.provision.data.model.BoundNode
 import com.hmprogram.eldercare.provision.data.model.ScannedNode
 import com.hmprogram.eldercare.provision.databinding.ActivityProvisionBinding
@@ -181,6 +182,25 @@ class ProvisionActivity : BaseActivity() {
             }
         }
 
+        // F4 华为云三件套：只提交云凭据，不动家庭 Wi-Fi（网关对「无 ssid + 有云凭据」有专门分支）
+        vb.btnSubmitIotda.setOnClickListener {
+            val host = vb.etIotdaHost.text.toString().trim()
+            val port = vb.etIotdaPort.text.toString().trim().toIntOrNull() ?: 1883
+            val deviceId = vb.etIotdaDevice.text.toString().trim()
+            val secret = vb.etIotdaSecret.text.toString()
+            val problem = GatewayApi.CloudCreds(host, port, deviceId, secret).validate()
+            if (problem != null) {
+                toast(problem)
+                return@setOnClickListener
+            }
+            scope().launch {
+                val d = vm.submitCloud(host, port, deviceId, secret)
+                // 密钥提交完就从界面清掉：现场投屏/拍照时不该留明文
+                vb.etIotdaSecret.setText("")
+                if (d != null) toast(getString(R.string.msg_saved))
+            }
+        }
+
         vb.btnBindAccount.setOnClickListener {
             val sn = vb.etGatewaySn.text.toString().trim()
             val code = vb.etBindCode.text.toString().trim()
@@ -267,6 +287,12 @@ class ProvisionActivity : BaseActivity() {
             // 只订阅一次，直到界面销毁；repeatOnLifecycle 会在 onStop 取消、onStart 重订阅
             vm.state.collect { s ->
                 vb.tvStatus.text = s.status?.summary() ?: getString(R.string.status_unknown)
+                val iotda = s.status?.iotda
+                vb.tvIotdaState.text = if (iotda == null || (iotda.host.isBlank() && iotda.device_id.isBlank())) {
+                    getString(R.string.msg_iotda_none)
+                } else {
+                    getString(R.string.msg_iotda_ok, iotda.summary())
+                }
                 vb.tvPairHint.text = when (s.scanState) {
                     "scanning" -> getString(R.string.pair_scanning)
                     "done" -> getString(R.string.pair_done_fmt, s.nodes.size, s.bound.size)

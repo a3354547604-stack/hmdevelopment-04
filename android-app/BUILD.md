@@ -1,19 +1,23 @@
-# Android 配网 App（eldercare-provision）
+# Android App（eldercare-provision / eldercare-android）
 
-现场演示用**最小配网 App**：注册/登录 → 连网关热点 → 提交家庭 Wi-Fi → 绑定账号 → 扫星闪节点 → 绑定节点。
+安卓侧与鸿蒙 App **功能对齐**的完整客户端：登录/注册 → 设备绑定 → 首页实时（14 属性 + 节点 + 10 s 轮询
++ 下拉刷新）→ 告警列表/详情/处置 → 周报月报（含今日/昨日对比）→ 设置（21 键阈值、静音、上报周期、
+演示事件）→ 配网（F1–F4：连热点 → 选 SSID（网关 `/api/scan` 缓存优先 + 手输兜底）→ 提交 Wi-Fi →
+IoTDA 三件套）→ Mock 自检（无服务器可演示全流程）。
 
-**不做**实时监测 / 告警 / 报表（契约 §13 划界，那部分由鸿蒙 App 负责）。所以这里没有图表、
-没有告警列表、没有历史报表，只有配网这一条链路 + 一份可复制的现场日志。
+口径唯一来源：`docs/技术/App功能对齐清单.md` 的 F1–F13。逐条验收证据见
+[`docs/F4-F13-交付说明.md`](docs/F4-F13-交付说明.md)。
 
 > **定位（PM 裁定 F-02，见契约 §12.11 / §13.2）**：P0 开场演示的**主路径是手机浏览器打开网关内置
 > H5 页面**（`http://192.168.4.1/`，实现归 `rk2206-gateway/`），不需要装任何 App。本 App 是
 > **P1 加分项**——与 H5 **同源同字段**：只调契约 §12 的 5 个本地接口（+ §6 的账号接口，契约 §12.11
 > 明确把「绑定账号」交给 App/脚本），不自己发明路径或字段名。现场它不可用也不影响主线。
 
-**交付状态（本机实测，非纸面）**：在本机 WSL 用命令行工具链**真编译出了 debug APK** ——
-`android-app/dist/eldercare-provision-0.1.0-debug.apk`，7 069 346 字节（6.74 MB），
-sha256 `31dbc08a99ff299ec42a63d3cf43210693c4bb37807ad381212af86c06a0aa01`；**29 个单测全绿**
-（`testDebugUnitTest`，BUILD SUCCESSFUL）。真机安装与真硬件联调仍需用户执行，见 §8。
+**交付状态（本机实测，非纸面）**：本机 WSL 命令行工具链**真编译出了 debug APK** ——
+`android-app/dist/eldercare-provision-0.2.0-debug.apk`，7 276 381 字节（6.94 MB），
+sha256 `5d92f775c3b829223e2f398568b1af17b47b4c2dfad965753d9bffaddc2ee988`（**当次**指纹，zip 时间戳
+不可复现，按 AGENTS.md 口径以「体积 + 提交号」为主）；**83 个单测全绿**（`testDebugUnitTest`，
+BUILD SUCCESSFUL）。真机安装与真硬件联调仍需用户执行，见 §8。
 
 ---
 
@@ -29,6 +33,16 @@ sha256 `31dbc08a99ff299ec42a63d3cf43210693c4bb37807ad381212af86c06a0aa01`；**29
 | 触发节点扫描 | `POST /api/pair/scan` → 轮询 `GET /api/pair/nodes` | §12.7、§12.8 |
 | 绑定 / 解绑 / 清空白名单 | `POST /api/pair/bind`（`op=add/del/clear/list`） | §12.9 |
 | 端到端顺序 | 「B2 顺序」= 连 AP → 提交 Wi-Fi → 绑定账号 → 扫节点 → 绑节点 | §13.2、§13.3 |
+| 首页实时 | `GET /api/devices` → `GET /api/devices/{id}/status`（10 s 轮询 + 下拉刷新） | §6.5、§6.7 |
+| 历史读数 | `GET /api/devices/{id}/readings` | §6.8 |
+| 阈值设置 | `GET`/`PUT /api/devices/{id}/settings`（21 键） | §6.9、§6.10 |
+| 下发到网关 | `POST /api/devices/{id}/config` | §6.11 |
+| 演示事件 | `POST /api/devices/{id}/demo`（只 gas/fall/sos） | §6.12 |
+| 告警列表/详情/处置 | `GET /api/alerts`、`GET /api/alerts/{id}`、`POST /api/alerts/{id}/disposition` | §6.13–§6.15 |
+| 周报月报 | `GET /api/reports/activity`、`/trend`、`/summary` | §6.16–§6.18 |
+| 推送注册 | `POST /api/push/register`（`platform=android`） | §6.19 |
+| 健康与对时 | `GET /api/health`、`GET /api/time`（免鉴权） | §6.20、§6.21 |
+| 网关缓存热点 | `GET /api/scan`（`rk2206-gateway` t143 实现；契约表尚未收录，清单 F2 明确要求） | 清单 F2 |
 
 两条合法顺序（契约 §13.3）本项目走 **B2**（任务卡默认）：先把网关送上网，再绑账号，最后扫节点。
 代价是**提交 Wi-Fi 后网关会关掉 SoftAP**，手机本地地址 `192.168.4.1` 不再可达，
@@ -57,14 +71,14 @@ export ANDROID_HOME=$HOME/toolchains/android-sdk
 export PATH=$JAVA_HOME/bin:$PATH
 G=$HOME/toolchains/gradle-8.7/bin/gradle
 
-# ② 单元测试：配网流程的回归（纯 JVM，16 s）
+# ② 单元测试：URL 拼接 / 错误码 + data 明细 / compare 解析 / 21 键 / 14 属性 / Mock 全流程（纯 JVM）
 $G -p android-app testDebugUnitTest --console=plain
-#   实测输出：BUILD SUCCESSFUL，29 个用例 0 失败
+#   实测输出：BUILD SUCCESSFUL，83 个用例 0 失败（8 个测试类）
 
 # ③ 出 debug APK
 $G -p android-app assembleDebug --console=plain
 # 产物：android-app/app/build/outputs/apk/debug/app-debug.apk
-# 本机已复制一份到 android-app/dist/eldercare-provision-0.1.0-debug.apk
+# 本机已复制一份到 android-app/dist/eldercare-provision-0.2.0-debug.apk
 ```
 
 **在 WSL 里编（本机就是这种）/mnt/c 上必须加一行**：DrvFs 不支持 AGP 8.4 对 jniLibs 输出目录的
@@ -143,7 +157,26 @@ debug 包的 `applicationId` 带 `.debug` 后缀（`com.hmprogram.eldercare.prov
 7. ③ 填网关 SN（`M0-XXXXXX`）+ 绑定码 → 绑定账号。
 8. ④ 扫描节点 → 列表里逐个「绑定」；扫不到看 App 日志里的错误码（1600/1601/1604/1605/1606 都有中文提示）。
 
-**日志区**：每条都带时间戳与错误码原文，右上角「复制日志」一行复制整段——排障不用拍照。
+**配网完回到 App 首页**（已登录时）：14 属性 + 节点列表 + 在线状态每 10 s 自动刷新，也可以下拉刷新。
+
+**日志区**（配网页）：每条都带时间戳与错误码原文，右上角「复制日志」一行复制整段——排障不用拍照。
+
+### 4.1 日常使用路径（F5–F13）
+
+| 页面 | 入口 | 关键行为 |
+|---|---|---|
+| 登录/注册 | 启动页 | 账号密码登录，JWT 存 `SharedPreferences`；401/1101 自动清令牌回登录页 |
+| 设备绑定 | 首页「设备」或扫码 | 设备列表 + 绑定（SN + 6 位绑定码）；失败显示服务器 `message` + `data` 明细（`field`/`allowed`/`missing`/`key`） |
+| 首页 | 登录后默认页 | 14 属性（缺省键显示「未上报」，不显示 0）、节点列表与在线状态、10 s 轮询 + 下拉刷新 |
+| 告警列表 | 首页「告警」 | 状态/类型筛选、分页（每页 20 条，「加载更多」按 total 判断） |
+| 告警详情 | 点告警行 | 平铺字段 + 处置历史 + 告警前后各 5 条读数；四个处置动作（已联系/已上门/误报/其他），提交后返回列表并刷新 |
+| 周报/月报 | 首页「报表」 | 活动统计 + 今日/昨日对比 + 汇总三段独立降级；`compare.title` 必现，无昨日基线只显示 title/today 并提示「暂无对比数据」 |
+| 设置 | 首页「设置」 | 21 键阈值（20 个标量 + 重复推送间隔数组）、一键保存、下发生效、静音（App 本地）、演示事件 gas/fall/sos、退出登录 |
+| 接口自检 | 设置「接口自检」 | 按契约顺序跑 18 个接口；**Mock 模式下**才做写操作（PUT/config/demo/disposition），真服务器只读 |
+
+> **静音为什么是 App 本地实现**：契约 §4.5 有 `mute_alarm` 网关命令，但 §6 **没有**对外 REST 入口，
+> 鸿蒙 App 也只留了开关位。安卓侧做成 App 本地「静音到某时刻」（仍照常收数据、只是不弹提示），
+> 把差异写在这里而不是自造一个服务器接口。
 
 ---
 
@@ -158,6 +191,13 @@ debug 包的 `applicationId` 带 `.debug` 后缀（`com.hmprogram.eldercare.prov
 * `1606`（白名单满）**在 MOCK 里复现不了**：MOCK 只种了 3 个节点、且按 MAC 去重，
   `bound.size` 最多 3，永远到不了上限 8。它只能靠真网关（或临时把 `MockTransport.kt`
   里 `bound.size >= 8` 的上限改小演示一次，演示完**必须改回**）。
+
+服务器侧（F5–F13）还提供：登录/注册（注册后的口令立即生效）、设备列表、14 属性状态（**故意不返回
+`lpg`/`co`**，用来验证「未上报」而不是「0」）、21 键设置（越界回 1002 + `field`/`allowed`，未知键回
+1003 + `key`）、下发（`source` 由 `local` 变 `device`）、演示事件（gas/fall/sos 会真的新增一条待处置告警）、
+告警列表（3 条种子：跌倒待处置/燃气已处置/无活动待处置）、告警详情与处置、三张报表（`trend` 的
+`days<=7` 有昨日基线、`days>=14` **没有** yesterday —— 用来验证 F10 的「无基线不崩」）。
+无服务器自检的两个入口：**设置 → 接口自检**（页面逐项 ✓/✗）与 `MockFlowTest`（15 个用例，`./gradlew test`）。
 
 MOCK 走的是**同一套信封解析与错误码路径**，不是假的返回值，所以它能证明解析代码是对的，
 但不能证明网关固件是对的——上真机时务必再跑一遍 B2 全流程。
@@ -182,13 +222,19 @@ MOCK 走的是**同一套信封解析与错误码路径**，不是假的返回�
 
 ```
 app/src/main/java/com/hmprogram/eldercare/provision/
-├── core/           ApiResult 信封、契约错误码表、Session 接口与 SharedPreferences 实现
-├── data/api/       ServerApi（§6）、GatewayApi（§12）
-├── data/model/     与契约字段逐个对齐的 data class
-├── data/net/       HttpClient（信封解析收口）、OkHttpTransport、MockTransport（假后端）
-├── ui/             6 个 Activity + ProvisionViewModel（纯 JVM 可测）+ parseDeviceQr
+├── core/           ApiResult 信封 + ErrorDetails(§9.2 data 明细)、契约错误码表、Session/SessionStore、
+│                   ApiPaths（18 个 REST 路径与查询串）、SettingsSchema（21 键 + 演示事件 + 处置动作）、Times
+├── data/api/       ServerApi（§6 全部接口）、GatewayApi（§12 + /api/scan + IoTDA 三件套）
+├── data/model/     与契约字段逐个对齐的 data class；DeviceProps/PropertyRows（14 属性）；
+│                   ServerModels（告警/报表/设置）+ CompareView（compare 渲染规则）
+├── data/net/       HttpClient（信封解析收口）、OkHttpTransport（Bearer 注入）、MockTransport（有状态假后端）
+├── ui/             BaseActivity（登录守卫/离线提示/错误兜底）、PullToRefreshLayout（自绘下拉刷新）
+│                   MainActivity(首页)、LoginActivity、DevicesActivity、AlertListActivity、AlertDetailActivity、
+│                   ReportsActivity、SettingsActivity、SmokeActivity、ProvisionActivity、WifiScanActivity、
+│                   PairNodesActivity、DevSettingsActivity + ProvisionViewModel（纯 JVM 可测）+ parseDeviceQr
 └── wifi/           WifiHelper：扫热点、连 SoftAP（WifiNetworkSpecifier）、权限分支
-app/src/test/       纯 JVM 单测：信封解析、URL 分流、配网流程、错误码、SN 规则
+app/src/test/       纯 JVM 单测：URL 拼接、错误码映射 + data 明细、compare 解析、21 键、14 属性、
+                    Mock 全流程、配网流程、信封解析、SN 规则（83 用例 / 8 个类）
 ```
 
 设计上刻意做的两件事：
@@ -197,6 +243,10 @@ app/src/test/       纯 JVM 单测：信封解析、URL 分流、配网流程、
    「URL → 信封 → 错误码 → 模型」链路，写错字段名两边一起错，不会出现「mock 绿、真机全红」。
 2. **ViewModel 不依赖任何 Android 类** —— 靠 `Session` 接口与 `HttpClient` 注入，
    配网流程能在 `./gradlew test` 里几秒回归一遍。
+3. **页面只做「接口 → 文本」的翻译** —— 判定规则（compare 文案、属性缺失、越界提示、错误码人话）
+   全在 `core/`、`data/model/` 的纯函数里，单测直接断言，不靠截图。
+4. **401/1101 只有一个出口** —— `BaseActivity.handleFailure()`：清令牌 → 回登录页；
+   离线（`code=-1`）只显示顶部离线横幅，不清令牌、不白屏。
 
 ---
 
@@ -207,3 +257,7 @@ app/src/test/       纯 JVM 单测：信封解析、URL 分流、配网流程、
 * [ ] `WifiNetworkSpecifier` 自动连 `ElderCare-XXXX`（Android 10+ 会弹系统确认框）
 * [ ] Android 13+ 的 `NEARBY_WIFI_DEVICES` 与 Android 12- 的 `ACCESS_FINE_LOCATION` 授权后能扫到 SSID
 * [ ] 与真实网关跑通契约 §13.2 的 B2 全流程（含 `1602` / `1604` 两类错误现场复现）
+* [ ] 与真服务器跑通 F5–F13：登录/绑定/首页 10 s 轮询/告警处置/报表（含无昨日基线的那一天）
+* [ ] `GET /api/scan` 在真网关上返回缓存列表（没扫过应为空 → App 落回手输）
+* [ ] IoTDA 三件套真实下发（App 只负责提交，云端连通性由服务器/网关日志验证）
+* [ ] 下拉刷新手势在真机上的手感（`tools/` 无真机，靠自绘 ViewGroup 实现）

@@ -61,6 +61,22 @@ DEFAULT_MODELS = os.path.join(
 REQUEST_SECTIONS = {"12.6", "12.7", "12.9"}
 RESPONSE_SECTIONS = {"12.5", "12.6", "12.7", "12.8", "12.9"}
 
+# 已登记、**有据可查**的例外（只打印提示，不报红）。登记规则：必须写明「为什么允许」
+# 和「证据在哪」，否则下一个人无法判断它是例外还是残留。
+EXTRA_ALLOWED: dict[tuple[str, str], str] = {
+    ("GET", "/scan"): (
+        "清单 F2 要求「SSID 下拉取自网关扫描缓存」；固件 t143 已在 "
+        "rk2206-gateway/src/gw_prov_route.c 路由 6 实现（只读缓存，不受配网窗口限制），"
+        "契约 §12.4 总表尚未补录，待 PM 补条目后删除本例外"
+    ),
+}
+
+# 同一接口的多个调用点：`submitWifi` 与 `submitCloudCreds` 都必须 POST /provision/wifi
+# （§12.6 允许只带云凭据、不带 ssid），这是设计，不是复制粘贴残留。
+DUP_ALLOWED: dict[tuple[str, str], str] = {
+    ("POST", "/provision/wifi"): "submitWifi（家庭 Wi-Fi）与 submitCloudCreds（仅云凭据）两个方法共用，见 §12.6",
+}
+
 
 def read(path: str) -> str:
     with open(path, encoding="utf-8") as f:
@@ -177,6 +193,7 @@ def main() -> int:
     props = parse_model_properties(models_src)
 
     problems: list[str] = []
+    notes: list[str] = []
 
     # 1) 接口集合与 HTTP 方法
     want = {(m, _norm_path(p)) for m, p in contract_eps}
@@ -184,7 +201,12 @@ def main() -> int:
     for m, p in sorted(want - have):
         problems.append(f"契约有、App 没调：{m} {p}")
     for m, p in sorted(have - want):
-        problems.append(f"App 调了 §12 之外的接口：{m} {p}")
+        why = EXTRA_ALLOWED.get((m, p))
+        # 登记过的例外只打印提示：越界本身是事实，但已有人担保过，不该每次都报红。
+        if why:
+            notes.append(f"已登记例外：{m} {p} — {why}")
+        else:
+            problems.append(f"App 调了 §12 之外的接口：{m} {p}")
     # 路径对但动词不对，单独报出来（比「多一条 + 少一条」好定位）
     for _, p in sorted(want - have):
         wrong = sorted(m for m, q in have if q == p)
@@ -193,7 +215,11 @@ def main() -> int:
 
     dup = [e for e in set(app_eps) if app_eps.count(e) > 1]
     for m, p in sorted(dup):
-        problems.append(f"同一接口被调用了多次（可能是复制粘贴残留）：{m} {p}")
+        why = DUP_ALLOWED.get((m, p))
+        if why:
+            notes.append(f"已登记的多调用点：{m} {p} 出现 {app_eps.count((m, p))} 次 — {why}")
+        else:
+            problems.append(f"同一接口被调用了多次（可能是复制粘贴残留）：{m} {p}")
 
     # 2) 请求字段名
     for sec in sorted(REQUEST_SECTIONS):
@@ -212,6 +238,8 @@ def main() -> int:
     resp_n = sum(len(v["response"]) for v in sections.values())
     print(f"契约字段：请求 {req_n} 个、响应 {resp_n} 个（嵌套字段由各自小节核对）")
     print(f"GatewayApi.kt 实际调用 {len(app_eps)} 处；请求字段 {len(put_keys)} 个；模型属性 {len(props)} 个")
+    for n in notes:
+        print("提示：" + n)
     if problems:
         print(f"!! 发现 {len(problems)} 处不一致：")
         for p in problems:

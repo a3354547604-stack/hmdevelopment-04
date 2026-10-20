@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 设备绑定（F6）：列表 + 绑定；失败时把服务器 message 与 data 明细完整显示出来 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/tvOfflineBanner"
+        style="@style/CardBody"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/err_bg"
+        android:padding="8dp"
+        android:text="@string/offline_banner"
+        android:visibility="gone" />
+
+    <TextView
+        style="@style/CardTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/title_devices" />
+
+    <TextView
+        android:id="@+id/tvEmpty"
+        style="@style/CardBody"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/devices_empty"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/listDevices"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical" />
+
+    <TextView
+        android:id="@+id/tvBindResult"
+        style="@style/CardBody"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <Button
+        android:id="@+id/btnBind"
+        style="@style/Field"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/action_bind_new" />
+
+    <Button
+        android:id="@+id/btnScanQr"
+        style="@style/Field"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/action_scan_qr" />
+
+    <Button
+        android:id="@+id/btnRefresh"
+        style="@style/Field"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/action_refresh_list" />
+</LinearLayout>

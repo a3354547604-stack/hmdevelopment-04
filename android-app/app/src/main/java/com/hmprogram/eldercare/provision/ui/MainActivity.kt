@@ -1,185 +1,148 @@
-
 package com.hmprogram.eldercare.provision.ui
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import android.widget.EditText
 import com.hmprogram.eldercare.provision.R
 import com.hmprogram.eldercare.provision.core.ApiResult
-import com.hmprogram.eldercare.provision.data.model.DeviceItem
+import com.hmprogram.eldercare.provision.core.Times
+import com.hmprogram.eldercare.provision.data.model.DeviceProps
+import com.hmprogram.eldercare.provision.data.model.DeviceStatusData
+import com.hmprogram.eldercare.provision.data.model.PropertyRows
 import com.hmprogram.eldercare.provision.databinding.ActivityMainBinding
-import com.hmprogram.eldercare.provision.databinding.ItemDeviceBinding
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
-import kotlinx.coroutines.launch
+import com.hmprogram.eldercare.provision.databinding.ItemPropertyBinding
+import com.hmprogram.eldercare.provision.databinding.ItemStatusNodeBinding
+import kotlinx.coroutines.delay
 
 /**
- * 主界面：我的设备 + 入口跳转。
+ * 首页（检查单 F7）：一台设备的 14 个属性 + 节点列表 + 在线状态，10 s 自动刷新 + 下拉刷新。
  *
- * 本页**只做配网相关的动作**（加设备 / 配网 / 开发者设置）。实时监测、告警、报表由鸿蒙 App 负责
- * （任务卡明确划界），所以这里连「实时状态」面板都不画——避免两个人做同一块界面。
+ * 为什么用「轮询」而不是长连接/推送：契约 §6 只有 REST，服务器到 App 没有下行通道；
+ * 10 s 是检查单给的口径，也和鸿蒙 App 的定时器保持一致（用户要求两个 App 行为一样）。
+ *
+ * 刷新策略：轮询是静默的（不闪界面、失败只留横幅），下拉是用户主动的（失败要 toast）。
+ * 两者共用 [refresh]，避免出现「下拉能刷新、轮询不刷新」这类双实现漂移。
  */
 class MainActivity : BaseActivity() {
 
     private lateinit var vb: ActivityMainBinding
-
-    /**
-     * 扫码添加设备。**扫码只是想省掉手输 SN**：扫到的文本可能是整条 URL、一段 JSON，
-     * 也可能就是裸 SN（谁生成的二维码就长什么样），三种都认，交给 [parseDeviceQr]。
-     * 扫完仍然要填绑定码——绑定码是凭据，出题/运维单给，不跟二维码走。
-     */
-    private val scanLauncher = registerForActivityResult(ScanContract()) { r ->
-        val text = r.contents
-        if (text.isNullOrBlank()) {
-            toast(getString(R.string.err_qr_cancel))
-            return@registerForActivityResult
-        }
-        val sn = parseDeviceQr(text)
-        if (sn.isBlank()) {
-            toast(getString(R.string.err_qr_unknown, text.take(40)))
-        } else {
-            showBindDialog(sn)
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         vb = ActivityMainBinding.inflate(layoutInflater)
         setContentView(vb.root)
 
-        vb.btnAddDevice.setOnClickListener {
-            startActivity(Intent(this, ProvisionActivity::class.java))
-        }
-        vb.btnRefresh.setOnClickListener { loadDevices() }
+        vb.ptr.onRefresh = { launchUi { refresh(pull = true) } }
+        vb.btnAlerts.setOnClickListener { startActivity(Intent(this, AlertListActivity::class.java)) }
+        vb.btnReport.setOnClickListener { startActivity(Intent(this, ReportsActivity::class.java)) }
+        vb.btnSettings.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java)) }
+        vb.btnDevices.setOnClickListener { startActivity(Intent(this, DevicesActivity::class.java)) }
+        vb.btnAddDevice.setOnClickListener { startActivity(Intent(this, ProvisionActivity::class.java)) }
         vb.btnScanQr.setOnClickListener {
-            // 权限没给或相机不可用时 ScanContract 会直接回来空内容，这里不拦，让用户看到提示后手输
-            scanLauncher.launch(
-                ScanOptions()
-                    .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                    .setPrompt(getString(R.string.title_scan_qr))
-                    .setBeepEnabled(false)
-                    .setOrientationLocked(false),
-            )
+            startActivity(Intent(this, DevicesActivity::class.java).putExtra(DevicesActivity.EXTRA_OPEN_BIND, true))
         }
-        vb.btnDevSettings.setOnClickListener {
-            startActivity(Intent(this, DevSettingsActivity::class.java))
-        }
+        vb.btnDevSettings.setOnClickListener { startActivity(Intent(this, DevSettingsActivity::class.java)) }
         vb.btnLogout.setOnClickListener { confirmLogout() }
     }
 
     override fun onStart() {
         super.onStart()
+        if (!requireLogin()) return
         vb.tvMockBanner.visibility = if (session.mockMode) View.VISIBLE else View.GONE
-        vb.tvAccount.text = if (session.loggedIn) {
-            getString(R.string.msg_account, session.username)
-        } else {
-            getString(R.string.msg_no_account)
+        vb.tvMockBanner.text = getString(R.string.using_mock)
+        vb.tvAccount.text = getString(R.string.msg_account, session.username)
+        // repeatOnLifecycle(STARTED) 会在 onStop 取消这个循环，回到前台重新起一个
+        launchUi {
+            while (true) {
+                refresh(pull = false)
+                delay(POLL_MS)
+            }
         }
-        loadDevices()
     }
 
-    private fun loadDevices() {
-        if (!session.loggedIn) {
-            // 没登录就不发请求：省得现场看到一个 401 弹框，用户还以为 App 坏了
-            renderDevices(emptyList())
-            return
-        }
-        scope().launch {
-            when (val r = container.serverApi.devices()) {
-                is ApiResult.Ok -> renderDevices(r.value.items)
+    private suspend fun refresh(pull: Boolean) {
+        val banner = vb.tvOfflineBanner
+        try {
+            if (!hasNetwork()) showBanner(banner, getString(R.string.offline_banner))
+
+            val devices = when (val r = container.serverApi.devices()) {
+                is ApiResult.Ok -> r.data.items
                 is ApiResult.Err -> {
-                    toast(r.display())
-                    renderDevices(emptyList())
+                    handleFailure(r, banner)
+                    return
                 }
             }
-        }
-    }
+            hideBanner(banner)
 
-    private fun renderDevices(items: List<DeviceItem>) {
-        vb.listDevices.removeAllViews()
-        vb.tvEmpty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
-        items.forEach { d ->
-            addRow<ItemDeviceBinding>(vb.listDevices, R.layout.item_device) { vb ->
-                vb.tvDeviceName.text = d.name.ifBlank { d.sn }
-                vb.tvDeviceMeta.text = buildString {
-                    append("SN ").append(d.sn)
-                    append("｜").append(if (d.online) "在线" else "离线")
-                    append("｜角色 ").append(d.role)
-                    if (d.unread_alerts > 0) append("｜未读告警 ").append(d.unread_alerts)
-                }
-                vb.btnProvision.setOnClickListener {
-                    // 顺手把 SN 带到配网页：第 ③ 步要填的就是它，现场少一次手输
-                    session.gatewaySn = d.sn
-                    startActivity(Intent(this, ProvisionActivity::class.java))
-                }
-                vb.btnCopySn.setOnClickListener { copy(d.sn) }
+            if (devices.isEmpty()) {
+                vb.tvDeviceName.text = getString(R.string.devices_empty)
+                vb.tvOnline.text = getString(R.string.label_no_device)
+                vb.listProps.removeAllViews()
+                vb.listNodes.removeAllViews()
+                vb.tvAlertsHint.text = ""
+                return
             }
-        }
-    }
 
-    /** 扫码结果弹框：预填 SN，绑定码必须手输（凭据不预填、不给默认值） */
-    private fun showBindDialog(scannedSn: String) {
-        val box = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(32, 16, 32, 0)
-        }
-        val etSn = EditText(this).apply {
-            hint = getString(R.string.hint_gateway_sn)
-            setText(scannedSn)
-        }
-        val etCode = EditText(this).apply {
-            hint = getString(R.string.hint_bind_code)
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER
-        }
-        val etName = EditText(this).apply { hint = getString(R.string.hint_device_name) }
-        box.addView(etSn)
-        box.addView(etCode)
-        box.addView(etName)
-
-        AlertDialog.Builder(this)
-            .setTitle(R.string.title_bind_device)
-            .setMessage(R.string.msg_bind_device_hint)
-            .setView(box)
-            .setPositiveButton(R.string.action_ok) { _, _ ->
-                val sn = etSn.text.toString().trim()
-                val code = etCode.text.toString().trim()
-                val name = etName.text.toString().trim().ifBlank { null }
-                if (sn.isBlank() || code.isBlank()) {
-                    toast(getString(R.string.err_sn_or_code_empty))
-                    return@setPositiveButton
-                }
-                bindDevice(sn, code, name)
+            // 记住上次选中的设备；换了账号/设备被解绑时回落到第一台，绝不显示「空白首页」
+            val device = devices.firstOrNull { it.id == session.deviceId } ?: devices.first()
+            session.deviceId = device.id
+            session.deviceName = device.name
+            vb.tvDeviceName.text = buildString {
+                append(device.name.ifBlank { device.sn })
+                append("（").append(device.sn).append("）")
             }
-            .setNegativeButton(R.string.action_cancel, null)
-            .show()
-    }
 
-    private fun bindDevice(sn: String, code: String, name: String?) {
-        if (!session.loggedIn) {
-            toast(getString(R.string.err_need_login))
-            startActivity(Intent(this, LoginActivity::class.java))
-            return
-        }
-        scope().launch {
-            when (val r = container.serverApi.bindDevice(sn, code, name)) {
+            when (val r = container.serverApi.deviceStatus(device.id)) {
                 is ApiResult.Ok -> {
-                    toast(getString(R.string.msg_bind_ok, r.value.sn, r.value.device_id))
-                    loadDevices()
+                    hideBanner(banner)
+                    renderStatus(r.data)
                 }
-                is ApiResult.Err -> {
-                    toast(r.display())
-                    // 凭证类错误（1101/1102）按契约 §9.2 直接跳登录，别让用户对着 401 反复点
-                    if (r.isCredentialProblem()) {
-                        session.clearLogin()
-                        startActivity(Intent(this@MainActivity, LoginActivity::class.java))
-                        finish()
-                    }
+                is ApiResult.Err -> handleFailure(r, banner)
+            }
+        } finally {
+            if (pull) vb.ptr.finishRefresh()
+        }
+    }
+
+    private fun renderStatus(s: DeviceStatusData) {
+        val now = System.currentTimeMillis()
+        vb.tvOnline.text = buildString {
+            append(if (s.online) getString(R.string.label_device_online) else getString(R.string.label_device_offline))
+            append("｜心跳 ").append(Times.ago(s.last_heartbeat, now))
+            val alarm = when (s.alarm_state) {
+                1 -> "预警"
+                2 -> "报警"
+                else -> "正常"
+            }
+            append("｜报警状态 ").append(alarm)
+            if (s.pending_alerts > 0) append("｜待处置 ").append(s.pending_alerts).append(" 条")
+        }
+        vb.tvAlertsHint.text = if (s.pending_alerts > 0) "有 ${s.pending_alerts} 条告警待处置" else ""
+
+        val props = DeviceProps.of(s.properties)
+        val rows = PropertyRows.build(props, now)
+        vb.listProps.removeAllViews()
+        rows.forEach { row ->
+            addRow<ItemPropertyBinding>(vb.listProps, R.layout.item_property) { b ->
+                b.tvPropLabel.text = row.label
+                b.tvPropValue.text = row.value
+            }
+        }
+
+        vb.listNodes.removeAllViews()
+        s.nodes.forEach { n ->
+            addRow<ItemStatusNodeBinding>(vb.listNodes, R.layout.item_status_node) { b ->
+                b.tvNodeTitle.text = buildString {
+                    append(n.sn)
+                    if (n.type.isNotBlank()) append(" · ").append(n.type)
+                    if (n.location.isNotBlank()) append(" · ").append(n.location)
+                }
+                b.tvNodeMeta.text = buildString {
+                    append(if (n.online) getString(R.string.label_device_online) else getString(R.string.label_device_offline))
+                    if (n.rssi != 0) append("｜RSSI ").append(n.rssi).append(" dBm")
+                    if (n.battery > 0) append("｜电量 ").append(n.battery).append("%")
+                    append("｜").append(Times.ago(n.last_seen, now))
                 }
             }
         }
@@ -191,17 +154,15 @@ class MainActivity : BaseActivity() {
             .setMessage(R.string.msg_logout_confirm)
             .setPositiveButton(R.string.action_ok) { _, _ ->
                 session.clearLogin()
-                startActivity(Intent(this, LoginActivity::class.java))
-                finish()
+                goLogin()
             }
             .setNegativeButton(R.string.action_cancel, null)
             .show()
     }
 
-    private fun copy(text: String) {
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("sn", text))
-        toast(getString(R.string.msg_copied))
+    companion object {
+        /** 检查单 F7 的口径：10 s 一次；不要更密——服务器是单实例 SQLite，密轮询没收益 */
+        const val POLL_MS = 10_000L
     }
 }
 
@@ -214,7 +175,7 @@ class MainActivity : BaseActivity() {
  *   ④ 裸 SN             M0-3F1A2B                            → M0-3F1A2B
  * 解析不出来就返回空串，由调用方提示「手动输入」，绝不做「猜一个 SN 出来」这种事。
  *
- * 写成顶层函数（而不是 MainActivity 的私有方法）是为了能在纯 JVM 单测里直接覆盖——
+ * 写成顶层函数（而不是 Activity 的私有方法）是为了能在纯 JVM 单测里直接覆盖——
  * 这段逻辑没有一行依赖 Android。
  */
 fun parseDeviceQr(raw: String): String {
