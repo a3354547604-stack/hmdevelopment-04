@@ -37,6 +37,30 @@ def read(p: pathlib.Path) -> str:
     return p.read_text(encoding="utf-8")
 
 
+def read_optional(p: pathlib.Path) -> "str | None":
+    """读得到就返回文本，读不到返回 None。
+
+    t155：这个探针是冻结门禁的 App 侧硬项，**不许因为某个页面被重做/改名就抛异常**——
+    FileNotFoundError 会让整个 App 侧假红（t154 发现：页面在 t150 界面重做中删除）。
+    找不到时由调用方显式跳过并打印原因。
+    """
+    try:
+        return p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:            # 权限/编码之外的读取失败也按「不可读 = 跳过」处理
+        return None
+
+
+SKIPS: list[str] = []
+
+
+def skip(msg: str) -> None:
+    """显式跳过：一定打印，且会出现在末尾结论行里（不是静默通过）。"""
+    SKIPS.append(msg)
+    print("  [SKIP] " + msg)
+
+
 def ok(msg: str) -> None:
     print("  [OK]   " + msg)
 
@@ -68,7 +92,12 @@ http = read(ETS / "service/HttpApiService.ets")
 port = read(ETS / "service/ApiPort.ets")
 types = read(ETS / "model/Types.ets")
 result = read(ETS / "model/Result.ets")
-settings_page = read(ETS / "pages/SettingsPage.ets")
+# t155：设置项在 t150 界面重做后由 pages/ProfilePage.ets 的「高级」区承载
+# （旧 pages/SettingsPage.ets 已删除；键定义在 common/SettingsSchema.ets）。
+# 这里只读页面本身（pushService 是页面级接入，配置文件里不会出现），
+# 页面不存在时走 skip() 分支，绝不抛异常、也不假装通过。
+SETTINGS_PAGE_REL = "pages/ProfilePage.ets"
+settings_page = read_optional(ETS / SETTINGS_PAGE_REL)
 
 # ---------------------------------------------------------------- A 接口清单
 print("A. §6.2 契约接口 ↔ HttpApiService 实现")
@@ -237,10 +266,14 @@ if "Idempotency-Key" in http + port:
     diff("代码出现 Idempotency-Key（核对表 §8 声明未实现）")
 else:
     ok("Idempotency-Key 确认未实现（与核对表 §8 一致）")
-if "pushService" in settings_page:
-    diff("设置页已接入 pushService（核对表 §8 声明未接入）")
+if settings_page is None:
+    skip("设置页 %s 不存在：跳过「pushService 接入」核对（原因：t150 界面重做后设置项迁到"
+         " ProfilePage 高级区；若页面再次改名，请更新 SETTINGS_PAGE_REL）。跳过 != 通过"
+         % SETTINGS_PAGE_REL)
+elif "pushService" in settings_page:
+    diff("设置页 %s 已接入 pushService（核对表 §8 声明未接入）" % SETTINGS_PAGE_REL)
 else:
-    ok("设置页未接入 pushService（与核对表 §8 的'留白'声明一致）")
+    ok("设置页 %s 未接入 pushService（与核对表 §8 的'留白'声明一致）" % SETTINGS_PAGE_REL)
 if "见核对表 D-03" in types:
     diff("Types.ets 把 gas_l1_to_l2_s 的编号引成 D-03，核对表里该问题是 D-01")
 else:
@@ -273,4 +306,7 @@ if problems:
     print("结论：%d 处差异（见 [DIFF]）—— 已在 docs/评审与验证/ 的复核报告里逐条判定"
           % len(problems))
     sys.exit(1)
-print("结论：静态交叉核对全部通过")
+if SKIPS:
+    print("结论：静态交叉核对全部通过（跳过 %d 项：%s）" % (len(SKIPS), "；".join(SKIPS)))
+else:
+    print("结论：静态交叉核对全部通过")
