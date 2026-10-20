@@ -198,6 +198,26 @@ export class UserCopy {
     ];
   }
 
+  /** 高级区：演示事件（答辩用，普通用户看不到）。 */
+  static readonly DEMO_TITLE: string = '演示事件（答辩用）';
+  static readonly DEMO_HINT: string = '点一下会真的产生一条提醒，用来演示报警链路';
+  static readonly DEMO_FIRED: string = '已触发，去看「提醒」页';
+
+  /** 三个演示事件的中文标签（顺序与 demoKey 对应）。 */
+  static demoList(): string[] {
+    return ['燃气', '跌倒', '紧急求助'];
+  }
+
+  /** 标签 → 契约 §6.12 的事件类型（只允许这三类）。 */
+  static demoKey(label: string): string {
+    if (label === '燃气') {
+      return 'gas';
+    } else if (label === '跌倒') {
+      return 'fall';
+    }
+    return 'sos';
+  }
+
   /** 提醒标题：说「发生了什么」，不说事件类型代码。 */
   static alertTitle(type: string): string {
     if (type === 'gas') {

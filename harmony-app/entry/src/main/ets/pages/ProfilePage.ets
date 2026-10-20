@@ -18,6 +18,7 @@ import { PrimaryButton } from '../components/CommonViews';
 import { SwitchRow } from '../components/SettingRows';
 import { SessionStore } from '../service/SessionStore';
 import { ServiceHub } from '../service/ServiceHub';
+import { ApiResult } from '../model/Result';
 
 @Component
 export struct ProfilePage {
@@ -27,6 +28,7 @@ export struct ProfilePage {
   @State serverInput: string = '';
   @State mockOn: boolean = true;
   @State savedTip: string = '';
+  @State demoBusy: boolean = false;
 
   aboutToAppear(): void {
     this.mockOn = RuntimeConfig.mockMode();
@@ -93,6 +95,60 @@ export struct ProfilePage {
       .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
       .width('100%')
       .padding({ left: 4, bottom: 2 })
+  }
+
+  /**
+   * 演示事件（D1/D4 用）：只在高级区出现。
+   *
+   * 为什么放在高级区而不是主界面：这三个按钮会**真的往库里写告警**，
+   * 普通用户误点会看到假报警；答辩时由讲解人连点版本号 5 次再点。
+   * 事件类型只允许 gas / fall / sos（契约 §6.12；其它类型服务器回 1206）。
+   */
+  private async fireDemo(kind: string): Promise<void> {
+    if (this.demoBusy) {
+      return;
+    }
+    this.demoBusy = true;
+    const r: ApiResult<Object> = await ServiceHub.api().demo(this.deviceId, kind);
+    this.demoBusy = false;
+    if (r.ok) {
+      this.savedTip = UserCopy.DEMO_FIRED;
+    } else {
+      this.savedTip = r.message;
+    }
+  }
+
+  @Builder
+  demoRow() {
+    Column({ space: 6 }) {
+      Text(UserCopy.DEMO_TITLE)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+      Text(UserCopy.DEMO_HINT)
+        .fontSize(AppTheme.FONT_CAPTION - 1)
+        .fontColor(AppTheme.COLOR_TEXT_HINT)
+        .width('100%')
+      Row({ space: 8 }) {
+        ForEach(UserCopy.demoList(), (item: string) => {
+          Text(item)
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(AppTheme.COLOR_PRIMARY)
+            .textAlign(TextAlign.Center)
+            .height(36)
+            .layoutWeight(1)
+            .borderRadius(AppTheme.BTN_RADIUS)
+            .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
+            .onClick(() => {
+              this.fireDemo(UserCopy.demoKey(item));
+            })
+        }, (item: string) => item)
+      }
+      .width('100%')
+      .opacity(this.demoBusy ? 0.5 : 1)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
   build() {
@@ -257,6 +313,7 @@ export struct ProfilePage {
                 checked: this.mockOn,
                 onToggle: (on: boolean) => this.cycleMock(on)
               })
+              this.demoRow()
               Row({ space: AppTheme.CARD_GAP }) {
                 PrimaryButton({
                   text: '保存',
