@@ -2,6 +2,7 @@
   "src": [
     "pages/Index",
     "pages/AlertDetailPage",
-    "pages/SmokePage"
+    "pages/SmokePage",
+    "pages/NetConfigPage"
   ]
 }

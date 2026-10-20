@@ -38,6 +38,14 @@ export const KEY_DEVICE_LOADED: string = 'deviceLoaded';
 export const KEY_AUTH_SEQ: string = 'authSeq';
 /** 是否"掉线"回到登录页（登录页据此给出原因，区别于用户主动退出）。 */
 export const KEY_AUTH_EXPIRED: string = 'authExpired';
+/**
+ * 网关本地 API 地址（配网页用，契约 §12.1）。
+ *
+ * 为什么要落盘：现场换板子/重刷固件后 SoftAP 网段可能变（CAL-12），
+ * 每次进配网页都从默认值开始会让用户反复改；记住上一次输入的地址，
+ * 错了也只改一次。注意它**不是**服务器地址（那是 AppConfig.SERVER_BASE_URL）。
+ */
+export const KEY_GATEWAY_URL: string = 'gatewayBaseUrl';
 
 export class SessionStore {
   /**
@@ -51,6 +59,7 @@ export class SessionStore {
     PersistentStorage.persistProp<number>(KEY_DEVICE_ID, 0);
     PersistentStorage.persistProp<string>(KEY_DEVICE_SN, '');
     PersistentStorage.persistProp<string>(KEY_DEVICE_NAME, '');
+    PersistentStorage.persistProp<string>(KEY_GATEWAY_URL, '');
     // 进前台序号与"已加载"标记是**进程内**状态，不落盘：重启 App 必须重新拉一次
     AppStorage.setOrCreate<number>(KEY_FOREGROUND_SEQ, 0);
     AppStorage.setOrCreate<boolean>(KEY_DEVICE_LOADED, false);
@@ -142,6 +151,16 @@ export class SessionStore {
 
   static deviceLoaded(): boolean {
     return AppStorage.get<boolean>(KEY_DEVICE_LOADED) ?? false;
+  }
+
+  // ---------------------------------------------------------------- 网关地址（配网）
+  /** 网关地址；从未设置过时返回空串，由调用方回落到 AppConfig 的默认值。 */
+  static gatewayUrl(): string {
+    return AppStorage.get<string>(KEY_GATEWAY_URL) ?? '';
+  }
+
+  static setGatewayUrl(url: string): void {
+    AppStorage.setOrCreate<string>(KEY_GATEWAY_URL, url.trim());
   }
 
   /** 当前进前台序号（页面 @StorageProp 监听用）。 */

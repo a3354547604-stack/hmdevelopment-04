@@ -17,6 +17,25 @@ export class AppConfig {
    */
   static readonly SERVER_BASE_URL: string = 'http://127.0.0.1:80/api';
 
+  /**
+   * 网关本地 API 根地址（契约 §12.1；配网页专用，**不是**服务器地址）。
+   *
+   * 默认值取 `192.168.2.1`：CAL-12 明确"实际网段由预编译驱动决定、以板子日志
+   * `[NET] SoftAP 已启动 … 地址 http://…/` 为准"，板上实测与官方样例是 192.168.2.1。
+   * 页面允许用户改，并会把这个地址**落盘**（SessionStore.KEY_GATEWAY_URL），
+   * 换板子只改一次。
+   */
+  static readonly GATEWAY_BASE_URL: string = 'http://192.168.2.1';
+
+  /**
+   * 网关请求超时（毫秒）。
+   *
+   * 取 3 s 与网关内置 H5 一致（契约 §12.11 第 5 条）：现场只有一台网关、
+   * 单请求串行处理，超时给太长（5 s）会让人以为页面卡死；给太短又会误判
+   * "连不上热点"（AP 刚起来时 WiFi 驱动还在初始化）。
+   */
+  static readonly GATEWAY_TIMEOUT_MS: number = 3000;
+
   /** 是否使用 mock 数据（true = 不发起任何网络请求）。 */
   static readonly MOCK_MODE: boolean = true;
 

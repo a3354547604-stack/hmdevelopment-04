@@ -194,6 +194,29 @@ export function codeText(code: number): string {
   if (code === 1502) {
     return '云端回调校验失败';
   }
+  // 16xx 是**网关本地配网 API** 的码（契约 §9.2 / §12.9），与云端 1xxx 同一张表。
+  // 配网页（§12）只连网关、不连云端，所以这段文案必须在同一处，避免两套翻译走偏。
+  if (code === 1600) {
+    return '网关不在配网模式';
+  }
+  if (code === 1601) {
+    return '配网窗口已超时';
+  }
+  if (code === 1602) {
+    return 'Wi-Fi 连接失败';
+  }
+  if (code === 1603) {
+    return '网关正忙（扫描或连接未结束）';
+  }
+  if (code === 1604) {
+    return '该节点不在最近一次扫描结果里';
+  }
+  if (code === 1605) {
+    return '汇聚离线，网关无法下发';
+  }
+  if (code === 1606) {
+    return '节点白名单已满（上限 8）';
+  }
   return `未知错误（code=${code}）`;
 }
 

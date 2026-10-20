@@ -16,6 +16,7 @@ import { SettingsViewModel, SettingsState } from '../viewmodel/SettingsViewModel
 import { AppTheme } from '../common/AppTheme';
 import { Formatter } from '../common/Formatter';
 import { SectionTitle, InfoRow, PrimaryButton, DividerLine } from '../components/CommonViews';
+import { ProvisionHub } from '../service/ProvisionHub';
 import { StepperRow, SwitchRow } from '../components/SettingRows';
 import { LoadingView, ErrorView } from '../components/StateViews';
 import { SessionStore } from '../service/SessionStore';
@@ -180,6 +181,32 @@ export struct SettingsPage {
             .padding(AppTheme.CARD_PADDING)
             .backgroundColor(AppTheme.COLOR_SURFACE)
             .borderRadius(AppTheme.CARD_RADIUS)
+
+            // 配网入口（F1–F4，t145）：与安卓侧同位置——进设置先看到「这台设备怎么连上的」。
+            // 为什么放在「当前设备」之后而不是塞进调试区：老人家属换路由器时会来设置里找，
+            // 埋进「演示与调试」只有我们自己找得到。
+            SectionTitle({ text: '设备配网', note: '换路由器 / 首次安装时用' })
+            Column({ space: 4 }) {
+              Text('连网关热点 → 选家里 Wi-Fi → 填密码 → 可选填华为云 IoTDA 凭据')
+                .fontSize(AppTheme.FONT_CAPTION)
+                .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+                .width('100%')
+              InfoRow({ label: '网关地址', value: ProvisionHub.configuredUrl() })
+              PrimaryButton({
+                text: '进入设备配网',
+                canTap: true,
+                loading: false,
+                plain: true,
+                onTap: () => {
+                  router.pushUrl({ url: 'pages/NetConfigPage' });
+                }
+              })
+            }
+            .width('100%')
+            .padding(AppTheme.CARD_PADDING)
+            .backgroundColor(AppTheme.COLOR_SURFACE)
+            .borderRadius(AppTheme.CARD_RADIUS)
+            .alignItems(HorizontalAlign.Start)
 
             SectionTitle({ text: '告警阈值', note: '改完自动下发，等待设备确认' })
             Column() {

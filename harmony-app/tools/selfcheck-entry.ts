@@ -25,6 +25,9 @@ import { SettingsItems, TrendCompare } from '../ets/model/Types';
 import { DEMO_EVENTS, SETTING_SPECS } from '../ets/common/SettingsSchema';
 import { HttpPort, HttpRequest, HttpResponse } from '../ets/service/HttpClient';
 import { Formatter } from '../ets/common/Formatter';
+import { GatewayApiService, normalizeGatewayUrl } from '../ets/service/GatewayApiService';
+import { MockGatewayTransport } from '../ets/service/MockGatewayTransport';
+import { ProvisionStatus, ScanCache, WifiResult, WifiSubmit } from '../ets/model/ProvisionTypes';
 
 /**
  * ArkUI 全局对象的 Node 替身。
@@ -46,6 +49,10 @@ class MemStore {
 
   has(key: string): boolean {
     return this.m.has(key);
+  }
+
+  keys(): string[] {
+    return Array.from(this.m.keys());
   }
 
   delete(key: string): void {
@@ -448,6 +455,136 @@ class Runner {
       ok: hadToken && e1101.code === 1101 && !SessionStore.hasToken(),
       code: e1101.code, httpStatus: e1101.httpStatus,
       detail: `前置 hasToken=${hadToken} → 之后 hasToken=${SessionStore.hasToken()}；'${e1101.message}'`
+    });
+
+    // ================= 配网五步（F1–F5）：真实 GatewayApiService + MockGatewayTransport =================
+    // 与上面 §6 用例同样的口径：只换传输层，URL 拼接/信封解析/16xx 文案都是真代码。
+    // 先放一个登录令牌：配网**不该**带 Authorization（§12.1：配网时还没有登录态）。
+    SessionStore.saveLogin('t145-must-not-leak', 9, 't145');
+
+    const gwT: MockGatewayTransport = new MockGatewayTransport();
+    const gw: GatewayApiService = new GatewayApiService('192.168.2.1', gwT);
+
+    const pst: ApiResult<ProvisionStatus> = await gw.status();
+    const pstD: ProvisionStatus | undefined = pst.data;
+    this.cases.push({
+      seq: 35, name: '§12 配网窗口状态解析 + 地址归一化', contract: '§12.3',
+      ok: pst.ok && pstD !== undefined && pstD.mode === 'ap' && pstD.remainS === 482
+        && pstD.ssid === 'ElderCare-1A2B' && pstD.hubOnline && pstD.slotsFree === 6
+        && gw.baseUrl() === 'http://192.168.2.1',
+      code: pst.code, httpStatus: pst.httpStatus,
+      detail: pstD === undefined ? pst.message
+        : `mode=${pstD.mode} remain=${pstD.remainS} ssid=${pstD.ssid} hub=${pstD.hubOnline} slots=${pstD.slotsFree} base=${gw.baseUrl()}`
+    });
+
+    // 配网请求必须是「本地地址 + 无鉴权头」：带 JWT 打网关说明写错了层（GatewayPort vs ApiPort）
+    const pstReq: HttpRequest | undefined = gwT.lastRequest;
+    const pstAuth: string = pstReq === undefined ? 'missing' : (pstReq.headers['Authorization'] ?? '');
+    this.cases.push({
+      seq: 36, name: '§12.1 配网不带 Authorization、打本地地址', contract: '§12.1',
+      ok: pstReq !== undefined && pstReq.url === 'http://192.168.2.1/api/provision/status'
+        && pstAuth.length === 0 && pstReq.method === 'GET',
+      code: pst.code, httpStatus: pst.httpStatus,
+      detail: pstReq === undefined ? '没有记录到请求'
+        : `url=${pstReq.url} method=${pstReq.method} auth='${pstAuth}'`
+    });
+
+    const scanOk: ApiResult<ScanCache> = await gw.scanCache();
+    const scanOkD: ScanCache | undefined = scanOk.data;
+    this.cases.push({
+      seq: 37, name: '§12 t143 /api/scan 缓存列表解析（code=200 也算成功）', contract: 't143',
+      ok: scanOk.ok && scanOkD !== undefined && scanOkD.cached && scanOkD.list.length === 3
+        && scanOkD.list[1].ssid === 'CMCC-老人房' && scanOkD.list[1].ch === 11 && scanOkD.limit === 20,
+      code: scanOk.code, httpStatus: scanOk.httpStatus,
+      detail: scanOkD === undefined ? scanOk.message
+        : `cached=${scanOkD.cached} n=${scanOkD.list.length} second=${scanOkD.list.length > 1 ? scanOkD.list[1].ssid : '-'}`
+    });
+
+    gwT.setFault('empty_scan');
+    const scanEmpty: ApiResult<ScanCache> = await gw.scanCache();
+    const scanEmptyD: ScanCache | undefined = scanEmpty.data;
+    this.cases.push({
+      seq: 38, name: '§12 /api/scan 空缓存 → 页面退回手输', contract: 't143',
+      ok: scanEmpty.ok && scanEmptyD !== undefined && !scanEmptyD.cached && scanEmptyD.list.length === 0,
+      code: scanEmpty.code, httpStatus: scanEmpty.httpStatus,
+      detail: scanEmptyD === undefined ? scanEmpty.message : `cached=${scanEmptyD.cached} n=${scanEmptyD.list.length}`
+    });
+    gwT.setFault('none');
+
+    const wReq: WifiSubmit = new WifiSubmit();
+    wReq.ssid = 'HOME-2.4G';
+    wReq.password = 'P@ssw0rd-145';
+    wReq.host = 'iotda.example.com';
+    wReq.deviceId = '68a1';
+    wReq.secret = 't145-secret-must-not-persist';
+    const wRes: ApiResult<WifiResult> = await gw.submitWifi(wReq);
+    const wD: WifiResult | undefined = wRes.data;
+    const wBody: string = gwT.lastRequest === undefined ? '' : gwT.lastRequest.body;
+    this.cases.push({
+      seq: 39, name: '§12.4 提交 Wi-Fi + 云三件套（请求体与响应）', contract: '§12.4',
+      ok: wRes.ok && wD !== undefined && wD.saved && wD.ssid === 'HOME-2.4G' && wD.settleS === 90
+        && wD.cloudSaved && wBody.indexOf('"secret"') >= 0 && wBody.indexOf('t145-secret-must-not-persist') >= 0,
+      code: wRes.code, httpStatus: wRes.httpStatus,
+      detail: wD === undefined ? wRes.message
+        : `saved=${wD.saved} ssid=${wD.ssid} settle=${wD.settleS} cloudSaved=${wD.cloudSaved} bodyHasSecret=${wBody.indexOf('"secret"') >= 0}`
+    });
+
+    // 密钥只出现在请求体里，App 侧不得落盘（SessionStore/AppStorage 里搜不到）
+    let secretStored: boolean = false;
+    for (const k of memStore.keys()) {
+      const v: Object | undefined = memStore.get<Object>(k);
+      const txt: string = v === undefined ? '' : JSON.stringify(v);
+      if (txt.indexOf('t145-secret-must-not-persist') >= 0 || k.toLowerCase().indexOf('secret') >= 0) {
+        secretStored = true;
+      }
+    }
+    this.cases.push({
+      seq: 40, name: 'F4 云密钥不落盘（只随请求体发送）', contract: 'F4',
+      ok: !secretStored, code: 0, httpStatus: 200,
+      detail: `AppStorage 键数=${memStore.keys().length} 命中密钥=${secretStored}`
+    });
+
+    // 1602 预检失败：文案要能说清"密码错"还是"没扫到"，且 reason 透出
+    gwT.setFault('auth');
+    const e1602: ApiResult<WifiResult> = await gw.submitWifi(wReq);
+    gwT.setFault('not_found');
+    const e1602b: ApiResult<WifiResult> = await gw.submitWifi(wReq);
+    gwT.setFault('busy');
+    const e1603: ApiResult<WifiResult> = await gw.submitWifi(wReq);
+    gwT.setFault('hub_offline');
+    const e1605: ApiResult<WifiResult> = await gw.submitWifi(wReq);
+    gwT.setFault('not_in_window');
+    const e1600: ApiResult<ProvisionStatus> = await gw.status();
+    gwT.setFault('none');
+
+    this.cases.push({
+      seq: 41, name: '§9.2 1602 预检失败（auth / not_found 分母文案）', contract: '§12.4',
+      ok: !e1602.ok && e1602.code === 1602 && e1602b.code === 1602
+        && e1602.message.length > 0 && e1602.message !== e1602b.message
+        && e1602.httpStatus === 400,
+      code: e1602.code, httpStatus: e1602.httpStatus,
+      detail: `auth='${e1602.message}' notfound='${e1602b.message}'`
+    });
+
+    this.cases.push({
+      seq: 42, name: '§9.2 1600/1603/1605 降级文案', contract: '§9.2',
+      ok: e1600.code === 1600 && e1603.code === 1603 && e1605.code === 1605
+        && e1600.message.length > 0 && e1603.message.length > 0 && e1605.message.length > 0,
+      code: e1600.code, httpStatus: e1600.httpStatus,
+      detail: `1600='${e1600.message}' 1603='${e1603.message}' 1605='${e1605.message}'`
+    });
+
+    // 地址容错：用户可能粘 "192.168.2.1/"、"http://x/api"、"https://y"、留空
+    const n1: string = normalizeGatewayUrl('192.168.2.1/');
+    const n2: string = normalizeGatewayUrl('http://192.168.4.1/api');
+    const n3: string = normalizeGatewayUrl('https://gw.local');
+    const n4: string = normalizeGatewayUrl('');
+    this.cases.push({
+      seq: 43, name: '配网地址容错（补 http:// / 去尾斜杠与 /api）', contract: 'CAL-12',
+      ok: n1 === 'http://192.168.2.1' && n2 === 'http://192.168.4.1' && n3 === 'https://gw.local'
+        && n4.length > 0,
+      code: 0, httpStatus: 200,
+      detail: `'192.168.2.1/'→${n1} 'http://192.168.4.1/api'→${n2} 'https://gw.local'→${n3} ''→${n4}`
     });
   }
 

@@ -152,6 +152,30 @@ export struct LoginPage {
         .alignItems(HorizontalAlign.Start)
       }
 
+      // 配网入口（t145）：新设备到家时用户还没账号/还没登录，配网必须先能进。
+      // 登录页是"未绑定"状态下唯一可达的页面，入口放这里才符合顺序（配网 → 绑定 → 登录）。
+      Column({ space: 6 }) {
+        Text('第一次使用？先给网关配好 Wi-Fi')
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .width('100%')
+        PrimaryButton({
+          text: '设备配网（连网关热点）',
+          canTap: true,
+          loading: false,
+          plain: true,
+          onTap: () => {
+            router.pushUrl({ url: 'pages/NetConfigPage' });
+          }
+        })
+      }
+      .width('100%')
+      .padding(AppTheme.CARD_PADDING)
+      .margin({ top: AppTheme.CARD_GAP })
+      .backgroundColor(AppTheme.COLOR_SURFACE)
+      .borderRadius(AppTheme.CARD_RADIUS)
+      .alignItems(HorizontalAlign.Start)
+
       Column({ space: 2 }) {
         InfoRow({ label: '接口规范', value: '接口契约 v1.1 §6' })
         InfoRow({ label: 'App 版本', value: '1.0.0（t6 骨架）' })
