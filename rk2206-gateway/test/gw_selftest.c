@@ -2293,6 +2293,55 @@ static void test_keys_cmd(void)
     t_ok(gw_keys_cmd(1, argv1, out, 8u) != 0, "输出缓冲太小 → 返回 -1");
 }
 
+/* ---- t141：心跳节拍与长按状态机（纯逻辑） ---- */
+static void test_tick_hb(void)
+{
+    uint32_t last = 0u;
+    uint32_t n = 0u;
+    uint32_t i;
+    gw_pairkey_state_t st;
+
+    t_start("t141 心跳节拍 / 长按状态机");
+
+    /* 首次必须立即返回 1：开机要能看到心跳，不用等满一个周期 */
+    t_ok(gw_hb_due(1000u, &last, GW_HB_PERIOD_MS) == 1, "首次调用立即给一条心跳");
+    t_ok(gw_hb_due(1500u, &last, GW_HB_PERIOD_MS) == 0, "同一周期内不重复打");
+    t_ok(gw_hb_due(10999u, &last, GW_HB_PERIOD_MS) == 0, "差 1 ms 还不到点");
+    t_ok(gw_hb_due(11000u, &last, GW_HB_PERIOD_MS) == 1, "满 10 s 打一条");
+
+    /* 计数递增：30 个周期 30 条 */
+    last = 0u;
+    n = 0u;
+    for (i = 0u; i <= 30u; i++) {
+        if (gw_hb_due(i * GW_HB_PERIOD_MS + 1u, &last, GW_HB_PERIOD_MS) != 0) {
+            n++;
+        }
+    }
+    t_ok(n == 31u, "31 个采样点覆盖 31 个周期 → 31 条（含首次）");
+
+    /* 计数器回绕也要按差值判，不能拿 now 直接比 */
+    last = 0xFFFFF000u;
+    t_ok(gw_hb_due(0x00001710u, &last, GW_HB_PERIOD_MS) == 1, "tick 计数回绕后仍按时打点");
+
+    /* 长按状态机：按住 3 s 后松手 → 触发一次，且只在松开沿触发一次 */
+    st.last = 1u;
+    st.pad = 0u;
+    st.press_start = 0u;
+    t_ok(gw_pairkey_step(&st, 1u, 1000u, GW_PAIRKEY_LONG_MS) == 0, "按下沿不触发");
+    t_ok(gw_pairkey_step(&st, 1u, 3999u, GW_PAIRKEY_LONG_MS) == 0, "按住 2.999 s 还不算长按");
+    t_ok(gw_pairkey_step(&st, 0u, 4000u, GW_PAIRKEY_LONG_MS) == 1, "3.000 s 松手触发一次");
+    t_ok(gw_pairkey_step(&st, 0u, 4100u, GW_PAIRKEY_LONG_MS) == 0, "松开保持期间不重复触发");
+
+    /* 短按不触发 */
+    st.last = 1u;
+    st.press_start = 0u;
+    (void)gw_pairkey_step(&st, 1u, 5000u, GW_PAIRKEY_LONG_MS);
+    t_ok(gw_pairkey_step(&st, 0u, 6200u, GW_PAIRKEY_LONG_MS) == 0, "短按 1.2 s 不触发");
+
+    /* 空指针不崩 */
+    t_ok(gw_pairkey_step(NULL, 1u, 0u, GW_PAIRKEY_LONG_MS) == 0, "st 为空时安全返回 0");
+}
+
 int main(void)
 {
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
@@ -2302,7 +2351,8 @@ int main(void)
     test_threshold_fail_paras();     /* t111 L-1 收口：失败响应 paras 必须是 {}、不谎报成功 */
     test_kvcfg();                    /* t34 凭证 KV：布局 + 落盘 + 串口命令 + 负向 */
     test_wifi_cmd();                 /* t136 串口 wifi：边界校验 + 口令不回显 + 失败可判读 */
-    test_key_events();               /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
+    test_key_events();            /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
+    test_tick_hb();               /* t141 心跳节拍 + 长按状态机（纯逻辑） */
     test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */
     test_hw_adc();                   /* t140 ADC 链路：幂等复用 / 已初始化 / 读失败留痕 */
     test_parser();

@@ -26,6 +26,39 @@ void gw_hw_key_tick(uint32_t now_ms);
 /* 1=按下（已去抖），0=松开。基线未就绪 / 通道异常时恒返回 0。 */
 int gw_hw_key_pressed(void);
 
+#ifndef GW_HW_HOST
+/* 采样状态快照（t141 心跳取证用，只读）：samp=基线窗口内已采点数、
+ * base_done=基线是否已采完（1/0）、last_mv=最近一次采样毫伏。
+ * 为什么要有它：现场「`keys` 报 0 点已采」时，光看日志分不清是
+ * 「tick 没跑」（心跳也停）还是「tick 在跑但采样函数早退」（心跳有、samp 恒 0）。 */
+void gw_hw_key_stat(uint32_t *samp, uint32_t *base_done, uint32_t *last_mv);
+#endif
+
+/* ------------------------------------------------------------------ *
+ * 心跳与长按状态机（t141，纯逻辑，主机可测）
+ *
+ * 为什么把这两段搬到这里：t141 之前它们分别写在 gw_main.c 的 tick 循环与
+ * 静态函数里，主机测不到；而「tick 到底跑没跑」正是最需要取证的东西。
+ * 搬到纯逻辑层后，主机用例能直接断言「节拍到点才返回 1」「长按只在松开沿触发一次」。
+ * ------------------------------------------------------------------ */
+#define GW_HB_PERIOD_MS 10000u   /* 心跳周期：10 s 一条，足够分清「卡住」与「慢」 */
+
+/* 心跳节拍：到点返回 1（并刷新 *last_ms），否则 0。
+ * *last_ms 初值传 0 表示「还没打过」——首次调用立即返回 1，
+ * 这样开机就能看到一条心跳，不必等满一个周期。 */
+int gw_hb_due(uint32_t now_ms, uint32_t *last_ms, uint32_t period_ms);
+
+/* 长按状态机（板载键与外接键共用这一个）：pressed 非 0 表示按下。
+ * 返回 1 = 这次「松开」构成一次长按，调用方自己去 toggle 配网窗口。
+ * 只判电平沿、不碰任何硬件，所以能主机测。 */
+typedef struct {
+    uint8_t  last;          /* 1=松开（初值），0=按下 */
+    uint8_t  pad;
+    uint32_t press_start;
+} gw_pairkey_state_t;
+
+int gw_pairkey_step(gw_pairkey_state_t *st, uint8_t pressed, uint32_t now_ms, uint32_t long_ms);
+
 /* 串口 `keys` 命令的输出：通道、基线、当前 raw/mV、判定结果与依据、分档表、
  * 全部可用通道扫描。返回写入字节数（不含 NUL）。 */
 int gw_hw_key_report(char *out, uint32_t cap);

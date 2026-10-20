@@ -168,6 +168,19 @@ int gw_hw_key_pressed(void)
     return gw_key_is_pressed(&s_key);
 }
 
+void gw_hw_key_stat(uint32_t *samp, uint32_t *base_done, uint32_t *last_mv)
+{
+    if (samp != NULL) {
+        *samp = s_samp_n;
+    }
+    if (base_done != NULL) {
+        *base_done = (uint32_t)s_base_done;
+    }
+    if (last_mv != NULL) {
+        *last_mv = s_key.last_mv;
+    }
+}
+
 int gw_hw_key_report(char *out, uint32_t cap)
 {
     uint32_t used = 0u;
@@ -288,6 +301,45 @@ int gw_hw_key_probe(unsigned channel, char *out, uint32_t cap)
  * 分派逻辑放在这里并接受「argc/argv 原样传进来」，就能在主机上用假 ops
  * 把三条路径（无参 / 合法数字 / 非法）都测到，不必上板。
  * ================================================================== */
+
+/* ---- 心跳与长按状态机（t141）：不碰 hardware，主机可测 ---- */
+
+int gw_hb_due(uint32_t now_ms, uint32_t *last_ms, uint32_t period_ms)
+{
+    if (last_ms == NULL) {
+        return 0;
+    }
+    if (*last_ms == 0u) {
+        /* 首次：立即给一条。置 1 而不是 0，避免 now_ms 恰好为 0 时永远"首次"。 */
+        *last_ms = (now_ms == 0u) ? 1u : now_ms;
+        return 1;
+    }
+    if ((uint32_t)(now_ms - *last_ms) >= period_ms) {
+        *last_ms = now_ms;
+        return 1;
+    }
+    return 0;
+}
+
+int gw_pairkey_step(gw_pairkey_state_t *st, uint8_t pressed, uint32_t now_ms, uint32_t long_ms)
+{
+    uint8_t lvl;
+    int fired = 0;
+
+    if (st == NULL) {
+        return 0;
+    }
+    lvl = (pressed != 0u) ? 0u : 1u;   /* 统一成 0=按下的表示，极性只在调用点翻译一次 */
+    if (lvl == 0u && st->last == 1u) {
+        st->press_start = now_ms;
+    } else if (lvl == 1u && st->last == 0u) {
+        if ((uint32_t)(now_ms - st->press_start) >= long_ms) {
+            fired = 1;
+        }
+    }
+    st->last = lvl;
+    return fired;
+}
 
 static const gw_keys_ops_t *s_keys_ops;
 

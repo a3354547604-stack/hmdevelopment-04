@@ -1217,39 +1217,65 @@ static void prov_http_task(void *arg)
  *
  * 电平约定：调用方统一传「1=按下」，内部换成与外接键相同的 0=按下 表示，
  * 这样两种键的极性问题只在调用点翻译一次。 */
-typedef struct {
-    uint8_t  last;          /* 1=松开（初值），0=按下 */
-    uint32_t press_start;
-} gw_pairkey_t;
-
-static gw_pairkey_t s_ext_key = { 1u, 0u };
+static gw_pairkey_state_t s_ext_key = { 1u, 0u, 0u };
 #if GW_KEY_ENABLE_BOARD
-static gw_pairkey_t s_board_key = { 1u, 0u };
+static gw_pairkey_state_t s_board_key = { 1u, 0u, 0u };
 #endif
 
-static void pair_key_step(gw_pairkey_t *st, uint8_t pressed, uint32_t now_ms)
+/* 长按判定本体在 gw_hw.c 的 gw_pairkey_step()（纯逻辑、主机可测，t141 搬过去）：
+ * 这里只剩一件事——把「这次松开构成一次长按」翻译成一次 gw_prov_toggle()。 */
+static void pair_key_step(gw_pairkey_state_t *st, uint8_t pressed, uint32_t now_ms)
 {
-    uint8_t lvl = (pressed != 0u) ? 0u : 1u;
-
-    if (lvl == 0u && st->last == 1u) {
-        st->press_start = now_ms;
-    } else if (lvl == 1u && st->last == 0u) {
-        if ((uint32_t)(now_ms - st->press_start) >= GW_PAIRKEY_LONG_MS) {
-            (void)gw_prov_toggle(&s_prov, now_ms);
-        }
+    if (gw_pairkey_step(st, pressed, now_ms, GW_PAIRKEY_LONG_MS) != 0) {
+        (void)gw_prov_toggle(&s_prov, now_ms);
     }
-    st->last = lvl;
 }
 
 static void tick_task(void *arg)
 {
     uint32_t now;
+    uint32_t hb_last_ms = 0u;   /* 0 = 还没打过，首次调用立即给一条 */
+    uint32_t hb_n = 0u;
+    uint8_t  entered = 0u;
 
     (void)arg;
     for (;;) {
         now = gw_now_ms();
+        if (entered == 0u) {
+            entered = 1u;
+            printf("[%s] tick #1 进入\n", GW_LOG_TAG);
+        }
         gw_alarm_tick(&s_alarm, now);
         gw_433_poll(&s_433, now);
+
+        /* ---- 按键采样放最前（t141）----
+         * 为什么：t141 现场 `keys` 报「正在采基线（0 点已采）」，而配网侧只有一条
+         * `[PROV] ⚠ 取不到 AP 口地址`、之后再无 tick 侧日志 —— 采样疑似被前面的
+         * 配网动作（SoftAP 起停 / STA 连接 / resync，都是可能阻塞的网络调用）饿死。
+         * 按键是「人手上的动作」，晚几百毫秒就丢一次长按；配网/告警晚一拍没有
+         * 等价代价。所以输入这一层必须排在所有可能阻塞的动作之前。
+         * 心跳紧挨着它打印，就是为了把「循环没转」与「采样函数自己早退」分开：
+         *   心跳停在第 N 条        → 循环卡住或任务已死；
+         *   心跳一直有、samp 恒 0  → 采样函数提前返回（看 gw_hw.c 的早退条件）。 */
+        if (gw_hb_due(now, &hb_last_ms, GW_HB_PERIOD_MS) != 0) {
+            uint32_t samp = 0u;
+            uint32_t base_done = 0u;
+            uint32_t last_mv = 0u;
+#if GW_KEY_ENABLE_BOARD
+            gw_hw_key_stat(&samp, &base_done, &last_mv);
+#endif
+            hb_n++;
+            printf("[%s] tick alive n=%u key(samp=%u base_done=%u last=%u mV)\n",
+                   GW_LOG_TAG, (unsigned)hb_n, (unsigned)samp, (unsigned)base_done,
+                   (unsigned)last_mv);
+        }
+#if GW_KEY_ENABLE_BOARD
+        gw_hw_key_tick(now);
+        pair_key_step(&s_board_key, (uint8_t)gw_hw_key_pressed(), now);
+#endif
+#if GW_KEY_ENABLE_EXTERNAL
+        pair_key_step(&s_ext_key, (uint8_t)((gw_plat_pairkey_level() == 0) ? 1u : 0u), now);
+#endif
 
         /* 配网状态机（契约 §12.2）：窗口/settle/扫描超时、STA 连接推进、指示灯节拍 */
         gw_prov_tick(&s_prov, now);
@@ -1275,16 +1301,6 @@ static void tick_task(void *arg)
             (void)gw_prov_resync_step(&s_prov);
         }
 
-        /* 配网键长按 3 s：未开窗则进入配网，已开窗则退出（§12.2 的"再长按一次退出"）。
-         * 板载键（t138）：ADC 电阻梯 K1–K4，任一键长按都算；采样与基线判定在 gw_hw.c，
-         * 这里只取「按下/松开」电平，与外接键走同一个 pair_key_step()。 */
-#if GW_KEY_ENABLE_BOARD
-        gw_hw_key_tick(now);
-        pair_key_step(&s_board_key, (uint8_t)gw_hw_key_pressed(), now);
-#endif
-#if GW_KEY_ENABLE_EXTERNAL
-        pair_key_step(&s_ext_key, (uint8_t)((gw_plat_pairkey_level() == 0) ? 1u : 0u), now);
-#endif
         {
             gw_event_t ev = gw_motion_tick(&s_motion, (uint64_t)now);
             if (ev != GW_EV_NONE) {
