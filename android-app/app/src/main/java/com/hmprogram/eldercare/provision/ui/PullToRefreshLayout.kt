@@ -30,7 +30,7 @@ class PullToRefreshLayout @JvmOverloads constructor(
     attrs: AttributeSet? = null,
 ) : FrameLayout(context, attrs) {
 
-    /** 拉到阈值松手时回调；调用方跑完必须调 [finishRefresh]，否则一直显示「刷新中」 */
+    /** 拉到足够距离松手时回调；调用方跑完必须调 [finishRefresh]，否则一直显示「刷新中」 */
     var onRefresh: (() -> Unit)? = null
 
     private var header: TextView? = null

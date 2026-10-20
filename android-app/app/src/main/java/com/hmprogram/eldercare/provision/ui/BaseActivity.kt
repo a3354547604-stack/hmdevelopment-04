@@ -118,6 +118,45 @@ abstract class BaseActivity : AppCompatActivity() {
     }
 
     /** 断网判断只用于「提前给一句人话」；真正的判据仍是请求失败（http=0） */
+    // ------------------------------------------------------------------
+    // 底部三个页签：首页 / 提醒 / 我的
+    // ------------------------------------------------------------------
+
+    /** 底部页签。只有三个——规范里明确不做更多入口，其余功能都挂在「我的」里。 */
+    enum class Tab(val label: String) {
+        HOME("首页"),
+        REMINDERS("提醒"),
+        PROFILE("我的"),
+    }
+
+    /**
+     * 给当前页面的底部页签接上点击并高亮自己这一项。
+     *
+     * 用 alpha 表示选中而不是换图：省一套 9-patch，老年用户对「亮/暗」的区分度也够。
+     * 页签之间用 [Intent.FLAG_ACTIVITY_CLEAR_TOP] + finish 切换，避免反复点导致任务栈越堆越深
+     * （三个页签是平级入口，不是层级导航）。
+     */
+    protected fun setupTabs(current: Tab) {
+        val targets = listOf(
+            Triple(R.id.btnTabHome, Tab.HOME, HomeActivity::class.java),
+            Triple(R.id.btnTabReminders, Tab.REMINDERS, RemindersActivity::class.java),
+            Triple(R.id.btnTabProfile, Tab.PROFILE, ProfileActivity::class.java),
+        )
+        for ((id, tab, target) in targets) {
+            val view = findViewById<View>(id) ?: continue
+            view.isSelected = tab == current
+            view.alpha = if (tab == current) 1f else 0.55f
+            view.setOnClickListener {
+                if (tab == current) return@setOnClickListener
+                startActivity(
+                    Intent(this, target)
+                        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                )
+                finish()
+            }
+        }
+    }
+
     protected fun hasNetwork(): Boolean {
         val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
         val nw = cm.activeNetwork ?: return false

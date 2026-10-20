@@ -27,7 +27,7 @@ data class SettingSpec(
     val step: Double,
     val decimals: Int,
     val defaultValue: Double,
-    /** 给现场看的一句话说明（为什么要有这个阈值） */
+    /** 给现场看的一句话说明（为什么要设这个门槛） */
     val hint: String = "",
 )
 
@@ -40,14 +40,14 @@ object SettingsSchema {
         SettingSpec("away_after_open_s", "离家判定", "秒", 60.0, 3600.0, 60.0, 0, 600.0, "开门后多久无人活动算离家"),
         SettingSpec("door_open_alarm_s", "开门报警", "秒", 30.0, 1800.0, 30.0, 0, 180.0, "门持续打开多久报警（door_left）"),
         SettingSpec("report_interval_s", "上报周期", "秒", 10.0, 600.0, 10.0, 0, 60.0, "属性上报间隔；调小更实时、更费流量"),
-        SettingSpec("node_offline_timeout_s", "节点离线超时", "秒", 3.0, 60.0, 1.0, 0, 9.0, "子节点多久没心跳判离线"),
+        SettingSpec("node_offline_timeout_s", "房间设备失联超时", "秒", 3.0, 60.0, 1.0, 0, 9.0, "房间设备多久没回话算失联"),
         SettingSpec("gateway_offline_timeout_s", "网关离线超时", "秒", 60.0, 600.0, 30.0, 0, 180.0, "网关多久没心跳判 device_offline"),
-        SettingSpec("gas_t1_mv", "燃气一级阈值", "mV", 0.0, 3300.0, 100.0, 0, 1500.0, "MQ-2 输出超过它算「浓度偏高」"),
-        SettingSpec("gas_t2_mv", "燃气二级阈值", "mV", 0.0, 3300.0, 100.0, 0, 2500.0, "超过它算「泄漏报警」，必须大于一级"),
-        SettingSpec("gas_l1_hold_s", "一级持续时间", "秒", 1.0, 120.0, 1.0, 0, 10.0, "持续超一级阈值多久才报"),
-        SettingSpec("gas_l2_hold_s", "二级持续时间", "秒", 1.0, 120.0, 1.0, 0, 6.0, "持续超二级阈值多久才报"),
-        SettingSpec("gas_recover_mv", "燃气恢复阈值", "mV", 0.0, 1000.0, 50.0, 0, 200.0, "低于它并保持一段时间才解除"),
-        SettingSpec("gas_recover_hold_s", "恢复保持", "秒", 5.0, 300.0, 5.0, 0, 30.0, "低于恢复阈值并保持多久才解除"),
+        SettingSpec("gas_t1_mv", "燃气提示门槛", "mV", 0.0, 3300.0, 100.0, 0, 1500.0, "燃气读数超过它算「浓度偏高」"),
+        SettingSpec("gas_t2_mv", "燃气报警门槛", "mV", 0.0, 3300.0, 100.0, 0, 2500.0, "超过它算「泄漏报警」，必须大于提示门槛"),
+        SettingSpec("gas_l1_hold_s", "一级持续时间", "秒", 1.0, 120.0, 1.0, 0, 10.0, "持续超过提示门槛多久才提醒"),
+        SettingSpec("gas_l2_hold_s", "二级持续时间", "秒", 1.0, 120.0, 1.0, 0, 6.0, "持续超过报警门槛多久才提醒"),
+        SettingSpec("gas_recover_mv", "燃气恢复门槛", "mV", 0.0, 1000.0, 50.0, 0, 200.0, "低于它并保持一段时间才算恢复"),
+        SettingSpec("gas_recover_hold_s", "恢复保持", "秒", 5.0, 300.0, 5.0, 0, 30.0, "低于恢复门槛并保持多久才算恢复"),
         SettingSpec("alert_suppress_s", "告警抑制", "秒", 10.0, 600.0, 10.0, 0, 60.0, "同类告警多久内不重复上报"),
         SettingSpec("fall_suppress_s", "跌倒抑制", "秒", 10.0, 120.0, 10.0, 0, 30.0, "跌倒告警去抖窗口"),
         SettingSpec("env_hold_min", "温湿度持续", "分钟", 5.0, 120.0, 5.0, 0, 30.0, "温湿度越界持续多久才报"),
@@ -59,7 +59,7 @@ object SettingsSchema {
 
     /**
      * 第 21 个键：`alert_repush_s`。值是**数组**（契约示例 `[0,60,300]`），
-     * 不是标量阈值，所以不在 [SPECS] 里让用户随便改——设置页只读展示，避免造出
+     * 不是单个数值，所以不在 [SPECS] 里让用户随便改——设置页只读展示，避免造出
      * 「递增但乱序」的推送序列把服务器搞成 5 分钟一推。
      */
     const val ARRAY_KEY = "alert_repush_s"

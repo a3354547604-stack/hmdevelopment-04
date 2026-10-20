@@ -13,9 +13,9 @@ android {
         // 现场演示机普遍是 10+，但保留 26 可以直接装在旧备用机上。
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
+        versionCode = 3
         // 0.2.0：补齐 F4–F13（登录/绑定/首页/告警/报表/设置/Mock 自检），与鸿蒙 App 功能对齐
-        versionName = "0.2.0"
+        versionName = "0.3.0"
 
         // 服务器地址默认指向演示笔记本上的 Nginx（契约 §6.1：http://{host}/api）。
         // 运行时可在 App「开发者设置」里改，不需要重新打包——现场 IP 一定会变。

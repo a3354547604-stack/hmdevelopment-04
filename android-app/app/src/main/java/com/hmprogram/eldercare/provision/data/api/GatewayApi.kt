@@ -12,13 +12,14 @@ import com.hmprogram.eldercare.provision.data.net.mapTo
 import org.json.JSONObject
 
 /**
- * 契约 §12 网关 SoftAP 本地 API（5 个 + t143 的 `/api/scan`）。全部走 [HttpClient] 的
- * `gatewayLocal=true` 分支，即固定域 `http://192.168.4.1/api`。没有 JWT——网关也不知道账号是谁（§12.1）。
+ * 契约 §12 小盒子热点里的本地接口（5 个 + t143 的 Wi-Fi 列表）。全部走 [HttpClient] 的
+ * `gatewayLocal=true` 分支，即固定地址（见 [com.hmprogram.eldercare.provision.core.AppConfig.GATEWAY_BASE]）。
+ * 这里不带登录令牌——小盒子也不知道账号是谁（§12.1）。
  */
 class GatewayApi(private val http: HttpClient) {
 
     /**
-     * F2：读网关缓存里的 Wi-Fi 扫描列表（`GET /api/scan`，t143 固件）。
+     * F2：读小盒子缓存里的 Wi-Fi 列表（t143 固件实现）。
      *
      * **只读缓存**：不看配网窗口、不触发新扫描，所以窗口外打开页面也能立刻拿到
      * 「上次扫到过什么」。列表为空是正常情况（刚上电/还没扫过）→ 界面退回手输 SSID。
@@ -51,7 +52,7 @@ class GatewayApi(private val http: HttpClient) {
     ).mapTo()
 
     /**
-     * F4：**只**提交华为云 IoTDA 三件套（不动家庭 Wi-Fi）。
+     * F4：**只**提交云端接入三件套（不动家庭 Wi-Fi）。
      *
      * 为什么复用 `/provision/wifi` 而不是另开接口：网关固件把「云凭据」与「Wi-Fi 凭据」
      * 做在同一条写入路径上（同一块 KV、与串口 `gwkv set` 完全一致），
@@ -72,7 +73,7 @@ class GatewayApi(private val http: HttpClient) {
     ).mapTo()
 
     /**
-     * 华为云 IoTDA 三件套（接入地址 / 设备 ID / 密钥）。
+     * 云端接入三件套（接入地址 / 设备标识 / 密钥）。
      *
      * 三条本地校验与网关固件的判定顺序一致（`bad_host`/`bad_device`/`bad_secret`），
      * 先在本机挡一次，省一个「点了等 3 秒再报错」的往返。**密钥不落盘、不进日志。**
@@ -98,13 +99,13 @@ class GatewayApi(private val http: HttpClient) {
             host.isBlank() -> "接入地址不能为空（形如 xxx.iotda-device.cn-north-4.myhuaweicloud.com）"
             !host.contains(".") || host.contains(" ") -> "接入地址格式不对：$host"
             port !in 1..65535 -> "端口必须在 1–65535"
-            deviceId.isBlank() -> "设备 ID 不能为空（IoTDA 设备详情页的设备 ID）"
+            deviceId.isBlank() -> "设备标识不能为空（云端设备详情页里的那一串）"
             secret.isBlank() -> "设备密钥不能为空"
             else -> null
         }
     }
 
-    /** §12.7 触发汇聚扫描星闪节点（异步受理，结果靠 [nodes] 轮询） */
+    /** §12.7 触发扫描房间设备（异步受理，结果靠 [nodes] 轮询） */
     suspend fun pairScan(durationS: Int = 15, includeBound: Boolean = true): ApiResult<PairScanData> =
         http.post(
             "/pair/scan",

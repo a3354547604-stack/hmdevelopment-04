@@ -1,12 +1,26 @@
 # Android App（eldercare-provision / eldercare-android）
 
-安卓侧与鸿蒙 App **功能对齐**的完整客户端：登录/注册 → 设备绑定 → 首页实时（14 属性 + 节点 + 10 s 轮询
-+ 下拉刷新）→ 告警列表/详情/处置 → 周报月报（含今日/昨日对比）→ 设置（21 键阈值、静音、上报周期、
-演示事件）→ 配网（F1–F4：连热点 → 选 SSID（网关 `/api/scan` 缓存优先 + 手输兜底）→ 提交 Wi-Fi →
-IoTDA 三件套）→ Mock 自检（无服务器可演示全流程）。
+安卓侧与鸿蒙 App **功能对齐**的完整客户端。功能口径唯一来源：`docs/技术/App功能对齐清单.md` 的
+F1–F13，逐条证据见 [`docs/F4-F13-交付说明.md`](docs/F4-F13-交付说明.md)；**界面上给普通人看的那一层**
+按 `docs/技术/App界面与文案规范.md` 重做，逐条证据见
+[`docs/界面重做交付说明.md`](docs/界面重做交付说明.md)。
 
-口径唯一来源：`docs/技术/App功能对齐清单.md` 的 F1–F13。逐条验收证据见
-[`docs/F4-F13-交付说明.md`](docs/F4-F13-交付说明.md)。
+**两层是同一份代码**：数据能力（14 属性、21 键设置、告警、报表、配网）全部保留，只是不再把接口名、
+房间编号、毫伏读数、阈值这些机器话摆到界面上——页面只调 `ui/LifeText` 把事实翻成「爸妈今天一切都好」
+「厨房 · 燃气偏高」「有人摔倒」这类生活话，技术动作收进「我的 → 连点版本号 5 次 → 高级」里。
+
+用户视角的主路径：
+
+```
+登录（手机号 + 密码） → 首页大字状态卡 + 厨房/卧室/门厅三张房间卡 + 今天小结（10 s 自动刷新、下拉刷新）
+                      → 提醒（全部/未处理）→ 提醒详情（我知道了 / 已处理 + 一句备注）
+                      → 我的（家庭成员与绑定设备、手机提醒开关、修改密码、退出登录）
+                      → 添加新设备（①连小盒子 Wi-Fi ②选家里 Wi-Fi ③正在连接 ④结果/绑定）
+                      → 高级（云端地址、演示事件 gas/fall/sos、演示模式、维护参数、接口自检）
+```
+
+> 演示账号（公网服务器已建好）：手机号 `13800000000`，密码 `demo-pass-123`。服务器把手机号当
+> `username` 用，**没有改服务器**；演示模式（Mock）里这个账号同样能登录，不需要服务器。
 
 > **定位（PM 裁定 F-02，见契约 §12.11 / §13.2）**：P0 开场演示的**主路径是手机浏览器打开网关内置
 > H5 页面**（`http://192.168.4.1/`，实现归 `rk2206-gateway/`），不需要装任何 App。本 App 是
@@ -14,9 +28,9 @@ IoTDA 三件套）→ Mock 自检（无服务器可演示全流程）。
 > 明确把「绑定账号」交给 App/脚本），不自己发明路径或字段名。现场它不可用也不影响主线。
 
 **交付状态（本机实测，非纸面）**：本机 WSL 命令行工具链**真编译出了 debug APK** ——
-`android-app/dist/eldercare-provision-0.2.0-debug.apk`，7 276 381 字节（6.94 MB），
-sha256 `5d92f775c3b829223e2f398568b1af17b47b4c2dfad965753d9bffaddc2ee988`（**当次**指纹，zip 时间戳
-不可复现，按 AGENTS.md 口径以「体积 + 提交号」为主）；**83 个单测全绿**（`testDebugUnitTest`，
+`android-app/dist/eldercare-0.3.0-debug.apk`，7 248 902 字节（6.91 MB），
+sha256 `c7af9119288fff2eb0ff31bfe8b8abab741c96f4de3e05140a99c325a3704869`（**当次**指纹，zip 时间戳
+不可复现，按 AGENTS.md 口径以「体积 + 提交号」为主）；**88 个单测全绿**（`testDebugUnitTest`，
 BUILD SUCCESSFUL）。真机安装与真硬件联调仍需用户执行，见 §8。
 
 ---
@@ -73,12 +87,12 @@ G=$HOME/toolchains/gradle-8.7/bin/gradle
 
 # ② 单元测试：URL 拼接 / 错误码 + data 明细 / compare 解析 / 21 键 / 14 属性 / Mock 全流程（纯 JVM）
 $G -p android-app testDebugUnitTest --console=plain
-#   实测输出：BUILD SUCCESSFUL，83 个用例 0 失败（8 个测试类）
+#   实测输出：BUILD SUCCESSFUL，88 个用例 0 失败（9 个测试类）
 
 # ③ 出 debug APK
 $G -p android-app assembleDebug --console=plain
 # 产物：android-app/app/build/outputs/apk/debug/app-debug.apk
-# 本机已复制一份到 android-app/dist/eldercare-provision-0.2.0-debug.apk
+# 本机已复制一份到 android-app/dist/eldercare-0.3.0-debug.apk（7 248 902 B）
 ```
 
 **在 WSL 里编（本机就是这种）/mnt/c 上必须加一行**：DrvFs 不支持 AGP 8.4 对 jniLibs 输出目录的
@@ -182,9 +196,12 @@ debug 包的 `applicationId` 带 `.debug` 后缀（`com.hmprogram.eldercare.prov
 
 ## 5. MOCK 模式（没有硬件也能演示）
 
-开发者设置里打开「MOCK 模式」，App 换掉 `Transport` 实现：
+普通用户界面里没有 MOCK 开关：**首页 → 我的 → 连点「版本」那行 5 次 → 高级 → 打开「演示模式」**。
+App 换掉 `Transport` 实现，其余链路一行不改：
 
-* 服务器侧：固定口令 `Passw0rd`，绑定码 `482913`；
+* 登录页直接用演示账号 `13800000000` / `demo-pass-123`（Mock 里也预置了这个账号，不需要服务器）；
+* 手机号登录：登录页校验 11 位数字，非 11 位只提示「请输入 11 位手机号」，不去问服务器；
+* 服务器侧：固定口令 `Passw0rd`（演示账号除外），绑定码 `482913`；
 * 网关侧：`mode=ap`、SSID `ElderCare-1A2B`、三个节点（其中一个是老固件 `sn="?"`）；
 * 扫描结果按轮询次数推进，**不用真等 15 s**，现场演示节奏可控；
 * SSID 里带 `5G` 会稳定复现 `1602`（最容易踩的错）；扫描还没出结果就点「绑定」复现 `1604`；
@@ -197,7 +214,7 @@ debug 包的 `applicationId` 带 `.debug` 后缀（`com.hmprogram.eldercare.prov
 1003 + `key`）、下发（`source` 由 `local` 变 `device`）、演示事件（gas/fall/sos 会真的新增一条待处置告警）、
 告警列表（3 条种子：跌倒待处置/燃气已处置/无活动待处置）、告警详情与处置、三张报表（`trend` 的
 `days<=7` 有昨日基线、`days>=14` **没有** yesterday —— 用来验证 F10 的「无基线不崩」）。
-无服务器自检的两个入口：**设置 → 接口自检**（页面逐项 ✓/✗）与 `MockFlowTest`（15 个用例，`./gradlew test`）。
+无服务器自检的两个入口：**高级 → 接口自检**（页面逐项 ✓/✗）与 `MockFlowTest`（15 个用例，`testDebugUnitTest`）。
 
 MOCK 走的是**同一套信封解析与错误码路径**，不是假的返回值，所以它能证明解析代码是对的，
 但不能证明网关固件是对的——上真机时务必再跑一遍 B2 全流程。
@@ -228,32 +245,41 @@ app/src/main/java/com/hmprogram/eldercare/provision/
 ├── data/model/     与契约字段逐个对齐的 data class；DeviceProps/PropertyRows（14 属性）；
 │                   ServerModels（告警/报表/设置）+ CompareView（compare 渲染规则）
 ├── data/net/       HttpClient（信封解析收口）、OkHttpTransport（Bearer 注入）、MockTransport（有状态假后端）
-├── ui/             BaseActivity（登录守卫/离线提示/错误兜底）、PullToRefreshLayout（自绘下拉刷新）
-│                   MainActivity(首页)、LoginActivity、DevicesActivity、AlertListActivity、AlertDetailActivity、
-│                   ReportsActivity、SettingsActivity、SmokeActivity、ProvisionActivity、WifiScanActivity、
-│                   PairNodesActivity、DevSettingsActivity + ProvisionViewModel（纯 JVM 可测）+ parseDeviceQr
+├── ui/             BaseActivity（登录守卫/离线横幅/错误兜底/底部三页签）、PullToRefreshLayout（自绘下拉刷新）
+│                   LifeText（技术词 → 生活话的唯一翻译层，纯函数可测）
+│                   用户页：LoginActivity、RegisterActivity、HomeActivity、RemindersActivity、
+│                           ReminderDetailActivity、ProfileActivity、ReportActivity、AddDeviceActivity、
+│                           ChangePasswordActivity
+│                   高级/维护页：AdvancedActivity（云端地址、演示事件、演示模式）、SettingsActivity（21 键与下发）、
+│                           SmokeActivity（接口自检）+ ProvisionViewModel（配网状态机，纯 JVM 可测）
 └── wifi/           WifiHelper：扫热点、连 SoftAP（WifiNetworkSpecifier）、权限分支
 app/src/test/       纯 JVM 单测：URL 拼接、错误码映射 + data 明细、compare 解析、21 键、14 属性、
-                    Mock 全流程、配网流程、信封解析、SN 规则（83 用例 / 8 个类）
+                    生活语言口径、Mock 全流程、配网流程、信封解析、设备编号解析（88 用例 / 9 个类）
 ```
 
-设计上刻意做的两件事：
+设计上刻意做的几件事：
 
 1. **Mock 是换 `Transport` 而不是在业务里写 `if (mock)`** —— mock 与真机走完全相同的
    「URL → 信封 → 错误码 → 模型」链路，写错字段名两边一起错，不会出现「mock 绿、真机全红」。
 2. **ViewModel 不依赖任何 Android 类** —— 靠 `Session` 接口与 `HttpClient` 注入，
-   配网流程能在 `./gradlew test` 里几秒回归一遍。
+   配网流程能在 `testDebugUnitTest` 里几秒回归一遍。
 3. **页面只做「接口 → 文本」的翻译** —— 判定规则（compare 文案、属性缺失、越界提示、错误码人话）
    全在 `core/`、`data/model/` 的纯函数里，单测直接断言，不靠截图。
 4. **401/1101 只有一个出口** —— `BaseActivity.handleFailure()`：清令牌 → 回登录页；
    离线（`code=-1`）只显示顶部离线横幅，不清令牌、不白屏。
+5. **技术词只有一个出口** —— 界面上所有生活话都来自 `ui/LifeText`，页面里不写死「节点」「阈值」
+   「MQTT」这类词；服务器地址、演示事件、Mock 开关、维护参数统统收进「高级」，普通用户看不到。
+   用一条 grep 就能守住：`src/main` 里除 `core/AppConfig.kt`、`core/ApiPaths.kt` 与注释外不再出现
+   `http://`、`/api/`、`payload`、`阈值`、`节点`、`MQTT`、`IoTDA`（证据见交付说明 §5）。
 
 ---
 
 ## 8. 待用户实测（需要真机 + 真硬件）
 
 * [ ] 真机安装与启动（`adb install`）
-* [ ] 扫码添加设备（需要一张印了 SN 的二维码；`parseDeviceQr` 兼容 URL/JSON/裸 SN 三种）
+* [ ] 手机号登录：真服务器上 `13800000000` / `demo-pass-123` 能进首页；输 10 位只提示「请输入 11 位手机号」
+* [ ] 注册新手机号 → 注册后**直接进首页**（不再回登录页手动登录一次）
+* [ ] 「我的 → 连点版本 5 次 → 高级」入口在真机上能进；普通路径上找不到服务器地址/演示事件
 * [ ] `WifiNetworkSpecifier` 自动连 `ElderCare-XXXX`（Android 10+ 会弹系统确认框）
 * [ ] Android 13+ 的 `NEARBY_WIFI_DEVICES` 与 Android 12- 的 `ACCESS_FINE_LOCATION` 授权后能扫到 SSID
 * [ ] 与真实网关跑通契约 §13.2 的 B2 全流程（含 `1602` / `1604` 两类错误现场复现）

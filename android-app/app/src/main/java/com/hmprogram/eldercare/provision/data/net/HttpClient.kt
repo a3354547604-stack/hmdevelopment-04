@@ -1,6 +1,7 @@
 package com.hmprogram.eldercare.provision.data.net
 
 import com.hmprogram.eldercare.provision.core.ApiResult
+import com.hmprogram.eldercare.provision.core.AppConfig
 import com.hmprogram.eldercare.provision.core.Envelope
 
 /**
@@ -44,6 +45,6 @@ class HttpClient(
 
     companion object {
         /** 契约 §12.1：固定的网关 SoftAP 本地 API 域 */
-        const val GATEWAY_BASE = "http://192.168.4.1/api"
+        const val GATEWAY_BASE = AppConfig.GATEWAY_BASE
     }
 }

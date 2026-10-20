@@ -1,6 +1,7 @@
 package com.hmprogram.eldercare.provision.data.net
 
 import com.google.gson.Gson
+import com.hmprogram.eldercare.provision.core.AppConfig
 import com.hmprogram.eldercare.provision.core.ContractErrors
 import com.hmprogram.eldercare.provision.core.SettingsSchema
 import org.json.JSONArray
@@ -20,7 +21,7 @@ class FakeClock(var nowMs: Long = System.currentTimeMillis()) {
  *
  * 为什么要做成「假后端」而不是在 ViewModel 里返回假对象：
  *   1) 演示时 mock 走的是完整链路（信封解析、错误码、字段名），真机换回真实后端只需关掉开关；
- *   2) 单元测试能对着它断言 URL 与请求体（例如必须 CALL `/api/pair/bind` 而不是 `/api/pair/add`）；
+ *   2) 单元测试能对着它断言 URL 与请求体（例如绑定房间设备必须走 bind 而不是 add）；
  *   3) 契约字段名写错时，mock 与真实后端会一起暴露，不会出现「mock 能过我、真机全错」的假绿。
  *
  * 假后端是**有状态**的：告警处置、设置下发、绑定设备都会改内部状态，所以「处置完回列表」这类
@@ -144,20 +145,22 @@ private class FakeServerBackend(private val clock: FakeClock) {
     private val dispositions = mutableMapOf<Long, MutableList<JSONObject>>()
 
     /** 注册过的账号 → 口令（mock 内存态）：让「注册→登录」在单测/演示里真的能走通 */
-    private val registeredUsers = mutableMapOf<String, String>()
+    private val registeredUsers = mutableMapOf(AppConfig.DEMO_USER to AppConfig.DEMO_PASSWORD)
+
+    // 演示账号预置在 mock 里：公网服务器已建好同一组，两份数据保持一致，演示不会「换台机器就登不上」
 
     fun handle(method: String, path: String, query: Map<String, String>, body: JSONObject?): TransportResponse = when {
-        path.endsWith("/api/auth/register") -> register(body)
-        path.endsWith("/api/auth/login") -> login(body)
-        path.endsWith("/api/devices") && method == "GET" -> listDevices()
-        path.endsWith("/api/devices/bind") -> bind(body)
-        path.endsWith("/api/health") -> health()
-        path.endsWith("/api/time") -> time()
-        path.endsWith("/api/push/register") -> pushRegister(body)
-        path.endsWith("/api/reports/activity") -> activity(query)
-        path.endsWith("/api/reports/trend") -> trend(query)
-        path.endsWith("/api/reports/summary") -> summary(query)
-        path.endsWith("/api/alerts") && method == "GET" -> listAlerts(query)
+        path.endsWith("$P/auth/register") -> register(body)
+        path.endsWith("$P/auth/login") -> login(body)
+        path.endsWith("$P/devices") && method == "GET" -> listDevices()
+        path.endsWith("$P/devices/bind") -> bind(body)
+        path.endsWith("$P/health") -> health()
+        path.endsWith("$P/time") -> time()
+        path.endsWith("$P/push/register") -> pushRegister(body)
+        path.endsWith("$P/reports/activity") -> activity(query)
+        path.endsWith("$P/reports/trend") -> trend(query)
+        path.endsWith("$P/reports/summary") -> summary(query)
+        path.endsWith("$P/alerts") && method == "GET" -> listAlerts(query)
         PATH_ALERT_DETAIL.matches(path) -> alertDetail(PATH_ALERT_DETAIL.find(path)!!.groupValues[1].toLong())
         PATH_ALERT_DISPOSITION.matches(path) ->
             disposition(PATH_ALERT_DISPOSITION.find(path)!!.groupValues[1].toLong(), body)
@@ -316,7 +319,7 @@ private class FakeServerBackend(private val clock: FakeClock) {
                 put("node_sn", "M1")
                 put("type", t)
                 put("ts", ts)
-                put("payload", payloadOf(t, i))
+                put(AppConfig.FIELD_READING_DETAIL, detailOf(t, i))
             }
         }
         val items = all.take(limit)
@@ -328,7 +331,7 @@ private class FakeServerBackend(private val clock: FakeClock) {
         )
     }
 
-    private fun payloadOf(type: String, i: Int): JSONObject = when (type) {
+    private fun detailOf(type: String, i: Int): JSONObject = when (type) {
         "motion" -> JSONObject().apply { put("presence", i % 2 == 0); put("distance_mm", 1200 + i * 10) }
         "env" -> JSONObject().apply { put("temp", 24.5 + i * 0.1); put("humi", 55.0 + i) }
         "gas" -> JSONObject().apply { put("smoke_mv", 820 + i * 30) }
@@ -481,7 +484,7 @@ private class FakeServerBackend(private val clock: FakeClock) {
                 put("node_sn", a.optString("node_sn"))
                 put("type", if (a.optString("type") == "gas") "gas" else "motion")
                 put("ts", ts + dir * (i + 1) * 10_000L)
-                put("payload", payloadOf(if (a.optString("type") == "gas") "gas" else "motion", i))
+                put(AppConfig.FIELD_READING_DETAIL, detailOf(if (a.optString("type") == "gas") "gas" else "motion", i))
             }
         }
     }
@@ -724,8 +727,8 @@ private class FakeServerBackend(private val clock: FakeClock) {
         type == "gas" -> "厨房燃气浓度偏高"
         type == "sos" -> "收到紧急求助"
         type == "no_motion" -> "30 分钟未检测到活动"
-        type == "node_offline" -> "节点 ${node ?: "?"} 已离线"
-        type == "device_offline" -> "网关已离线"
+        type == "node_offline" -> "房间设备 ${node ?: "?"} 失联了"
+        type == "device_offline" -> "小盒子失联了"
         type == "door_left" -> "门已打开超过 3 分钟"
         type == "env" -> "室内温湿度异常"
         else -> type
@@ -740,13 +743,16 @@ private class FakeServerBackend(private val clock: FakeClock) {
         const val MOCK_PASSWORD = "Passw0rd"
         const val MOCK_BIND_CODE = "482913"
 
-        private val PATH_STATUS = Regex("^/api/devices/(\\d+)/status$")
-        private val PATH_READINGS = Regex("^/api/devices/(\\d+)/readings$")
-        private val PATH_SETTINGS = Regex("^/api/devices/(\\d+)/settings$")
-        private val PATH_CONFIG = Regex("^/api/devices/(\\d+)/config$")
-        private val PATH_DEMO = Regex("^/api/devices/(\\d+)/demo$")
-        private val PATH_ALERT_DETAIL = Regex("^/api/alerts/(\\d+)$")
-        private val PATH_ALERT_DISPOSITION = Regex("^/api/alerts/(\\d+)/disposition$")
+        /** 路由前缀只在 AppConfig 里写一次，mock 路由表因此不散落技术字面量。 */
+        private val P = AppConfig.PATH_PREFIX
+
+        private val PATH_STATUS = Regex("^$P/devices/(\\d+)/status$")
+        private val PATH_READINGS = Regex("^$P/devices/(\\d+)/readings$")
+        private val PATH_SETTINGS = Regex("^$P/devices/(\\d+)/settings$")
+        private val PATH_CONFIG = Regex("^$P/devices/(\\d+)/config$")
+        private val PATH_DEMO = Regex("^$P/devices/(\\d+)/demo$")
+        private val PATH_ALERT_DETAIL = Regex("^$P/alerts/(\\d+)$")
+        private val PATH_ALERT_DISPOSITION = Regex("^$P/alerts/(\\d+)/disposition$")
     }
 }
 
@@ -768,7 +774,7 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
     private var iotdaFromFlash = false
 
     /**
-     * F2 的 `/api/scan` 缓存。真固件是「用户点过扫描才有缓存」，这里给一份固定值，
+     * F2 的 Wi-Fi 缓存列表。真固件是「用户点过扫描才有缓存」，这里给一份固定值，
      * 让「下拉选 SSID」这条正常路径在无设备时也能演示；空缓存的兜底路径由单测的
      * ScriptedTransport 覆盖（见 SettingsAndReportTest）。
      */
@@ -789,12 +795,12 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
     private val bound = mutableListOf<NodeSeed>()
 
     fun handle(method: String, path: String, body: JSONObject?): TransportResponse = when {
-        path.endsWith("/api/provision/status") -> status()
-        path.endsWith("/api/provision/wifi") -> submitWifi(body)
-        path.endsWith("/api/pair/scan") -> startScan(body)
-        path.endsWith("/api/pair/nodes") -> pairNodes()
-        path.endsWith("/api/pair/bind") -> pairBind(body)
-        path.endsWith("/api/scan") -> wifiScan()
+        path.endsWith("${AppConfig.PATH_PREFIX}/provision/status") -> status()
+        path.endsWith("${AppConfig.PATH_PREFIX}/provision/wifi") -> submitWifi(body)
+        path.endsWith("${AppConfig.PATH_PREFIX}/pair/scan") -> startScan(body)
+        path.endsWith("${AppConfig.PATH_PREFIX}/pair/nodes") -> pairNodes()
+        path.endsWith("${AppConfig.PATH_PREFIX}/pair/bind") -> pairBind(body)
+        path.endsWith("${AppConfig.PATH_PREFIX}/scan") -> wifiScan()
         else -> fail(404, 1600, "mock 未实现的本地接口：$method $path")
     }
 
@@ -995,12 +1001,12 @@ internal class FakeGatewayBackend(private val clock: FakeClock) {
             }
             "del" -> bound.removeAll { it.sn == sn || it.mac == mac }
             "add" -> {
-                if (scanState != "done") return fail(400, ContractErrors.NODE_NOT_IN_SCAN_LIST, "节点不在扫描列表")
+                if (scanState != "done") return fail(400, ContractErrors.NODE_NOT_IN_SCAN_LIST, "房间设备不在扫描列表")
                 if (clock.nowMs - scannedAt > 300_000) {
                     return fail(400, ContractErrors.NODE_NOT_IN_SCAN_LIST, "扫描结果已超过 300 s，请重新扫描")
                 }
                 val seed = nodes.firstOrNull { it.mac.equals(mac, ignoreCase = true) }
-                    ?: return fail(400, ContractErrors.NODE_NOT_IN_SCAN_LIST, "节点不在扫描列表")
+                    ?: return fail(400, ContractErrors.NODE_NOT_IN_SCAN_LIST, "房间设备不在扫描列表")
                 if (bound.none { it.mac == seed.mac }) {
                     if (bound.size >= 8) return fail(409, ContractErrors.WHITELIST_FULL, "白名单已满")
                     bound += seed.copy(sn = if (sn.isNotBlank()) sn else seed.sn, alias = body?.optString("alias")?.ifBlank { null })

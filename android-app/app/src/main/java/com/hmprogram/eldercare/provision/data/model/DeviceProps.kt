@@ -176,7 +176,7 @@ object PropertyRows {
         row("co", "一氧化碳", props.co?.let { fmt("%.0f mV", it) } ?: "未上报", props.co != null,
             level = levelOfSmoke(props.co)),
         row(
-            "nodes_online", "节点在线",
+            "nodes_online", "房间设备在线",
             if (props.nodesOnline.isEmpty()) props.nodesOnlineRaw ?: "未上报"
             else props.nodesOnline.entries.joinToString("  ") { (sn, on) -> sn + if (on) "✓" else "✗" },
             props.nodesOnlineRaw != null,
@@ -196,7 +196,7 @@ object PropertyRows {
             level = props.alarmState ?: 0,
         ),
         row(
-            "bound_nodes", "已绑节点",
+            "bound_nodes", "已绑定的房间设备",
             if (props.boundNodes.isEmpty()) "未上报" else props.boundNodes.joinToString("、"),
             props.boundNodes.isNotEmpty(),
         ),

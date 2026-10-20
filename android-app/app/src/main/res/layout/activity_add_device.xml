@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/tvOfflineBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_banner"
+        android:padding="10dp"
+        android:text="@string/offline_banner"
+        android:textColor="@color/warn"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tvStepTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/add_step_1_title"
+                android:textColor="@color/brand_dark"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvStepHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/add_step_1_hint"
+                android:textColor="@color/muted"
+                android:textSize="17sp" />
+
+            <!-- 第 1 步：连小盒子的 Wi-Fi -->
+            <LinearLayout
+                android:id="@+id/groupStep1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/add_step_1_body"
+                    android:textColor="@color/black"
+                    android:textSize="17sp" />
+
+                <Button
+                    android:id="@+id/btnOpenWifi"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="12dp"
+                    android:backgroundTint="@color/brand"
+                    android:text="@string/action_open_wifi"
+                    android:textSize="17sp" />
+            </LinearLayout>
+
+            <!-- 第 2 步：选家里的 Wi-Fi -->
+            <LinearLayout
+                android:id="@+id/groupStep2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:visibility="gone">
+
+                <Button
+                    android:id="@+id/btnLoadWifi"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:backgroundTint="@color/surface_alt"
+                    android:text="@string/action_load_wifi"
+                    android:textColor="@color/brand_dark"
+                    android:textSize="16sp" />
+
+                <Spinner
+                    android:id="@+id/spWifi"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:minHeight="52dp" />
+
+                <EditText
+                    android:id="@+id/etSsid"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="@string/hint_wifi_name"
+                    android:importantForAutofill="no"
+                    android:inputType="text"
+                    android:textSize="18sp" />
+
+                <EditText
+                    android:id="@+id/etPassword"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="@string/hint_wifi_password"
+                    android:importantForAutofill="no"
+                    android:inputType="textPassword"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+            <!-- 第 3 步：正在连接 -->
+            <LinearLayout
+                android:id="@+id/groupStep3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_card"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="24dp"
+                android:visibility="gone">
+
+                <ProgressBar
+                    android:layout_width="48dp"
+                    android:layout_height="48dp" />
+
+                <TextView
+                    android:id="@+id/tvConnecting"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:text="@string/add_step_3_body"
+                    android:textColor="@color/black"
+                    android:textSize="18sp" />
+            </LinearLayout>
+
+            <!-- 第 4 步：结果 -->
+            <LinearLayout
+                android:id="@+id/groupStep4"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvResult"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/value_unknown"
+                    android:textColor="@color/black"
+                    android:textSize="19sp" />
+
+                <Button
+                    android:id="@+id/btnRetry"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="12dp"
+                    android:backgroundTint="@color/surface_alt"
+                    android:text="@string/action_retry"
+                    android:textColor="@color/brand_dark"
+                    android:textSize="17sp" />
+            </LinearLayout>
+
+            <!-- 绑定到家（可选） -->
+            <LinearLayout
+                android:id="@+id/groupBind"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/add_bind_title"
+                    android:textColor="@color/brand_dark"
+                    android:textSize="19sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/etSn"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="@string/hint_device_sn"
+                    android:importantForAutofill="no"
+                    android:inputType="textVisiblePassword"
+                    android:textSize="17sp" />
+
+                <EditText
+                    android:id="@+id/etCode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:hint="@string/hint_bind_code"
+                    android:importantForAutofill="no"
+                    android:inputType="number"
+                    android:maxLength="6"
+                    android:textSize="17sp" />
+
+                <Button
+                    android:id="@+id/btnBind"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="10dp"
+                    android:backgroundTint="@color/brand"
+                    android:text="@string/action_bind_account"
+                    android:textSize="17sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnNext"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="24dp"
+                android:backgroundTint="@color/brand"
+                android:text="@string/action_next_step"
+                android:textSize="19sp" />
+
+            <Button
+                android:id="@+id/btnPrev"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="10dp"
+                android:backgroundTint="@color/surface_alt"
+                android:text="@string/action_prev_step"
+                android:textColor="@color/muted"
+                android:textSize="16sp" />
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

@@ -20,11 +20,6 @@
         android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="32" />
 
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="false" />
-
     <!-- 用 WifiNetworkSpecifier 连设备热点（API 29+）必须显式声明，否则运行时报 SecurityException -->
     <uses-feature
         android:name="android.hardware.wifi"
@@ -40,9 +35,11 @@
         android:theme="@style/Theme.ElderCare.Provision"
         tools:targetApi="34">
 
+        <!-- 登录页是入口：没登录就没有账号上下文，首页什么也显示不出来 -->
         <activity
-            android:name=".ui.MainActivity"
-            android:exported="true">
+            android:name=".ui.LoginActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -50,35 +47,43 @@
         </activity>
 
         <activity
-            android:name=".ui.LoginActivity"
+            android:name=".ui.RegisterActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity
-            android:name=".ui.ProvisionActivity"
+            android:name=".ui.HomeActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ui.RemindersActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ui.ReminderDetailActivity"
             android:exported="false"
-            android:label="@string/title_provision"
             android:windowSoftInputMode="adjustResize" />
         <activity
-            android:name=".ui.WifiScanActivity"
+            android:name=".ui.ProfileActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ui.ReportActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ui.AddDeviceActivity"
             android:exported="false"
-            android:label="@string/title_wifi_scan"
             android:windowSoftInputMode="adjustResize" />
         <activity
-            android:name=".ui.PairNodesActivity"
+            android:name=".ui.ChangePasswordActivity"
             android:exported="false"
-            android:label="@string/title_pair_nodes"
             android:windowSoftInputMode="adjustResize" />
         <activity
-            android:name=".ui.DevSettingsActivity"
+            android:name=".ui.AdvancedActivity"
             android:exported="false"
-            android:label="@string/title_dev_settings"
             android:windowSoftInputMode="adjustResize" />
-
-        <activity android:name="ui.DevicesActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name="ui.AlertListActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name="ui.AlertDetailActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name="ui.ReportsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name="ui.SettingsActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
-        <activity android:name="ui.SmokeActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.SmokeActivity"
+            android:exported="false" />
     </application>
 </manifest>

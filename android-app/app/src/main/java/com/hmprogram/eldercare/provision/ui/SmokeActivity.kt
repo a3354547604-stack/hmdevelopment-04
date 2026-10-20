@@ -4,33 +4,34 @@ import android.os.Bundle
 import android.view.View
 import com.google.gson.JsonObject
 import com.hmprogram.eldercare.provision.R
+import com.hmprogram.eldercare.provision.core.ApiPaths
 import com.hmprogram.eldercare.provision.core.ApiResult
 import com.hmprogram.eldercare.provision.databinding.ActivitySmokeBinding
 import com.hmprogram.eldercare.provision.databinding.ItemSmokeBinding
 
 /**
- * 接口自检（检查单 F12 的入口）。
+ * 自检（维护用，入口在维护模式里）。
  *
- * 为什么需要这一页：现场没有设备、没有网关、甚至没有服务器时，也要能证明「App 这一侧是对的」。
- * 点一次「开始自检」就按契约 §6 顺序把接口挨个打一遍，逐条显示通/不通与返回摘要；
- * Mock 模式下还会把写接口（保存设置 / 下发 / 演示 / 处置）也跑一遍，等于一次**全流程演练**。
+ * 为什么需要这一页：现场没设备、没小盒子、甚至没云端时，也要能证明「App 这一侧是对的」。
+ * 点一次「开始自检」就把全部接口按契约顺序打一遍，逐条显示通/不通与返回摘要；
+ * Mock 模式下连写操作也跑一遍，等于一次**全流程演练**。
  *
- * 写接口只在 Mock 模式跑：真实服务器上跑 demo/disposition 会往数据库里塞真告警、真处置记录，
- * 那会污染用户的现场数据（检查单也要求演示事件只用于演示）。
+ * 写操作只在 Mock 模式跑：真实云端上跑演示/处置会往数据库里塞真提醒、真处置记录，
+ * 会污染用户现场数据，所以真实模式下只跑读。
  */
 class SmokeActivity : BaseActivity() {
 
     private lateinit var vb: ActivitySmokeBinding
     private var pass = 0
     private var fail = 0
-    private var firstAlertId = 0L
-    private var firstPendingAlertId = 0L
+    private var firstReminderId = 0L
+    private var firstPendingId = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         vb = ActivitySmokeBinding.inflate(layoutInflater)
         setContentView(vb.root)
-        vb.tvSummary.text = getString(R.string.smoke_idle)
+        vb.tvSummary.text = getString(R.string.self_check_idle)
         vb.btnRun.setOnClickListener { launchUi { run() } }
     }
 
@@ -44,88 +45,86 @@ class SmokeActivity : BaseActivity() {
         vb.listSmoke.removeAllViews()
         pass = 0
         fail = 0
-        firstAlertId = 0
-        firstPendingAlertId = 0
-        vb.tvSummary.text = "运行中…"
+        firstReminderId = 0
+        firstPendingId = 0
+        vb.tvSummary.text = getString(R.string.self_check_running)
         vb.btnRun.isEnabled = false
         try {
-            step("GET /api/health（免鉴权）", { container.serverApi.health() }) { d ->
-                "ok=${d.ok}｜version=${d.version}｜db=${d.db}｜clock=${d.clock_source}"
+            step("云端连通", { container.serverApi.health() }) { d ->
+                "ok=${d.ok}｜版本=${d.version}｜数据库=${d.db}"
             }
-            step("GET /api/time（免鉴权）", { container.serverApi.time() }) { d ->
-                "utc_epoch=${d.utc_epoch}｜${d.iso8601}"
-            }
-            // 不要用「重新登录」来自检：那需要明文密码，而密码在本 App 里是内存态、绝不落盘。
-            // 带 Bearer 的 /api/devices 本身就能证明令牌可用（401/1101 会在这一条上暴露）。
-            step("GET /api/devices（带 Bearer）", { container.serverApi.devices() }) { d ->
-                "total=${d.total}｜${d.items.joinToString { "${it.sn}/${if (it.online) "在线" else "离线"}" }}"
+            step("时间同步", { container.serverApi.time() }) { d -> d.iso8601 }
+            // 不用「重新登录」来自检：那需要明文密码，而密码在本 App 里是内存态、绝不落盘。
+            // 带登录态的设备列表本身就能证明令牌可用（401/1101 会在这一条上暴露）。
+            step("我的设备", { container.serverApi.devices() }) { d ->
+                "${d.total} 台｜" + d.items.joinToString { "${it.sn}/${if (it.online) "正常" else "失联"}" }
             }
             val id = session.deviceId
             if (id <= 0) {
-                row("设备上下文", false, "没有选中设备：先在「设备」页绑定/选择，再来自检")
-                vb.tvSummary.text = "通过 $pass 项，失败 ${fail + 1} 项"
+                row("当前设备", false, getString(R.string.err_no_device))
+                vb.tvSummary.text = getString(R.string.self_check_summary_fmt, pass, fail + 1)
                 return
             }
-            step("GET /api/devices/$id/status", { container.serverApi.deviceStatus(id) }) { d ->
-                "online=${d.online}｜属性键 ${d.properties.size()} 个｜节点 ${d.nodes.size}"
+            step("设备当前状况", { container.serverApi.deviceStatus(id) }) { d ->
+                "在线=${d.online}｜属性 ${d.properties.size()} 项｜房间设备 ${d.nodes.size} 个"
             }
-            step("GET /api/devices/$id/readings", { container.serverApi.readings(id, limit = 5) }) { d ->
-                "total=${d.total}｜返回 ${d.items.size} 条"
+            step("最近记录", { container.serverApi.readings(id, limit = 5) }) { d ->
+                "共 ${d.total} 条｜取回 ${d.items.size} 条"
             }
-            step("GET /api/devices/$id/settings", { container.serverApi.settings(id) }) { d ->
-                "source=${d.source}｜${d.items.size()} 个键"
+            step("工作参数", { container.serverApi.settings(id) }) { d ->
+                "${d.sourceText()}｜${d.items.size()} 项"
             }
-            step("GET /api/alerts", { container.serverApi.alerts(id, limit = 5) }) { d ->
-                firstAlertId = d.items.firstOrNull()?.id ?: 0
-                firstPendingAlertId = d.items.firstOrNull { it.isPending }?.id ?: 0
-                "total=${d.total}｜返回 ${d.items.size} 条"
+            step("提醒列表", { container.serverApi.alerts(id, limit = 5) }) { d ->
+                firstReminderId = d.items.firstOrNull()?.id ?: 0
+                firstPendingId = d.items.firstOrNull { it.isPending }?.id ?: 0
+                "共 ${d.total} 条｜取回 ${d.items.size} 条"
             }
-            if (firstAlertId > 0) {
-                step("GET /api/alerts/$firstAlertId", { container.serverApi.alertDetail(firstAlertId) }) { d ->
-                    "${d.alert.type}/${d.alert.level}｜处置 ${d.dispositions.size} 条｜前后读数 ${d.readings_before.size}/${d.readings_after.size}"
+            if (firstReminderId > 0) {
+                step("提醒详情", { container.serverApi.alertDetail(firstReminderId) }) { d ->
+                    "${LifeText.alertTitle(d.alert.type, d.alert.level)}｜处置记录 ${d.dispositions.size} 条"
                 }
             } else {
-                row("GET /api/alerts/{id}", true, "无告警可查，跳过")
+                row("提醒详情", true, getString(R.string.self_check_skip_no_reminder))
             }
-            step("GET /api/reports/activity?period=week", { container.serverApi.activity(id, "week") }) { d ->
-                "total=${d.total}｜序列 ${d.daily.size + d.hourly.size} 点"
+            step("本周活动", { container.serverApi.activity(id, "week") }) { d ->
+                "共 ${d.total} 次｜${d.daily.size + d.hourly.size} 个点"
             }
-            step("GET /api/reports/trend?days=7", { container.serverApi.trend(id, 7) }) { d ->
-                "compare.title=${d.compare?.title ?: "（缺失）"}｜today=${d.compare?.today ?: "—"}｜yesterday=${d.compare?.yesterday ?: "（无基线）"}"
+            step("今日对比", { container.serverApi.trend(id, 7) }) { d ->
+                "标题=${d.compare?.title ?: "（缺失）"}｜今天=${d.compare?.today ?: "—"}｜昨天=${d.compare?.yesterday ?: "（无基线）"}"
             }
-            step("GET /api/reports/summary?period=week", { container.serverApi.summary(id, "week") }) { d ->
-                "活动 ${d.activity.total} 次｜告警 ${d.alerts.total} 条"
+            step("本周小结", { container.serverApi.summary(id, "week") }) { d ->
+                "活动 ${d.activity.total} 次｜提醒 ${d.alerts.total} 条"
             }
-            step("POST /api/push/register", { container.serverApi.pushRegister("smoke-test-token") }) { d ->
-                "registered=${d.registered}｜user_id=${d.user_id}"
+            step("推送登记", { container.serverApi.pushRegister("self-check-token") }) { d ->
+                "registered=${d.registered}"
             }
 
             if (session.mockMode) {
-                // Mock 模式：把写接口也走一遍，等于一次全流程演练（真实服务器上不跑，避免污染数据）
-                step("PUT /api/devices/$id/settings（回写 report_interval_s）", {
+                // Mock：写操作也走一遍，等于一次全流程演练（真实云端不跑，避免污染数据）
+                step("保存工作参数", {
                     val cur = container.serverApi.settings(id)
                     val interval = (cur as? ApiResult.Ok)?.data?.items?.get("report_interval_s")?.asDouble ?: 60.0
                     container.serverApi.putSettings(id, JsonObject().apply { addProperty("report_interval_s", interval) })
-                }) { d -> "source=${d.source}" }
-                step("POST /api/devices/$id/config（缺省全部键）", { container.serverApi.config(id, null) }) { d ->
-                    "accepted=${d.accepted.size}｜timeout_s=${d.timeout_s}"
+                }) { d -> d.sourceText() }
+                step("下发到小盒子", { container.serverApi.config(id, null) }) { d ->
+                    "接受 ${d.accepted.size} 项｜最多等 ${d.timeout_s} 秒"
                 }
-                step("POST /api/devices/$id/demo（gas）", { container.serverApi.demo(id, "gas") }) { d ->
-                    "event=${d.event}｜command_id=${d.command_id}"
+                step("演示提醒", { container.serverApi.demo(id, "gas") }) { d ->
+                    "事件=${d.event}"
                 }
-                if (firstPendingAlertId > 0) {
-                    step("POST /api/alerts/$firstPendingAlertId/disposition（checked）", {
-                        container.serverApi.disposition(firstPendingAlertId, "checked", "自检自动处置")
-                    }) { d -> "status=${d.status}｜disposition_id=${d.disposition_id}" }
+                if (firstPendingId > 0) {
+                    step("处理提醒", { container.serverApi.disposition(firstPendingId, "checked", "自检自动处理") }) { d ->
+                        "状态=${d.status}"
+                    }
                 } else {
-                    row("POST /api/alerts/{id}/disposition", true, "无待处置告警，跳过")
+                    row("处理提醒", true, getString(R.string.self_check_skip_no_pending))
                 }
             } else {
-                row("写接口（settings/config/demo/disposition）", true, "真实服务器：自检只跑读接口，避免污染现场数据")
+                row("写操作", true, getString(R.string.self_check_readonly))
             }
         } finally {
             vb.btnRun.isEnabled = true
-            vb.tvSummary.text = "通过 $pass 项，失败 $fail 项"
+            vb.tvSummary.text = getString(R.string.self_check_summary_fmt, pass, fail)
         }
     }
 
@@ -145,7 +144,7 @@ class SmokeActivity : BaseActivity() {
                 if (r.isTransportProblem()) showBanner(vb.tvOfflineBanner, getString(R.string.offline_banner))
             }
         }
-        vb.tvSummary.text = "通过 $pass 项，失败 $fail 项"
+        vb.tvSummary.text = getString(R.string.self_check_summary_fmt, pass, fail)
     }
 
     private fun row(name: String, ok: Boolean, detail: String) {

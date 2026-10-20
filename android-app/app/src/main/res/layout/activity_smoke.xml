@@ -1,27 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 接口自检（F12）：逐个打 18 个接口 + /api/time，本机没有设备/服务器也能说明「哪条通、哪条不通」 -->
+<!-- 接口自检：维护用，普通用户看不到 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:orientation="vertical">
 
     <TextView
         android:id="@+id/tvOfflineBanner"
-        style="@style/CardBody"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/err_bg"
+        android:background="@drawable/bg_banner"
         android:padding="8dp"
         android:text="@string/offline_banner"
+        android:textColor="@color/warn"
+        android:textSize="14sp"
         android:visibility="gone" />
 
     <TextView
-        android:id="@+id/tvSummary"
-        style="@style/CardBody"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/smoke_idle" />
+        android:padding="16dp"
+        android:text="@string/title_self_check"
+        android:textColor="@color/brand_dark"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:text="@string/self_check_idle"
+        android:textColor="@color/muted"
+        android:textSize="15sp" />
+
+    <Button
+        android:id="@+id/btnRun"
+        android:layout_width="match_parent"
+        android:layout_height="50dp"
+        android:layout_margin="16dp"
+        android:backgroundTint="@color/brand"
+        android:text="@string/action_run_self_check"
+        android:textSize="16sp" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -32,13 +53,8 @@
             android:id="@+id/listSmoke"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical" />
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp" />
     </ScrollView>
-
-    <Button
-        android:id="@+id/btnRun"
-        style="@style/Field"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="@string/action_smoke_test" />
 </LinearLayout>

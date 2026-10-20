@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/tvOfflineBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_banner"
+        android:padding="10dp"
+        android:text="@string/offline_banner"
+        android:textColor="@color/warn"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/title_profile"
+                android:textColor="@color/brand_dark"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <!-- 家庭成员 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/title_family"
+                    android:textColor="@color/brand_dark"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvAccount"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/msg_no_account"
+                    android:textColor="@color/muted"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/tvDeviceLine"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/label_no_device"
+                    android:textColor="@color/black"
+                    android:textSize="18sp" />
+
+                <Button
+                    android:id="@+id/btnAddDevice"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="12dp"
+                    android:backgroundTint="@color/brand"
+                    android:text="@string/action_bind_new"
+                    android:textSize="17sp" />
+            </LinearLayout>
+
+            <!-- 手机提醒 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/label_push"
+                        android:textColor="@color/black"
+                        android:textSize="19sp" />
+
+                    <Switch
+                        android:id="@+id/swPush"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvPushHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/push_hint_on"
+                    android:textColor="@color/muted"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnChangePassword"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="@color/surface_alt"
+                android:text="@string/action_change_password"
+                android:textColor="@color/brand_dark"
+                android:textSize="17sp" />
+
+            <Button
+                android:id="@+id/btnLogout"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:layout_marginTop="12dp"
+                android:backgroundTint="@color/surface_alt"
+                android:text="@string/action_logout"
+                android:textColor="@color/danger"
+                android:textSize="17sp" />
+
+            <TextView
+                android:id="@+id/tvVersion"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:gravity="center"
+                android:padding="8dp"
+                android:text="@string/value_unknown"
+                android:textColor="@color/muted"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </ScrollView>
+
+    <include layout="@layout/part_bottom_nav" />
+</LinearLayout>

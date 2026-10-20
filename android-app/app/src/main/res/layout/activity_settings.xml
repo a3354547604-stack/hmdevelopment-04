@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 设置（F11）：21 键阈值 + 静音 + 上报周期 + 演示事件 + 退出登录；Mock 开关入口（F12） -->
+<!-- 维护设置：只在「我的 → 连点版本号 5 次 → 高级」里进入，普通用户看不到 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -12,179 +13,195 @@
 
         <TextView
             android:id="@+id/tvOfflineBanner"
-            style="@style/CardBody"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/err_bg"
+            android:background="@drawable/bg_banner"
             android:padding="8dp"
             android:text="@string/offline_banner"
+            android:textColor="@color/warn"
+            android:textSize="14sp"
             android:visibility="gone" />
 
         <TextView
-            android:id="@+id/tvAccount"
-            style="@style/CardTitle"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:text="@string/title_maintenance"
+            android:textColor="@color/brand_dark"
+            android:textSize="24sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/tvSource"
-            style="@style/CardBody"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            style="@style/CardTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/label_thresholds" />
+            android:layout_marginTop="6dp"
+            android:text="@string/value_unknown"
+            android:textColor="@color/muted"
+            android:textSize="15sp" />
 
         <LinearLayout
             android:id="@+id/listSettings"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:orientation="vertical" />
 
         <Button
             android:id="@+id/btnSaveAll"
-            style="@style/Field"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/action_save_all" />
+            android:layout_height="50dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="@color/brand"
+            android:text="@string/action_save_all"
+            android:textSize="16sp" />
 
         <Button
             android:id="@+id/btnDispatch"
-            style="@style/Field"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/action_dispatch_settings" />
+            android:layout_height="50dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="@color/surface_alt"
+            android:text="@string/action_dispatch_settings"
+            android:textColor="@color/brand_dark"
+            android:textSize="16sp" />
 
         <TextView
             android:id="@+id/tvDispatchResult"
-            style="@style/CardBody"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            style="@style/CardTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/label_mute" />
+            android:layout_marginTop="6dp"
+            android:textColor="@color/muted"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/label_mute"
+            android:textColor="@color/brand_dark"
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/tvMuteState"
-            style="@style/CardBody"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+            android:layout_height="wrap_content"
+            android:text="@string/msg_not_muted"
+            android:textColor="@color/black"
+            android:textSize="16sp" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:orientation="horizontal">
 
             <Button
                 android:id="@+id/btnMute30"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
                 android:layout_weight="1"
-                android:text="@string/action_mute_30" />
+                android:text="@string/action_mute_30"
+                android:textSize="14sp" />
 
             <Button
                 android:id="@+id/btnMute60"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                android:text="@string/action_mute_60" />
+                android:text="@string/action_mute_60"
+                android:textSize="14sp" />
 
             <Button
                 android:id="@+id/btnUnmute"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginStart="8dp"
                 android:layout_weight="1"
-                android:text="@string/action_unmute" />
+                android:text="@string/action_unmute"
+                android:textSize="14sp" />
         </LinearLayout>
 
         <TextView
-            style="@style/CardTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/label_demo" />
+            android:layout_marginTop="20dp"
+            android:text="@string/label_cloud"
+            android:textColor="@color/brand_dark"
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
-        <TextView
-            style="@style/CardBody"
+        <EditText
+            android:id="@+id/etIotdaHost"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/demo_note" />
+            android:hint="@string/hint_cloud_host"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:textSize="16sp" />
 
-        <LinearLayout
+        <EditText
+            android:id="@+id/etIotdaPort"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:hint="@string/hint_cloud_port"
+            android:importantForAutofill="no"
+            android:inputType="number"
+            android:textSize="16sp" />
 
-            <Button
-                android:id="@+id/btnDemoGas"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/action_demo_gas" />
-
-            <Button
-                android:id="@+id/btnDemoFall"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/action_demo_fall" />
-
-            <Button
-                android:id="@+id/btnDemoSos"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="@string/action_demo_sos" />
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/tvDemoResult"
-            style="@style/CardBody"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            style="@style/CardTitle"
+        <EditText
+            android:id="@+id/etIotdaDevice"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/label_mock" />
+            android:hint="@string/hint_cloud_device"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:textSize="16sp" />
 
-        <CheckBox
-            android:id="@+id/cbMock"
+        <EditText
+            android:id="@+id/etIotdaSecret"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/settings_mock" />
-
-        <TextView
-            style="@style/CardBody"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/settings_mock_note" />
+            android:hint="@string/hint_cloud_secret"
+            android:importantForAutofill="no"
+            android:inputType="textPassword"
+            android:textSize="16sp" />
 
         <Button
-            android:id="@+id/btnSmoke"
-            style="@style/Field"
+            android:id="@+id/btnSubmitIotda"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="@color/brand"
+            android:text="@string/action_submit_cloud"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/tvIotdaState"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/action_smoke_test" />
+            android:layout_marginTop="6dp"
+            android:text="@string/msg_cloud_none"
+            android:textColor="@color/muted"
+            android:textSize="14sp" />
 
         <Button
-            android:id="@+id/btnDevSettings"
-            style="@style/Field"
+            android:id="@+id/btnSelfCheck"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/action_dev_settings" />
+            android:layout_marginTop="16dp"
+            android:backgroundTint="@color/brand"
+            android:text="@string/action_self_check"
+            android:textSize="16sp" />
 
         <Button
-            android:id="@+id/btnLogout"
-            style="@style/Field"
+            android:id="@+id/btnClose"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/action_logout" />
+            android:layout_marginTop="8dp"
+            android:backgroundTint="@color/muted"
+            android:text="@string/action_close"
+            android:textSize="16sp" />
     </LinearLayout>
 </ScrollView>

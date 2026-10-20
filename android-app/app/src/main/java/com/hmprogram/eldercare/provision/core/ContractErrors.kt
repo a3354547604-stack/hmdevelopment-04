@@ -7,8 +7,8 @@ package com.hmprogram.eldercare.provision.core
  * 做成可配置只会让现场出现「地址被改过导致 1600/连不上」的隐形故障。
  */
 object LocalGateway {
-    const val HOST: String = "192.168.4.1"
-    const val BASE_URL: String = "http://$HOST/api"
+    const val HOST: String = AppConfig.GATEWAY_HOST
+    const val BASE_URL: String = AppConfig.GATEWAY_BASE
     const val PORT: Int = 80
 
     /** 契约 §12.3：SSID = `ElderCare-` + 网关 SN 后 4 位十六进制 */
@@ -20,7 +20,7 @@ object DeviceId {
     /** 网关 SN 形如 `M0-3F1A2B`：`M0-` + 6 位大写十六进制 */
     private val GATEWAY_SN = Regex("^M0-[0-9A-F]{6}$")
 
-    /** 传感节点编号 `M1`/`M2`/`M4`（M3/M5 为 P1 预留编号，仍合法） */
+    /** 房间设备编号 `M1`/`M2`/`M4`（M3/M5 为预留编号，仍合法） */
     private val NODE_SN = Regex("^M[0-9]{1,2}$")
 
     fun isGatewaySn(raw: String?): Boolean = raw != null && GATEWAY_SN.matches(raw.trim().uppercase())
@@ -127,15 +127,15 @@ object ContractErrors {
         BAD_DISPOSITION to "处置动作非法",
         REPORT_EMPTY to "报表无数据",
         DB_ERROR to "服务器数据库错误",
-        IOTDA_UNAVAILABLE to "上游 IoTDA 不可用",
+        IOTDA_UNAVAILABLE to "云端转发暂时不可用",
         WEBHOOK_UNAUTHORIZED to "webhook 校验失败",
         NOT_IN_PROVISION_MODE to "网关不在配网模式（请长按配对键 3 秒）",
         PROVISION_WINDOW_TIMEOUT to "配网窗口已超时（请重新长按配对键）",
         WIFI_CONNECT_FAILED to "Wi-Fi 连接失败",
         BUSY to "网关正忙（扫描或连接未结束）",
-        NODE_NOT_IN_SCAN_LIST to "该节点不在最近一次扫描结果里（请先扫描）",
-        HUB_OFFLINE to "汇聚节点 H1 未连接或离线",
-        WHITELIST_FULL to "白名单已满（最多 8 个节点）",
+        NODE_NOT_IN_SCAN_LIST to "这个房间设备不在最近一次扫描结果里（请先扫描）",
+        HUB_OFFLINE to "家里的主机没有连上或已离线",
+        WHITELIST_FULL to "名单已满（最多 8 个房间设备）",
     )
 
     /** 契约 §9.2 全部业务码，供同步性检查与测试使用 */
@@ -152,9 +152,9 @@ object ContractErrors {
         PROVISION_WINDOW_TIMEOUT -> "窗口默认 600 秒；重新长按配对键 3 秒再进"
         WIFI_CONNECT_FAILED -> "确认选的是 2.4G 热点、口令大小写正确；隐藏网络要勾选「隐藏」"
         BUSY -> "等 3–5 秒，等状态回到空闲再试"
-        NODE_NOT_IN_SCAN_LIST -> "先点「扫描附近节点」，再在结果里点「绑定」"
-        HUB_OFFLINE -> "检查 H1 汇聚节点是否上电、串口 TX/RX/GND 三线"
-        WHITELIST_FULL -> "先解绑一个不用的节点（上限 8）"
+        NODE_NOT_IN_SCAN_LIST -> "先点「扫描附近设备」，再在结果里点「绑定」"
+        HUB_OFFLINE -> "检查家里的主机是否上电、串口 TX/RX/GND 三根线是否插好"
+        WHITELIST_FULL -> "先解绑一个不用的房间设备（上限 8）"
         else -> null
     }
 }

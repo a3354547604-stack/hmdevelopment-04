@@ -44,7 +44,7 @@ data class UiState(
     /** 配网窗口倒计时（§12.2，秒） */
     val remainS: Int = 0,
 ) {
-    /** 绑定节点这个动作的前置条件：扫过、扫完了、白名单没满（另有 300 s 有效期由网关判） */
+    /** 绑定房间设备这个动作的前置条件：扫过、扫完了、名单没满（另有 300 s 有效期由小盒子判） */
     fun canBindNodes(): Boolean = scanState == "done" && nodes.any { !it.bind }
 
     fun gatewayBusy(): Boolean = busy != null || scanState == "scanning"
@@ -170,7 +170,7 @@ class ProvisionViewModel(
     /**
      * F4 华为云三件套：只更新云凭据，**不碰家庭 Wi-Fi**。
      * 网关对「body 里有 host/device_id/secret、但没有 ssid」有单独分支，回 `note` 说明只换了云凭据；
-     * 这条路径让用户可以在不重配 Wi-Fi 的前提下补/改 IoTDA 凭据。
+     * 这条路径让用户可以在不重配 Wi-Fi 的前提下补/改云端凭据。
      */
     suspend fun submitCloud(host: String, port: Int, deviceId: String, secret: String): ProvisionWifiData? {
         info("提交云凭据：host=$host port=$port device_id=$deviceId secret=••••")
@@ -181,17 +181,17 @@ class ProvisionViewModel(
         return d
     }
 
-    // ------------------------------------------------------------ 扫描节点
+    // ------------------------------------------------------------ 扫描房间设备
     /**
-     * 触发网关扫描星闪节点（§12.7，异步受理）。
-     * 异步的原因：真实扫描要 15 s，而 IoTDA 命令 5 s 就超时，所以走「受理 + 轮询结果」。
+     * 触发小盒子扫描房间设备（§12.7，异步受理）。
+     * 异步的原因：真实扫描要 15 s，而云端下发命令 5 s 就超时，所以走「受理 + 轮询结果」。
      */
     suspend fun triggerScan(durationS: Int = 15, includeBound: Boolean = true) {
         if (_state.value.scanState == "scanning") {
             warn("已有扫描任务在进行，忽略本次触发")
             return
         }
-        val d = run("触发节点扫描") { gateway.pairScan(durationS, includeBound) } ?: return
+        val d = run("触发扫描房间设备") { gateway.pairScan(durationS, includeBound) } ?: return
         info("扫描已受理 id=${d.id} duration=${d.duration_s}s estimate=${d.estimate_s}s")
         _state.value = _state.value.copy(scanState = "scanning")
         pollScanUntilDone()
@@ -202,7 +202,7 @@ class ProvisionViewModel(
         // 从 pollScanUntilDone 返回（inline 函数的非局部返回），这里是「本轮跳过/结束轮询」，
         // 语义不同，写错会让单测里「轮询到 done」永远走不到。
         for (round in 1..maxRounds) {
-            val d = run("读节点列表") { gateway.nodes() }
+            val d = run("读房间设备列表") { gateway.nodes() }
             if (d == null) continue
             _state.value = _state.value.copy(
                 nodes = d.nodes,
@@ -211,7 +211,7 @@ class ProvisionViewModel(
                 truncated = d.truncated,
             )
             if (d.scan_state != "scanning") {
-                ok("扫描完成：发现 ${d.nodes.size} 个节点（白名单 ${d.bound.size}，剩余槽位 ${d.slots_free}）")
+                ok("扫描完成：发现 ${d.nodes.size} 个房间设备（已绑定 ${d.bound.size}，还能加 ${d.slots_free} 个）")
                 return
             }
             delay(scanPollMs)
@@ -219,9 +219,9 @@ class ProvisionViewModel(
         warn("扫描超时未收到结果，请重试")
     }
 
-    /** 只刷新一次节点列表（用户在页面上下拉/点「刷新」时用） */
+    /** 只刷新一次房间设备列表（用户在页面上下拉/点「刷新」时用） */
     suspend fun refreshNodes() {
-        val d = run("读节点列表") { gateway.nodes() } ?: return
+        val d = run("读房间设备列表") { gateway.nodes() } ?: return
         _state.value = _state.value.copy(
             nodes = d.nodes,
             bound = d.bound,
@@ -230,32 +230,32 @@ class ProvisionViewModel(
         )
     }
 
-    // ------------------------------------------------------------ 绑定节点
-    /** 绑定：**必须传 mac**（汇聚按 MAC 建白名单；只传 sn 会让老固件节点无法绑定） */
+    // ------------------------------------------------------------ 绑定房间设备
+    /** 绑定：**必须传 mac**（小盒子按 MAC 建名单；只传 sn 会让老固件设备无法绑定） */
     suspend fun bindNode(node: ScannedNode, alias: String? = null) {
         if (node.isUnknownSn() && !node.bind) {
-            warn("该节点广播里没有 SN（老固件），按 MAC 绑定：${node.mac}")
+            warn("这个房间设备广播里没有编号（老固件），按 MAC 绑定：${node.mac}")
         }
-        val d = run("绑定节点 ${node.display()}") {
+        val d = run("绑定房间设备 ${node.display()}") {
             gateway.bind(op = "add", sn = node.sn.takeIf { it != "?" }, mac = node.mac, alias = alias)
         } ?: return
         applyBind(d)
     }
 
     suspend fun unbindNode(entry: BoundNode) {
-        val d = run("解绑节点 ${entry.sn}") { gateway.bind(op = "del", sn = entry.sn, mac = entry.mac) } ?: return
+        val d = run("解绑房间设备 ${entry.sn}") { gateway.bind(op = "del", sn = entry.sn, mac = entry.mac) } ?: return
         applyBind(d)
-        warn("已解绑：${entry.sn}（节点侧下次心跳才会断连，界面短暂仍显示在线属正常）")
+        warn("已解绑：${entry.sn}（设备下次回话才会断开，界面短暂仍显示在线属正常）")
     }
 
     suspend fun clearWhitelist() {
-        val d = run("清空白名单") { gateway.bind(op = "clear", confirm = "CLEAR") } ?: return
+        val d = run("清空名单") { gateway.bind(op = "clear", confirm = "CLEAR") } ?: return
         applyBind(d)
-        warn("白名单已清空（演示前记得重新绑定，否则 P0 闭环跑不起来）")
+        warn("名单已清空（演示前记得重新绑定，否则闭环流程跑不起来）")
     }
 
     suspend fun listBind() {
-        val d = run("读白名单") { gateway.bind(op = "list") } ?: return
+        val d = run("读名单") { gateway.bind(op = "list") } ?: return
         applyBind(d)
     }
 

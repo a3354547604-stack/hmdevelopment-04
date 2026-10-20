@@ -1,6 +1,8 @@
 package com.hmprogram.eldercare.provision.data.model
 
 import com.google.gson.JsonObject
+import com.google.gson.annotations.SerializedName
+import com.hmprogram.eldercare.provision.core.AppConfig
 import com.hmprogram.eldercare.provision.core.Times
 import org.json.JSONArray
 import org.json.JSONObject
@@ -14,11 +16,12 @@ data class ReadingItem(
     val node_sn: String = "",
     val type: String = "",
     val ts: Long = 0,
-    val payload: JsonObject? = null,
+    @SerializedName(AppConfig.FIELD_READING_DETAIL)
+    val detail: JsonObject? = null,
 ) {
-    /** 读数摘录：把 payload 里的键值对压成一行，界面不必为每种 type 写一套渲染 */
-    fun payloadText(): String {
-        val o = payload ?: return "—"
+    /** 读数摘录：把明细里的键值对压成一行，界面不必为每种类型写一套渲染 */
+    fun detailText(): String {
+        val o = detail ?: return "—"
         if (o.size() == 0) return "—"
         return o.keySet().joinToString("  ") { k ->
             val v = o.get(k)
@@ -89,7 +92,7 @@ data class AlertItem(
         "gas" -> "燃气"
         "sos" -> "紧急求助"
         "no_motion" -> "无活动"
-        "node_offline" -> "节点离线"
+        "node_offline" -> "房间设备失联"
         "device_offline" -> "网关离线"
         "door_left" -> "门未关"
         "env" -> "温湿度异常"
@@ -112,10 +115,10 @@ data class AlertItem(
     fun title(): String = summary?.takeIf { it.isNotBlank() }
         ?: (typeText() + "｜" + levelText() + "｜" + Times.full(ts))
 
-    /** 列表第二行：类型 / 级别 / 状态 / 节点 / 推送次数 */
+    /** 列表第二行：类型 / 级别 / 状态 / 房间 / 推送次数 */
     fun meta(): String = buildString {
         append(typeText()).append("｜").append(levelText()).append("｜").append(statusText())
-        node_sn?.takeIf { it.isNotBlank() }?.let { append("｜节点 ").append(it) }
+        node_sn?.takeIf { it.isNotBlank() }?.let { append("｜设备 ").append(it) }
         append("｜").append(Times.full(ts))
         if (push_count > 0) append("｜已推 ").append(push_count).append(" 次")
     }
@@ -205,7 +208,7 @@ data class AlertDetail(
                         node_sn = o.optString("node_sn"),
                         type = o.optString("type"),
                         ts = o.optLong("ts"),
-                        payload = o.optJSONObject("payload")?.let { p ->
+                        detail = o.optJSONObject(AppConfig.FIELD_READING_DETAIL)?.let { p ->
                             com.google.gson.JsonParser.parseString(p.toString()).asJsonObject
                         },
                     )

@@ -195,3 +195,89 @@ $ python3 android-app/tools/check_local_api.py
 
 **代码提交号**：`e4f864c`（`t146: 安卓 App 补齐 F4–F13…`，50 个文件、+5791/−336；本段随回填提交追加）。
 
+
+---
+
+## 7. t149：界面按「普通人能看懂」重做（0.3.0）
+
+### 7.1 这一轮改了什么（一句话）
+
+功能一条没删，把**摆给用户看的那一层**换掉了：手机号登录 + 三个底部页签（首页/提醒/我的）+
+生活语言（技术词只留在「我的 → 连点版本号 5 次 → 高级」里）。
+
+* 登录：手机号 + 密码；非 11 位只提示「请输入 11 位手机号」；底部整行「还没有账号？立即注册」，
+  注册成功后**直接进首页**（`RegisterActivity.loginAfterRegister()` 注册完顺手登录拿令牌）。
+* 首页：大字状态卡「爸妈今天一切都好 / 爸妈那边有 N 条提醒 / 有紧急情况」+ 厨房（燃气/温度/湿度）、
+  卧室（有人摔倒/现在有人）、门厅（门/今天开关次数）三张卡 + 「今天」小结；10 s 轮询 + 下拉刷新。
+* 提醒：列表按时间倒序 `14:32 · 厨房 · 燃气浓度偏高`，筛选只有全部/未处理；详情只有「我知道了」
+  「已处理」两个大按钮 + 一句备注。
+* 我的：家庭成员（已绑定设备一行）、手机提醒开关、修改密码、退出登录、版本号（连点 5 次进高级）。
+* 添加设备：①去连接小盒子 Wi-Fi ②选家里 Wi-Fi（网关扫描缓存下拉，空则手输）③正在连接 ④结果/失败原因。
+* 高级：云端地址、演示事件（gas/fall/sos）、演示模式（Mock）、维护参数（21 键 + 下发）、接口自检。
+* 删除旧的「一接口一页面」Activity（9 个）与 14 个旧布局；能力全部并入上面的页面。
+
+### 7.2 技术字面量收口（能被一条 grep 守住）
+
+地址、`/api` 前缀、`payload` 字段名、演示账号**只**存在于 `core/AppConfig.kt`（契约路径表在
+`core/ApiPaths.kt`）；其余 `src/main` 的文件（含 XML 注释）不再出现这些词。
+
+```bash
+$ bash -c "! grep -rnE 'http://|payload|阈值|节点|MQTT|IoTDA|/api/' android-app/app/src/main \
+    --include=*.kt --include=*.xml | grep -v 'AppConfig\|ApiPaths\|//\s\|xmlns' "
+$ echo $?
+0    # 取反成功 = 扣除豁免后 0 行命中
+```
+
+### 7.3 单元测试（`--rerun-tasks`，27 tasks executed）
+
+| 测试类 | 用例 | 失败 |
+|---|---|---|
+| `ErrorMappingTest` | 11 | 0 |
+| `SettingsSchemaTest` | 11 | 0 |
+| `CoreRulesTest` | 11 | 0 |
+| `ProvisionViewModelTest` | 13 | 0 |
+| `LifeTextTest`（本轮新增，钉住大字卡句式/房间映射/燃气两档/提醒行） | 5 | 0 |
+| `ApiPathsTest` | 9 | 0 |
+| `MockFlowTest` | 15 | 0 |
+| `CompareViewTest` | 8 | 0 |
+| `TransportTest` | 5 | 0 |
+| **合计** | **88** | **0**（跳过 0） |
+
+### 7.4 产物（当次）
+
+| 项 | 值 |
+|---|---|
+| APK | `dist/eldercare-0.3.0-debug.apk`（源：`~/eldercare-build/_app/outputs/apk/debug/app-debug.apk`） |
+| 体积 | **7 248 902 字节** |
+| sha256 | `c7af9119288fff2eb0ff31bfe8b8abab741c96f4de3e05140a99c325a3704869`（当次；APK 带时间戳，不可复现） |
+| versionCode / versionName | 3 / 0.3.0 |
+
+### 7.5 契约同步检查（不需要 SDK / 联网）
+
+```bash
+$ python3 android-app/tools/check_error_codes.py
+一致：错误码集合、code=0 登记、配网码操作指引、常量声明与契约 §9.2 逐条对齐（退出码 0）
+提示：10 条码的 App 文案与契约 message 措辞不同（不计入失败；App 是面向用户的措辞，
+      例如 1605 契约「汇聚未连接或离线」/ App「家里的主机没有连上或已离线」）
+
+$ python3 android-app/tools/check_local_api.py
+契约 §12 接口 6 个：GET /api/provision/status, POST /api/provision/wifi, POST /api/pair/scan,
+                    GET /api/pair/nodes, POST /api/pair/bind, GET /api/scan
+一致：接口集合、请求字段名、响应字段名与契约 §12 逐条对齐（未发明接口或字段）（退出码 0）
+```
+
+> 上一轮登记的 `GET /scan` 例外已随 PM 补录契约 §12.4 第 6 条而**自然失效**（脚本不再报例外），
+> 说明「例外必须带理由与证据」这条口径是对的：契约补齐后例外自动消失。
+
+### 7.6 本轮没解决的（据实登记）
+
+1. 修改密码只能「验明本人 + 明确告知」：服务器没有改密接口，任务禁止改服务器，**没有发明接口**。
+2. 手机提醒开关是 App 本地静音（`SessionStore.muteUntil`）：契约 §4.5 的 `mute_alarm` 没有 REST 出口。
+3. 无真机截图：证据是「布局 id ↔ 文案」对照 + 纯逻辑单测，真机手感列入 `BUILD.md §8`。
+
+**代码提交号**：待回填（见 §7.7）。
+
+### 7.7 提交号回填
+
+* t149 代码提交：`<待回填>`
+* 本回填提交：`<待回填>`

@@ -190,7 +190,7 @@ data class PairNodesData(
     val done: Boolean get() = scan_state == "done"
 }
 
-// ---------- §12.9 绑定节点 ----------
+// ---------- §12.9 绑定房间设备 ----------
 data class PairBindData(
     val op: String = "",
     val sn: String? = null,
@@ -199,7 +199,7 @@ data class PairBindData(
     val connected: Boolean? = null,
 )
 
-// ---------- F4 华为云 IoTDA 三件套 ----------
+// ---------- F4 云端接入三件套 ----------
 /**
  * 云凭据回执。**密钥只进请求、不回显**：网关与服务器都只回 `secret_set` 布尔，
  * App 侧也不落盘，避免「投屏时把设备密钥显示出来」这类事故。
@@ -219,7 +219,7 @@ data class IotdaCreds(
     }
 }
 
-// ---------- 检查单 F2：/api/scan 的 Wi-Fi 缓存列表 ----------
+// ---------- 检查单 F2：Wi-Fi 缓存列表 ----------
 data class ScanAp(
     val ssid: String = "",
     val rssi: Int = 0,
@@ -229,7 +229,7 @@ data class ScanAp(
 }
 
 /**
- * 网关 `GET /api/scan` 的缓存列表（t143 固件已实现，契约表尚未收录）。
+ * 小盒子缓存下来的 Wi-Fi 列表（t143 固件已实现，契约表尚未收录）。
  *
  * `cached=false` 或 `list` 为空都是**正常情况**：刚从 AP 模式起来、或者用户还没点过扫描。
  * 这时 App 必须退回手输 SSID（检查单 F2：空则手输），而不是卡在空下拉里。

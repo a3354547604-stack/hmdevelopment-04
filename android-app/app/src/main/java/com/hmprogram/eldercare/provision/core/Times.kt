@@ -7,7 +7,7 @@ import java.util.Locale
 /**
  * 时间显示的统一口径。纯 JVM，可单测。
  *
- * 契约里所有时间戳都是 **Unix 毫秒**（`/api/time` 的 `utc_epoch` 是秒，这是唯一的例外）。
+ * 契约里所有时间戳都是 **Unix 毫秒**（只有对时接口给的是秒，这是唯一的例外）。
  * 现场最容易被这行代码坑到：告警时间显示成 `56 年前`，一看就是拿秒当毫秒了。
  * 所以取秒/毫秒这件事只在 [Times.fromSeconds] 一处做。
  */
@@ -18,7 +18,7 @@ object Times {
     private const val HOUR = 60 * MINUTE
     private const val DAY = 24 * HOUR
 
-    /** `/api/time` 的 `utc_epoch`（秒）→ 毫秒 */
+    /** 服务器对时接口给的秒级时间戳 → 毫秒 */
     fun fromSeconds(epochSeconds: Long): Long = epochSeconds * SECOND
 
     private fun fmt(pattern: String): SimpleDateFormat =

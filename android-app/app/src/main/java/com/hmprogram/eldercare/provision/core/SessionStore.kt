@@ -21,7 +21,7 @@ class SessionStore(context: Context) : Session {
         set(value) = prefs.edit().putString(KEY_SERVER_BASE, normalizeBase(value)).apply()
 
     /**
-     * 网关 SoftAP 本地 API 基址。契约 §12.1 固定 `http://192.168.4.1/api`，
+     * 小盒子热点里的本地服务基址。契约 §12.1 固定，普通用户看不到也改不了，
      * 之所以设成可改：真机联调时可能把网关的 httpd 起在别的地址/端口，改这里比重编译快。
      */
     override var gatewayBase: String
@@ -60,7 +60,7 @@ class SessionStore(context: Context) : Session {
         get() = prefs.getString(KEY_GATEWAY_SN, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_GATEWAY_SN, value).apply()
 
-    /** 当前查看的主设备（`GET /api/devices` 里选的那台），首页/告警/报表都按它取数 */
+    /** 当前查看的主设备（设备列表里选的那台），首页/提醒/报表都按它取数 */
     var deviceId: Long
         get() = prefs.getLong(KEY_DEVICE_ID, 0L)
         set(value) = prefs.edit().putLong(KEY_DEVICE_ID, value).apply()
@@ -107,7 +107,7 @@ class SessionStore(context: Context) : Session {
         private const val KEY_ECHO_PWD = "echo_password"
 
         /** 契约 §12.1：网关 SoftAP 本地 API 的固定地址 */
-        const val DEFAULT_GATEWAY_BASE = "http://192.168.4.1/api"
+        const val DEFAULT_GATEWAY_BASE = AppConfig.GATEWAY_BASE
         private const val KEY_MOCK = "mock_mode"
         private const val KEY_TOKEN = "token"
         private const val KEY_USERNAME = "username"
@@ -117,13 +117,13 @@ class SessionStore(context: Context) : Session {
         private const val KEY_MUTE_UNTIL = "mute_until"
 
         /**
-         * 允许用户只输 `192.168.1.100`，自动补齐成 `http://192.168.1.100/api`
+         * 允许用户只输主机名，自动补齐成完整地址（协议前缀 + 路径前缀）
          * （契约 §6.1 Base URL 带 `/api` 前缀，漏了会全部 404）。
          */
         fun normalizeBase(raw: String): String {
             var s = raw.trim()
             if (s.isEmpty()) return s
-            if (!s.startsWith("http://") && !s.startsWith("https://")) s = "http://$s"
+            if (!s.startsWith(AppConfig.SCHEME) && !s.startsWith("https://")) s = AppConfig.SCHEME + s
             while (s.endsWith("/")) s = s.dropLast(1)
             if (!s.endsWith("/api")) s = "$s/api"
             return s

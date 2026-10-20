@@ -1,236 +1,224 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  界面文案一律用生活语言（见 docs/技术/App界面与文案规范.md）：
+  不出现网络地址、端口、接口名、参数名、设备内部术语。
+  技术字面量只允许出现在 core/AppConfig.kt 与 core/ApiPaths.kt。
+-->
 <resources>
-    <string name="app_name">老人居家配网</string>
+    <string name="app_name">老人守护</string>
 
-    <!-- 通用 -->
-    <string name="action_ok">确定</string>
-    <string name="action_cancel">取消</string>
-    <string name="action_retry">重试</string>
-    <string name="action_back">返回</string>
-    <string name="action_next">下一步</string>
-    <string name="action_copy">复制</string>
-    <string name="action_save">保存</string>
-    <string name="action_reset_defaults">恢复默认</string>
-    <string name="action_clear_log">清空日志</string>
-
-    <!-- 登录 -->
-    <string name="title_login">登录</string>
-    <string name="title_register">注册</string>
-    <string name="hint_username">账号（3–32 位字母/数字/下划线）</string>
-    <string name="hint_password">密码（8–64 位）</string>
-    <string name="hint_phone">手机号（可空，11 位）</string>
+    <!-- ===== 登录 / 注册 ===== -->
+    <string name="app_title">老人守护</string>
+    <string name="app_subtitle">随时知道爸妈好不好</string>
+    <string name="hint_phone">手机号</string>
+    <string name="hint_password">密码</string>
     <string name="action_login">登录</string>
-    <string name="action_register">注册</string>
-    <string name="action_switch_to_register">没有账号？去注册</string>
-    <string name="action_switch_to_login">已有账号？去登录</string>
-    <string name="action_skip_login">跳过登录（仅演示配网本地链路）</string>
-    <string name="login_note">说明：登录只用于「绑定账号」这一步。只演示「连通网关 + 绑定星闪节点」时可以不登录——网关本地 API 不需要账号。</string>
+    <string name="action_register_entry">还没有账号？立即注册</string>
+    <string name="register_title">注册</string>
+    <string name="hint_password_new">设置密码（至少 8 位）</string>
+    <string name="hint_password_confirm">再输一次密码</string>
+    <string name="action_register_and_login">注册并登录</string>
+    <string name="action_back_to_login">返回登录</string>
+    <string name="register_note">手机号就是账号，家里人可以共用同一个。</string>
+    <string name="login_note">家里人可以共用同一个账号；忘记密码请联系客服。</string>
+    <string name="mock_banner">演示模式：用假数据显示，不需要联网</string>
 
-    <!-- 主界面 -->
-    <string name="title_devices">我的设备</string>
-    <string name="action_add_device">添加设备（配网）</string>
-    <string name="action_dev_settings">开发者设置</string>
-    <string name="action_logout">退出登录</string>
-    <string name="action_provision_this">配网</string>
-    <string name="devices_empty">还没有绑定设备。点「添加设备」开始现场配网。</string>
-    <string name="mock_banner">当前为 MOCK 模式：所有网络请求都走本地假数据，不会真的连网关。</string>
+    <!-- ===== 底部导航 ===== -->
+    <string name="tab_home">首页</string>
+    <string name="tab_reminders">提醒</string>
+    <string name="tab_profile">我的</string>
 
-    <!-- 配网流程 -->
-    <string name="title_provision">设备配网</string>
-    <string name="title_wifi_scan">选择家庭 Wi-Fi</string>
-    <string name="title_pair_nodes">星闪节点绑定</string>
-    <string name="title_dev_settings">开发者设置</string>
-
-    <string name="step1_title">① 连接设备热点</string>
-    <string name="step1_desc">长按网关配对键 3 秒（声光双闪 2 次），再连上设备热点。连上后系统提示「已连接，无法访问互联网」是正常的——网关热点本来就不带外网。</string>
-    <string name="hint_hotspot_prefix">热点名前缀</string>
-    <string name="hint_ap_password">热点口令（8 位，见设备贴纸/串口日志）</string>
-    <string name="action_scan_hotspot">扫描附近热点</string>
-    <string name="action_connect_hotspot">自动连接该热点</string>
-    <string name="action_open_wifi_settings">打开系统 WLAN 设置</string>
-
-    <string name="step2_title">② 提交家庭 Wi-Fi（2.4G）</string>
-    <string name="action_pick_wifi">选择家庭 Wi-Fi</string>
-    <string name="hint_ssid">SSID</string>
-    <string name="hint_wifi_password">Wi-Fi 口令</string>
-    <string name="action_submit_wifi">提交给网关</string>
-    <string name="action_echo_password">口令回显（演示核对用，会显示在屏幕上）</string>
-
-    <string name="step3_title">③ 绑定到账号</string>
-    <string name="hint_gateway_sn">网关 SN（如 M0-3F1A2B）</string>
-    <string name="hint_bind_code">绑定码（6 位数字）</string>
-    <string name="action_bind_account">绑定到我的账号</string>
-
-    <string name="step4_title">④ 扫描并绑定星闪节点</string>
-    <string name="action_pair_scan">扫描附近节点</string>
-    <string name="action_pair_bind">绑定</string>
-    <string name="action_pair_unbind">解绑</string>
-    <string name="action_refresh_list">刷新列表</string>
-    <string name="action_refresh_status">刷新状态</string>
-    <string name="action_clear_whitelist">清空白名单（需二次确认）</string>
-    <string name="action_back_to_provision">返回配网页</string>
-    <string name="pair_nodes_empty">还没有扫描结果。点「扫描附近节点」。</string>
-    <string name="pair_gateway_hint">本页要求手机已连上网关热点（配网页 ① 做过即可）。扫描走网关本地 API，不需要外网。</string>
-
-    <string name="label_bound_list">已绑定节点</string>
-    <string name="label_log">操作日志</string>
-    <string name="action_copy_log">复制日志</string>
-    <string name="status_unknown">尚未读到网关状态</string>
-
-    <!-- Wi-Fi 扫描页 -->
-    <string name="wifi_scan_hint">选一个 2.4G 的家庭 Wi-Fi。列表里的 5G 项网关连不上，会直接失败。</string>
-    <string name="wifi_perm_banner">缺少定位/附近设备权限 → 扫描结果会一直是空的。点「重新扫描」时按提示授权。</string>
-    <string name="hint_manual_ssid">手动输入 SSID（隐藏网络或扫不到时用）</string>
-    <string name="action_rescan">重新扫描</string>
-    <string name="action_use_manual">用手输的 SSID</string>
-    <string name="wifi_list_empty">附近没有可用热点（或在设置里关掉了 Wi-Fi）。</string>
-
-    <!-- 开发者设置 -->
-    <string name="settings_server_title">服务器与网关地址</string>
-    <string name="hint_server_base">服务器 API 基址</string>
-    <string name="hint_gateway_base">网关本地 API 基址</string>
-    <string name="settings_gateway_note">网关本地 API 固定是 192.168.4.1（契约 §12.1）。只有在拿真实硬件做测试、改了网关侧监听地址时才需要动它。</string>
-    <string name="settings_mock">MOCK 模式（不联网，用本地假数据）</string>
-    <string name="settings_mock_note">打开后：登录用 demo/Passw0rd 以外的任意 8 位以上口令都会失败，正确口令是 Passw0rd；账号绑定需要绑定码 482913。这样可以在没有服务器、没有网关的情况下把整条界面流程走一遍。</string>
-    <!-- 运行期提示（代码里用到的） -->
-    <string name="err_username_len">账号长度需 3–32 位</string>
-    <string name="err_password_len">密码长度需 8–64 位</string>
-    <string name="err_no_hotspot">没扫到任何热点：先在系统里打开 Wi-Fi，并确认已授予定位/附近设备权限。</string>
-    <string name="err_no_ssid">还没有选 Wi-Fi 名称</string>
-    <string name="err_no_ap_pwd">还没填设备热点口令（见网关贴纸或串口日志）</string>
-    <string name="err_confirm_mismatch">确认词不对，什么都没改</string>
-    <string name="err_perm_denied">没有权限就扫不到热点。到「设置 → 应用 → 权限」里给本应用开启定位（Android 12 及以下）或附近设备（Android 13+）。</string>
-    <string name="err_wifi_off">手机的 Wi-Fi 开关是关的，扫描结果必然是空的：请先打开 Wi-Fi。</string>
-    <string name="msg_login_ok">登录成功：%1$s</string>
-    <string name="msg_register_ok">注册成功（user_id=%1$d），请登录</string>
-    <string name="msg_account">已登录：%1$s</string>
-    <string name="msg_no_account">未登录（只能做本地配网；「绑定到账号」需要先登录）</string>
-    <string name="msg_logout_confirm">退出后会清掉本机保存的登录态（不会解绑设备）。</string>
-    <string name="msg_copied">已复制</string>
-    <string name="msg_log_copied">日志已复制到剪贴板</string>
-    <string name="msg_saved">已保存</string>
-    <string name="msg_saved_restart_hint">已保存。MOCK 开关需要回到配网页重新打开才生效（已打开的页仍用旧链路）。</string>
-    <string name="msg_reset_done">已填回默认值，记得点「保存」</string>
-    <string name="msg_clear_log_hint">日志只存在配网页的内存里：重新进入配网页即可清空。</string>
-    <string name="msg_clear_whitelist_warning">清空后所有节点都会掉线、P0 闭环需要重新绑定。确认要继续吗？</string>
-
-    <string name="pair_scanning">正在扫描…（汇聚侧扫 15 s 左右，稍等）</string>
-    <string name="pair_done_fmt">扫描完成：发现 %1$d 个节点，已绑定 %2$d 个</string>
-    <string name="pair_done_detail">扫描完成：发现 %1$d 个节点，已绑定 %2$d 个，剩余槽位 %3$d</string>
-    <string name="pair_idle">还没扫描。点「扫描附近节点」开始。</string>
-    <string name="pair_no_result_tip">扫不到节点的常见原因：① 网关不在配网窗口内（长按配对键 3 秒重进）；② 节点没上电或没进配对模式；③ 汇聚与节点距离太远。</string>
-    <string name="label_bound_list_n">已绑定节点（%1$d 台）</string>
-    <string name="action_echo_password_on">口令回显：开（投屏时会显示，演示结束记得关）</string>
-
-    <!-- Wi-Fi 页补充 -->
-    <!-- 扫码添加设备 -->
-    <string name="action_scan_qr">扫码添加设备</string>
-    <string name="title_scan_qr">对准设备二维码</string>
-    <string name="err_qr_cancel">已取消扫码</string>
-    <string name="title_bind_device">绑定设备</string>
-    <string name="msg_bind_device_hint">确认 SN 与绑定码。绑定码在设备贴纸/运维单上，不预填——它是凭据，不该写进源码。</string>
-    <string name="hint_device_name">设备名称（可空，如「家里」）</string>
-    <string name="msg_scan_offline">相机不可用或未授权，可以手动输入 SN。</string>
-    <string name="err_qr_unknown">没从二维码里认出设备 SN：%1$s</string>
-    <string name="err_sn_or_code_empty">SN 与绑定码都不能为空</string>
-    <string name="err_need_login">绑定设备需要先登录</string>
-    <string name="msg_bind_ok">绑定成功：%1$s（id=%2$d）</string>
-    <string name="msg_bind_account_needs_internet">本步走公网服务器，必须先切回家庭 Wi-Fi 或蜂窝网络（网关 SoftAP 已关闭，本地地址 192.168.4.1 不再可达）。</string>
-    <string name="msg_need_switch_network">先把手机 Wi-Fi 切回家里/蜂窝网络：网关已切到 STA，本地配网地址不可达。</string>
-
-    <!-- ===== F7 首页 / 通用 ===== -->
+    <!-- ===== 首页 ===== -->
+    <string name="status_loading">正在看看爸妈家的情况…</string>
+    <string name="status_loading_hint">稍等一下，马上就好</string>
+    <string name="status_no_device">还没有绑定设备</string>
+    <string name="status_no_device_hint">点下面的「绑定新设备」，跟着提示连一下就好</string>
+    <string name="label_no_device">还没有绑定设备</string>
+    <string name="room_kitchen">厨房</string>
+    <string name="room_bedroom">卧室</string>
+    <string name="room_hall">门厅</string>
+    <string name="label_gas">燃气</string>
+    <string name="label_temp">温度</string>
+    <string name="label_humi">湿度</string>
+    <string name="label_fall">有人摔倒</string>
+    <string name="label_presence_now">现在有人</string>
+    <string name="label_door">门</string>
+    <string name="label_door_today">今天开关</string>
+    <string name="title_today">今天</string>
+    <string name="home_no_data">还没有收到数据，稍等一会儿</string>
+    <string name="action_open_report">看看这周的小结</string>
+    <string name="value_unknown">—</string>
+    <string name="value_none">无</string>
+    <string name="msg_urgent_alert">有紧急情况，请尽快联系家里人</string>
     <string name="pull_hint">下拉刷新</string>
     <string name="pull_release">松开刷新</string>
     <string name="pull_loading">正在刷新…</string>
-    <string name="offline_banner">网络不可用：下面是上次拿到的数据；恢复后下拉刷新即可</string>
-    <string name="err_token_expired">登录已过期，请重新登录</string>
-    <string name="err_no_device_selected">还没选设备：先到「设备」页绑定或选择一台</string>
-    <string name="label_no_device">未选择设备</string>
-    <string name="label_properties">属性（契约 §4.3 共 14 项，未上报的显示「未上报」）</string>
-    <string name="label_nodes">节点</string>
-    <string name="title_alerts">告警</string>
-    <string name="title_alert_detail">告警详情</string>
-    <string name="title_report">周报 / 月报</string>
-    <string name="title_settings">设置</string>
-    <string name="title_smoke">接口自检</string>
-    <string name="label_dispositions">处置记录</string>
-    <string name="label_dispose_action">处置动作</string>
-    <string name="label_readings_around">事发前后读数</string>
-    <string name="label_compare">对比</string>
-    <string name="label_summary">汇总</string>
-    <string name="label_activity_series">活动分布</string>
-    <string name="label_thresholds">阈值与周期（21 项）</string>
-    <string name="label_mute">告警静音（App 本机）</string>
-    <string name="label_demo">演示事件</string>
-    <string name="label_mock">Mock 模式</string>
-    <string name="label_device_online">在线</string>
-    <string name="label_device_offline">离线</string>
-    <string name="label_battery">电池</string>
-    <string name="demo_note">只支持 gas / fall / sos（契约 §6.12）；door / presence 不是合法事件</string>
-    <string name="action_open_alerts">告警列表</string>
-    <string name="action_open_report">周报 / 月报</string>
-    <string name="action_open_settings">设置</string>
-    <string name="action_open_devices">设备绑定</string>
-    <string name="action_bind_new">绑定新设备</string>
+    <string name="offline_banner">网络不太好，正在重试</string>
+
+    <!-- ===== 提醒 ===== -->
+    <string name="title_reminders">提醒</string>
+    <string name="filter_all">全部</string>
+    <string name="filter_pending">未处理</string>
+    <string name="reminders_empty">还没有提醒，一切正常</string>
     <string name="action_load_more">加载更多</string>
-    <string name="action_period_week">周报（7 天）</string>
-    <string name="action_period_month">月报（30 天）</string>
-    <string name="action_contacted">已联系老人</string>
-    <string name="action_checked">已上门查看</string>
-    <string name="action_false_alarm">误报</string>
-    <string name="action_other">其他</string>
-    <string name="action_save_all">保存全部阈值</string>
-    <string name="action_dispatch_settings">下发到网关</string>
+    <string name="tag_pending">未处理</string>
+    <string name="tag_done">已处理</string>
+    <string name="action_ack">我知道了</string>
+    <string name="action_done">已处理</string>
+    <string name="hint_note">想说点什么（可不填）</string>
+    <string name="title_history">处理记录</string>
+    <string name="hint_check_in_person">给%1$s打个电话，问问情况吧</string>
+    <string name="msg_disposed">记下了，谢谢</string>
+    <string name="note_ack_default">看到了</string>
+    <string name="err_alert_missing">找不到这条提醒</string>
+
+    <!-- ===== 我的 ===== -->
+    <string name="title_profile">我的</string>
+    <string name="title_family">家庭成员</string>
+    <string name="label_phone_account">手机号：%1$s</string>
+    <string name="label_small_box">家里的小盒子</string>
+    <string name="action_bind_new">绑定新设备</string>
+    <string name="label_push">手机提醒</string>
+    <string name="push_hint_on">有情况会在这里提醒你</string>
+    <string name="push_hint_off">手机不再响，明天自动恢复</string>
+    <string name="action_change_password">修改密码</string>
+    <string name="action_logout">退出登录</string>
+    <string name="label_version">版本 %1$s（%2$d）</string>
+    <string name="msg_advanced_taps">再点 %1$d 次进入高级设置</string>
+    <string name="msg_logout_confirm">退出后需要重新登录，设备不会被解绑。</string>
+    <string name="msg_mute_left">还有 %1$d 分钟恢复提醒</string>
+
+    <!-- ===== 高级（连点版本号可见） ===== -->
+    <string name="title_advanced">高级设置</string>
+    <string name="advanced_note">这些设置会影响 App 连接云端，非维护人员请不要修改。</string>
+    <string name="label_server_base">云端地址</string>
+    <string name="hint_server_base">留空或填错就连不上云端</string>
+    <string name="action_save">保存</string>
+    <string name="label_mock">演示模式</string>
+    <string name="mock_switch_hint">演示模式开关</string>
+    <string name="mock_switch_hint_on">现在用假数据，不需要网络</string>
+    <string name="mock_switch_hint_off">现在连真实云端</string>
+    <string name="msg_mock_on">已切到演示模式</string>
+    <string name="msg_mock_off">已切回真实云端</string>
+    <string name="label_demo">试一条提醒</string>
+    <string name="action_demo_gas">燃气</string>
+    <string name="action_demo_fall">有人摔倒</string>
+    <string name="action_demo_sos">紧急求助</string>
+    <string name="event_gas">燃气</string>
+    <string name="event_fall">有人摔倒</string>
+    <string name="event_sos">紧急求助</string>
+    <string name="msg_demo_sent">已经发出一条「%1$s」提醒</string>
+    <string name="action_maintenance">更多维护设置</string>
+    <string name="action_self_check">接口自检</string>
+    <string name="action_close">返回</string>
+    <string name="err_server_empty">云端地址不能为空</string>
+
+    <!-- ===== 添加设备 ===== -->
+    <string name="add_step_1_title">第 1 步：先连上小盒子</string>
+    <string name="add_step_1_hint">小盒子通电后，会发出一个名字以 ElderCare 开头的 Wi-Fi</string>
+    <string name="add_step_1_body">打开手机的 Wi-Fi 设置连上它。连不上就靠近一点再试。</string>
+    <string name="action_open_wifi">去连接</string>
+    <string name="add_step_2_title">第 2 步：选家里的 Wi-Fi</string>
+    <string name="add_step_2_hint">小盒子要连上家里的 Wi-Fi，才能把数据发到云端</string>
+    <string name="action_load_wifi">读取可用的 Wi-Fi</string>
+    <string name="hint_wifi_name">家里 Wi-Fi 的名字</string>
+    <string name="hint_wifi_password">家里 Wi-Fi 的密码</string>
+    <string name="add_step_3_title">第 3 步：正在连接…</string>
+    <string name="add_step_3_body">大概要等一分钟，请把手机放在小盒子旁边</string>
+    <string name="add_step_4_title">第 4 步：结果</string>
+    <string name="add_step_4_hint">连上以后，小盒子会自己把数据发到云端</string>
+    <string name="msg_wifi_ok">小盒子已连上你家 Wi-Fi，正在把数据发到云端</string>
+    <string name="msg_wifi_failed">没连上，再试一次</string>
+    <string name="wifi_reason_auth">Wi-Fi 密码不对，请重新输入</string>
+    <string name="wifi_reason_not_found">没找到这个 Wi-Fi，请确认它离手机不远</string>
+    <string name="wifi_reason_timeout">一直连不上，可能信号太弱，靠近一点再试</string>
+    <string name="wifi_reason_open">这个 Wi-Fi 没有密码，暂不支持</string>
+    <string name="wifi_reason_unknown">稍后再试一次</string>
+    <string name="err_not_connected">手机还没连上小盒子的 Wi-Fi，请先回上一步</string>
+    <string name="err_wifi_name">请填家里 Wi-Fi 的名字</string>
+    <string name="err_wifi_password_len">Wi-Fi 密码至少要 8 位</string>
+    <string name="msg_wifi_scan_empty">没读到可用 Wi-Fi，直接手动填写名字</string>
+    <string name="action_next_step">下一步</string>
+    <string name="action_prev_step">上一步</string>
+    <string name="action_retry">再试一次</string>
+    <string name="add_bind_title">把设备绑到我的账号</string>
+    <string name="hint_device_sn">设备编号（盒子上贴着）</string>
+    <string name="hint_bind_code">绑定码（6 位）</string>
+    <string name="action_bind_account">绑定</string>
+    <string name="err_bind_sn_code">设备编号和绑定码都要填</string>
+    <string name="msg_bind_ok">绑定成功</string>
+
+    <!-- ===== 维护设置（21 项，藏在高级里） ===== -->
+    <string name="title_maintenance">维护设置</string>
+    <string name="maintenance_note">这些是小盒子内部的工作参数，改了会影响判断，非维护人员请勿修改。</string>
+    <string name="action_save_all">保存全部</string>
+    <string name="action_dispatch_settings">下发到小盒子</string>
+    <string name="label_mute">手机不再响</string>
     <string name="action_mute_30">静音 30 分钟</string>
     <string name="action_mute_60">静音 60 分钟</string>
-    <string name="action_unmute">取消静音</string>
-    <string name="action_demo_gas">燃气演示</string>
-    <string name="action_demo_fall">跌倒演示</string>
-    <string name="action_demo_sos">紧急求助演示</string>
-    <string name="action_smoke_test">开始自检</string>
-    <string name="hint_dispose_note">备注（≤200 字，可空）</string>
-    <string name="report_no_data">暂无数据</string>
-    <string name="smoke_idle">点「开始自检」逐个请求接口，逐条显示通/不通</string>
-    <string name="compare_today">今日：%1$s</string>
-    <string name="compare_yesterday">昨日：%1$s</string>
-    <string name="compare_delta">变化：%1$s</string>
-    <string name="settings_source_fmt">设置来源：%1$s</string>
-    <string name="msg_mute_on">已静音 %1$d 分钟（App 本机不弹告警横幅）</string>
-    <string name="msg_mute_off">已取消静音</string>
-    <string name="msg_mute_left">静音中：剩余 %1$d 分钟</string>
-    <string name="msg_not_muted">未静音</string>
-    <string name="msg_dispose_ok">处置已提交：%1$s</string>
-    <string name="msg_saved_settings">已保存（source=%1$s）</string>
-    <string name="msg_demo_sent">演示事件已下发：%1$s</string>
-    <string name="msg_mock_on">已开启 Mock 模式（假数据，返回上一页生效）</string>
-    <string name="msg_mock_off">已关闭 Mock 模式（走真实服务器）</string>
-    <string name="msg_online_ok">已连上服务器</string>
-    <string name="using_mock">当前为 Mock 模式：数据全部是内置假数据，可无服务器演示</string>
-    <string name="alert_filter_all">全部状态</string>
-    <string name="alert_status_pending">待处置</string>
-    <string name="alert_status_confirmed">已确认</string>
-    <string name="alert_status_resolved">已处置</string>
-    <string name="type_all">全部类型</string>
-    <string name="type_fall">跌倒</string>
-    <string name="type_gas">燃气</string>
-    <string name="type_sos">紧急求助</string>
-    <string name="type_no_motion">无活动</string>
-    <string name="type_node_offline">节点离线</string>
-    <string name="type_device_offline">网关离线</string>
-    <string name="type_door_left">门未关</string>
-    <string name="type_env">温湿度</string>
+    <string name="action_unmute">恢复提醒</string>
+    <string name="msg_not_muted">手机正常提醒</string>
+    <string name="msg_mute_on">手机在 %1$d 分钟内不再响</string>
+    <string name="msg_mute_off">已恢复提醒</string>
+    <string name="msg_saved">已保存</string>
+    <string name="msg_dispatch_sent">已发出 %1$d 项，等小盒子确认</string>
+    <string name="label_cloud">云端接入（维护用）</string>
+    <string name="hint_cloud_host">接入地址</string>
+    <string name="hint_cloud_port">端口（默认 1883）</string>
+    <string name="hint_cloud_device">设备标识</string>
+    <string name="hint_cloud_secret">密钥</string>
+    <string name="action_submit_cloud">提交</string>
+    <string name="err_cloud_fields">云端三项都要填</string>
+    <string name="msg_cloud_saved">已保存：%1$s:%2$d · %3$s</string>
+    <string name="msg_cloud_none">还没有配置云端</string>
+    <string name="msg_cloud_need_hotspot">先把手机连到小盒子的 Wi-Fi，再提交</string>
 
-    <!-- ===== F4 华为云 IoTDA 三件套 ===== -->
-    <string name="step_iotda_title">④ 华为云 IoTDA 三件套（可跳过）</string>
-    <string name="msg_iotda_skip">跳过也能在局域网内跑；填了平台侧才看得到设备。只提交云凭据不会动家庭 Wi-Fi。</string>
-    <string name="hint_iotda_host">IoTDA 接入地址（如 xxx.st1.iotda-device.cn-north-4.myhuaweicloud.com）</string>
-    <string name="hint_iotda_port">端口（默认 1883）</string>
-    <string name="hint_iotda_device">设备 ID</string>
-    <string name="hint_iotda_secret">设备密钥</string>
-    <string name="action_submit_iotda">提交云凭据</string>
-    <string name="msg_iotda_ok">云凭据已保存：%1$s</string>
-    <string name="msg_iotda_none">网关尚未配置云凭据</string>
+    <!-- ===== 自检（维护用） ===== -->
+    <string name="title_self_check">接口自检</string>
+    <string name="self_check_idle">点下面的按钮开始自检</string>
+    <string name="self_check_running">正在检查…</string>
+    <string name="action_run_self_check">开始自检</string>
+    <string name="self_check_summary_fmt">通过 %1$d 项，失败 %2$d 项</string>
+    <string name="self_check_skip_no_reminder">没有提醒可看，跳过</string>
+    <string name="self_check_skip_no_pending">没有待处理的提醒，跳过</string>
+    <string name="self_check_readonly">真实云端下只检查读取，避免留下测试数据</string>
+
+    <!-- ===== 这周 / 这个月 ===== -->
+    <string name="title_report">这周 / 这个月</string>
+    <string name="action_period_week">这周</string>
+    <string name="action_period_month">这个月</string>
+    <string name="label_compare">和昨天比</string>
+    <string name="compare_today">今天 %1$s</string>
+    <string name="compare_yesterday">昨天 %1$s</string>
+    <string name="compare_delta">变化 %1$s</string>
+    <string name="label_summary">这周小结</string>
+    <string name="summary_activity_fmt">一共走动 %1$d 次，%2$d 天有活动，平均每天 %3$s 次，最忙 %4$s，最安静 %5$s</string>
+    <string name="summary_alerts_fmt">提醒 %1$d 条（已处理 %2$d、没处理 %3$d）%4$s</string>
+    <string name="summary_env_fmt">屋里平均 %1$s℃，最低 %2$s℃，最高 %3$s℃，湿度 %4$s%%</string>
+    <string name="label_activity">每天的活动</string>
+    <string name="activity_total_fmt">一共 %1$d 次活动</string>
+    <string name="report_no_data">还没有收到数据，稍等一会儿</string>
     <string name="action_refresh">刷新</string>
+
+    <!-- ===== 修改密码 ===== -->
+    <string name="title_change_password">修改密码</string>
+    <string name="hint_old_password">当前密码</string>
+    <string name="err_old_password">当前密码不对</string>
+    <string name="msg_password_change_unsupported">当前密码正确。线上改密码还没开通，请联系家里人或客服帮你改。</string>
+
+    <!-- ===== 运行期提示 ===== -->
+    <string name="err_phone_format">请输入 11 位手机号</string>
+    <string name="err_phone_or_password">手机号或密码不对</string>
+    <string name="err_phone_taken">这个手机号已经注册过了，直接登录吧</string>
+    <string name="err_password_mismatch">两次输入的密码不一样</string>
+    <string name="err_password_len">密码至少要 8 位</string>
+    <string name="err_need_login">请先登录</string>
+    <string name="err_token_expired">登录已过期，请重新登录</string>
+    <string name="err_no_device">还没有绑定设备，先去「我的」绑定</string>
+    <string name="msg_login_ok">登录成功</string>
+    <string name="msg_register_ok">注册好了，正在进入首页</string>
+    <string name="msg_register_ok_login_manual">注册好了，请用刚才的手机号和密码登录</string>
+    <string name="msg_no_account">还没登录</string>
+    <string name="action_ok">好</string>
+    <string name="action_cancel">取消</string>
 </resources>
-
-

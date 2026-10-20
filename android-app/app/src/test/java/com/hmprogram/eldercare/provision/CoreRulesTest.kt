@@ -5,7 +5,7 @@ import com.hmprogram.eldercare.provision.core.Envelope
 import com.hmprogram.eldercare.provision.core.LocalGateway
 import com.hmprogram.eldercare.provision.core.ApiResult
 import com.hmprogram.eldercare.provision.core.SessionStore
-import com.hmprogram.eldercare.provision.ui.parseDeviceQr
+import com.hmprogram.eldercare.provision.core.parseDeviceQr
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

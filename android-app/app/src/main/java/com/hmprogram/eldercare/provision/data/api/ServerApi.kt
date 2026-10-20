@@ -28,7 +28,7 @@ import com.hmprogram.eldercare.provision.data.net.mapTo
 import org.json.JSONObject
 
 /**
- * 契约 §6 服务器 REST 接口（18 个 + `/api/time`）的**唯一出口**。
+ * 契约 §6 服务器接口（18 个 + 对时）的**唯一出口**。
  *
  * 设计口径：
  *   · 每个方法第一行注释写契约小节号，验收时能逐条对表；
@@ -77,11 +77,11 @@ class ServerApi(private val http: HttpClient) {
             }.toString(),
         ).mapTo()
 
-    /** §6.7 实时状态：14 属性 + 节点 + 在线状态 */
+    /** §6.7 实时状态：14 项属性 + 房间设备 + 在线状态 */
     suspend fun deviceStatus(deviceId: Long): ApiResult<DeviceStatusData> =
         http.get(ApiPaths.deviceStatus(deviceId)).mapTo()
 
-    /** §6.8 历史读数（可选过滤：类型/节点/时间窗） */
+    /** §6.8 历史读数（可选过滤：类型/房间设备/时间窗） */
     suspend fun readings(
         deviceId: Long,
         type: String? = null,

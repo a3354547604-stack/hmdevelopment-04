@@ -92,7 +92,7 @@ class ErrorMappingTest {
             1602 to "2.4G",
             1603 to "空闲",
             1604 to "扫描",
-            1605 to "H1",
+            1605 to "主机",
             1606 to "8",
         )
         expected.forEach { (code, keyword) ->
