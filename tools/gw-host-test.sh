@@ -16,7 +16,12 @@
 #      编译运行，日志取回 rk2206-gateway/out/。所以"只有 docker 的机器"也能复现同一结果。
 #
 # 用法：tools/gw-host-test.sh
-# 退出码：0 = 全部用例通过；1 = 有用例失败或编译失败
+# 退出码：0 = 全部用例通过；1 = 有用例失败或编译失败；
+#         2 = **环境不可用**（容器没在跑 / 没有编译器 / 本次没产生日志）——此时绝不打印「通过」
+# ⚠ t142 假绿修复：环境不可用必须 exit 2，且判定只读**本次**运行产生的日志。
+#   旧版把 run_container 守门返回的 2 用 `|| true` 吞掉，然后拿上一次的 host-test.log
+#   判出「通过 459 / 失败 0」并打印「全部用例通过」——容器根本没起来（t141 首日踩到：
+#   拿到假的 447，重开 Docker Desktop + docker start 容器后才是真的 459）。
 # =============================================================================
 set -euo pipefail
 
@@ -57,14 +62,18 @@ run_host() {
     local brc=$?
     [ "$brc" = "0" ] || { cat "$BUILDF"; return 1; }
     "$OUT/gw_selftest" > "$LOGF" 2>&1
-    return $?
+    local trc=$?
+    # 自测程序自己的退出码只表达「用例过/不过」，统一归一到 0/1，
+    # 免得它的非 0 值（如 2）被上层误当成「环境不可用」。
+    [ "$trc" = "0" ] && return 0 || return 1
 }
 
 run_container() {
     echo "[gw-host-test] 模式：构建容器 $CONT（主机没有编译器）"
+    # 返回码约定：0 = 跑完；1 = 用例/编译失败；**3 = 环境不可用**（上层映射成脚本 exit 2）
     docker inspect -f '{{.State.Running}}' "$CONT" 2>/dev/null | grep -q true || {
         echo "容器 $CONT 没在运行：docker start $CONT（或见 tools/gw-build.sh 顶部注释重建）" >&2
-        return 2
+        return 3
     }
     # 用 tar 流而不是 docker cp：docker cp 在 /mnt/c（DrvFs）上出现过只拷了一部分文件、
     # 却仍然返回 0 的情况，随后 gcc 报一串 "No such file or directory" 让人以为是代码问题。
@@ -76,7 +85,7 @@ run_container() {
     set -- $staged
     if [ "${1:-0}" -lt 12 ] || [ "${2:-0}" -lt 12 ] || [ "${3:-0}" -lt 7 ]; then
         echo "[gw-host-test] 暂存失败：src 只拷到 ${1:-0} 个 .c / ${2:-0} 个 .h，stub ${3:-0} 个头（期望 12/12/7）" >&2
-        return 2
+        return 3
     fi
 
     # 注意：docker exec bash -lc 的字符串里**不能**用反斜杠续行 —— 宿主的双引号会先把
@@ -91,17 +100,47 @@ run_container() {
     return $rc
 }
 
+# t142：判定只许读**本次**运行产生的日志。先删上一次的——旧版最致命的假绿就在这：
+# run_container 的守门 `return 2` 被 `|| true` 吞掉，随后拿上一次的 host-test.log
+# 判出「通过 459 / 失败 0」并打印「全部用例通过」，而容器根本没跑。
+rm -f "$LOGF" "$BUILDF"
+
 mode=host
+run_rc=0
 if ! command -v "$CC" >/dev/null 2>&1; then
     mode=container
-    run_container || true
+    run_container || run_rc=$?
 else
-    run_host || true
+    run_host || run_rc=$?
+fi
+
+if [ "$run_rc" = "3" ]; then
+    echo "[gw-host-test] 环境不可用（脚本 exit 2，不是用例失败）：$mode 模式没跑起来，本次没有结果——不判定为成功。" >&2
+    exit 2
+fi
+if [ "$run_rc" != "0" ]; then
+    echo "[gw-host-test] 本次运行失败（exit 1）：编译或用例没通过。" >&2
+    if [ -s "$BUILDF" ]; then
+        grep -E "error:" "$BUILDF" | head -20 >&2 || true
+    fi
+    if [ -s "$LOGF" ]; then
+        grep -E "✗|失败 [1-9]" "$LOGF" | head -20 >&2 || true
+    fi
+    exit 1
+fi
+if [ ! -s "$LOGF" ]; then
+    echo "[gw-host-test] 环境不可用（exit 2）：跑完却没有日志 $LOGF——上一次的日志已删除、不复用，故不判定为成功。" >&2
+    exit 2
 fi
 
 # ------------------------------ 判定 ------------------------------
 ok=1
 if [ "$mode" = "container" ]; then
+    # docker exec 中途失败（引擎掉线等）时日志里连 BUILD_RC 都不会有：那是环境问题，不是用例失败
+    if ! grep -q "^BUILD_RC=" "$LOGF"; then
+        echo "[gw-host-test] 环境不可用（脚本 exit 2）：容器日志里没有 BUILD_RC 标记（docker exec 失败？），不判定为成功。" >&2
+        exit 2
+    fi
     # 把编译输出和运行输出分开：编译段到 RUN_RC 之前，运行段在其后
     sed -n '1,/^RUN_RC=/p' "$LOGF" > "$BUILDF" || true
     grep -q "^BUILD_RC=0" "$LOGF" || ok=0
