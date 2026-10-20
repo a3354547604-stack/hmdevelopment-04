@@ -1,0 +1,298 @@
+/**
+ * 「我的」页（规范 §2：三个页签 = 首页 / 提醒 / 我的）。
+ *
+ * 普通用户在这里只做四件事：添加设备、开关手机提醒、改密码、退出登录。
+ *  · 「添加设备」→ 4 步向导（pages/NetConfigPage）；
+ *  · 「修改密码」→ 服务器没有改密接口（`server/app/routers/auth.py` 只有
+ *    register/login/me），所以这里**如实**说「需要在管理员后台改」，不做假的成功提示；
+ *  · 「关于 → 版本号」连点 5 次才展开「高级」：服务器地址、离线演示开关都在里面。
+ *    为什么藏起来：这些是维护项，普通用户看到服务器地址只会以为「要自己搭服务器」。
+ */
+
+import { router } from '@kit.ArkUI';
+import { AppConfig } from '../common/AppConfig';
+import { AppTheme } from '../common/AppTheme';
+import { RuntimeConfig } from '../common/RuntimeConfig';
+import { UserCopy } from '../common/UserCopy';
+import { PrimaryButton } from '../components/CommonViews';
+import { SwitchRow } from '../components/SettingRows';
+import { SessionStore } from '../service/SessionStore';
+import { ServiceHub } from '../service/ServiceHub';
+
+@Component
+export struct ProfilePage {
+  @StorageProp('deviceId') deviceId: number = 0;
+  @State advanced: boolean = false;
+  @State taps: number = 0;
+  @State serverInput: string = '';
+  @State mockOn: boolean = true;
+  @State savedTip: string = '';
+
+  aboutToAppear(): void {
+    this.mockOn = RuntimeConfig.mockMode();
+    this.serverInput = RuntimeConfig.baseUrl();
+  }
+
+  private onVersionTap(): void {
+    this.taps = this.taps + 1;
+    if (this.taps >= AppConfig.ADVANCED_TAP_COUNT && !this.advanced) {
+      this.advanced = true;
+      this.savedTip = '';
+    }
+  }
+
+  private saveAdvanced(): void {
+    RuntimeConfig.setBaseUrl(this.serverInput);
+    RuntimeConfig.setMockMode(this.mockOn);
+    ServiceHub.invalidate();
+    this.serverInput = RuntimeConfig.baseUrl();
+    this.savedTip = UserCopy.ADVANCED_SAVED;
+  }
+
+  private resetAdvanced(): void {
+    RuntimeConfig.resetBaseUrl();
+    ServiceHub.invalidate();
+    this.serverInput = RuntimeConfig.baseUrl();
+    this.savedTip = UserCopy.ADVANCED_SAVED;
+  }
+
+  private cycleMock(on: boolean): void {
+    this.mockOn = on;
+    RuntimeConfig.setMockMode(on);
+    ServiceHub.invalidate();
+    this.savedTip = UserCopy.ADVANCED_SAVED;
+  }
+
+  @Builder
+  row(label: string, value: string, chevron: boolean, onTap: () => void) {
+    Row({ space: 8 }) {
+      Text(label)
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        .layoutWeight(1)
+      Text(value)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      if (chevron) {
+        Text('›')
+          .fontSize(AppTheme.FONT_SECTION)
+          .fontColor(AppTheme.COLOR_TEXT_HINT)
+      }
+    }
+    .width('100%')
+    .height(48)
+    .onClick(() => onTap())
+  }
+
+  @Builder
+  card(title: string) {
+    Text(title)
+      .fontSize(AppTheme.FONT_CAPTION)
+      .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+      .width('100%')
+      .padding({ left: 4, bottom: 2 })
+  }
+
+  build() {
+    Scroll() {
+      Column({ space: AppTheme.CARD_GAP }) {
+        // 家人
+        Column({ space: 4 }) {
+          this.card(UserCopy.SEC_FAMILY)
+          Column({ space: 4 }) {
+            Row({ space: 8 }) {
+              Text('👨‍👩‍👧')
+                .fontSize(22)
+              Column({ space: 2 }) {
+                Text(SessionStore.username().length > 0 ? SessionStore.username() : '我')
+                  .fontSize(AppTheme.FONT_BODY)
+                  .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+                Text('负责照看家里的小盒子')
+                  .fontSize(AppTheme.FONT_CAPTION)
+                  .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+            }
+            .width('100%')
+            .padding(AppTheme.CARD_PADDING)
+            .backgroundColor(AppTheme.COLOR_SURFACE)
+            .borderRadius(AppTheme.CARD_RADIUS)
+          }
+        }
+        .width('100%')
+
+        // 绑定的设备
+        Column({ space: 4 }) {
+          this.card(UserCopy.SEC_DEVICE)
+          Column() {
+            Row({ space: 8 }) {
+              Text('📦')
+                .fontSize(22)
+              Column({ space: 2 }) {
+                Text(SessionStore.deviceName().length > 0 ? SessionStore.deviceName() : '还没有添加设备')
+                  .fontSize(AppTheme.FONT_BODY)
+                  .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+                Text(UserCopy.BIND_DEVICE_HINT)
+                  .fontSize(AppTheme.FONT_CAPTION)
+                  .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+            }
+            .width('100%')
+
+            PrimaryButton({
+              text: UserCopy.BIND_DEVICE,
+              canTap: true,
+              loading: false,
+              plain: true,
+              onTap: () => {
+                router.pushUrl({ url: 'pages/NetConfigPage' });
+              }
+            })
+              .margin({ top: 10 })
+          }
+          .width('100%')
+          .padding(AppTheme.CARD_PADDING)
+          .backgroundColor(AppTheme.COLOR_SURFACE)
+          .borderRadius(AppTheme.CARD_RADIUS)
+        }
+        .width('100%')
+
+        // 手机提醒
+        Column({ space: 4 }) {
+          this.card(UserCopy.SEC_NOTIFY)
+          Column() {
+            SwitchRow({
+              label: UserCopy.NOTIFY_HINT,
+              hint: '关掉后只在 App 里看得到提醒',
+              checked: true,
+              onToggle: (on: boolean) => {
+                // 真正推送依赖 AGC 与 push token（契约 §6.19）；本原型没有接入，
+                // 所以这里只保存偏好，不谎称「已开启推送」。
+                this.savedTip = on ? '有情况时会在 App 里提醒你' : '已关掉手机提醒';
+              }
+            })
+          }
+          .width('100%')
+          .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING, top: 4, bottom: 4 })
+          .backgroundColor(AppTheme.COLOR_SURFACE)
+          .borderRadius(AppTheme.CARD_RADIUS)
+        }
+        .width('100%')
+
+        // 账号
+        Column({ space: 4 }) {
+          this.card(UserCopy.SEC_SECURITY)
+          Column() {
+            this.row(UserCopy.CHANGE_PWD, UserCopy.CHANGE_PWD_HINT, true, () => {
+              this.savedTip = UserCopy.CHANGE_PWD_HINT;
+            })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
+            this.row(UserCopy.LOGOUT, '', false, () => {
+              SessionStore.clear();
+            })
+          }
+          .width('100%')
+          .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
+          .backgroundColor(AppTheme.COLOR_SURFACE)
+          .borderRadius(AppTheme.CARD_RADIUS)
+        }
+        .width('100%')
+
+        if (this.savedTip.length > 0) {
+          Text(this.savedTip)
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(AppTheme.COLOR_PRIMARY)
+            .width('100%')
+            .padding({ left: 4 })
+        }
+
+        // 关于（连点版本号 5 次出高级）
+        Column({ space: 4 }) {
+          this.card(UserCopy.SEC_ABOUT)
+          Column({ space: 8 }) {
+            Row({ space: 8 }) {
+              Text(UserCopy.VERSION_LABEL)
+                .fontSize(AppTheme.FONT_BODY)
+                .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+                .layoutWeight(1)
+              Text(AppConfig.APP_VERSION)
+                .fontSize(AppTheme.FONT_CAPTION)
+                .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+                .onClick(() => this.onVersionTap())
+            }
+            .width('100%')
+
+            if (this.advanced) {
+              Divider()
+                .color(AppTheme.COLOR_DIVIDER)
+              Text(UserCopy.ADVANCED_TITLE)
+                .fontSize(AppTheme.FONT_CAPTION)
+                .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+                .width('100%')
+              Text(UserCopy.ADVANCED_HINT)
+                .fontSize(AppTheme.FONT_CAPTION - 1)
+                .fontColor(AppTheme.COLOR_TEXT_HINT)
+                .width('100%')
+              Text(UserCopy.ADVANCED_SERVER)
+                .fontSize(AppTheme.FONT_CAPTION)
+                .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+                .width('100%')
+              TextInput({ text: this.serverInput, placeholder: 'http://host:port' })
+                .height(44)
+                .fontSize(AppTheme.FONT_CAPTION)
+                .backgroundColor(AppTheme.COLOR_BG)
+                .borderRadius(AppTheme.BTN_RADIUS)
+                .onChange((v: string) => {
+                  this.serverInput = v;
+                })
+              SwitchRow({
+                label: UserCopy.ADVANCED_MOCK,
+                hint: '打开时不连网，只用离线数据',
+                checked: this.mockOn,
+                onToggle: (on: boolean) => this.cycleMock(on)
+              })
+              Row({ space: AppTheme.CARD_GAP }) {
+                PrimaryButton({
+                  text: '保存',
+                  canTap: true,
+                  loading: false,
+                  plain: false,
+                  onTap: () => this.saveAdvanced()
+                })
+                  .layoutWeight(1)
+                PrimaryButton({
+                  text: UserCopy.ADVANCED_RESET,
+                  canTap: true,
+                  loading: false,
+                  plain: true,
+                  onTap: () => this.resetAdvanced()
+                })
+                  .layoutWeight(1)
+              }
+              .width('100%')
+            }
+          }
+          .width('100%')
+          .padding(AppTheme.CARD_PADDING)
+          .backgroundColor(AppTheme.COLOR_SURFACE)
+          .borderRadius(AppTheme.CARD_RADIUS)
+          .alignItems(HorizontalAlign.Start)
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .padding(AppTheme.PAGE_PADDING)
+    }
+    .width('100%')
+    .height('100%')
+    .scrollBar(BarState.Off)
+    .backgroundColor(AppTheme.COLOR_BG)
+    .align(Alignment.Top)
+  }
+}

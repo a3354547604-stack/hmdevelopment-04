@@ -1,362 +1,260 @@
 /**
- * 报表页：周报 / 月报（契约 §6.16 活动报表、§6.17 趋势、§6.18 汇总）。
+ * 「最近的情况」页（原「报表」页；规范 §2 的三个页签里没有报表，从页签移到首页入口）。
  *
- * 为什么一页塞三个接口而不是三页：
- *  家属真正关心的是一个组合问题——"这周活动量比上周少了吗？夜里起夜正常吗？
- *  有没有反复报警？"。拆成三页要来回切，放一屏才能形成判断。
+ * 对用户只讲两句话：
+ *  · 这周/这个月，爸妈在家走动了多少次（和上期比是多是少）；
+ *  · 这段时间有几次提醒、其中几次还没处理、几次是误报。
  *
- * 为什么先画柱图不画折线：
- *  活动量是按小时/按天计数的离散值，柱图读起来比折线准（折线会暗示"中间也在变"）。
+ * 所以页面上去掉了一切技术表述：没有「活动量（本周）」「汇总」「接口：GET /api/...」
+ * 这类字样，也不让用户自己算百分比——对比文案由服务器 `compare.text` 生成（§6.17），
+ * App 只管翻译成普通人看得懂的话。
  *
- * 老人相关的取舍：数字用 22–32 fp（比字号规范大一号），
- *  "比昨天多/少"这类对比用文字讲明白，不让用户自己算百分比。
+ * 为什么从三个周期砍成两个：`day`（今日 24 小时分布）对家属的决策价值最低，
+ * 而多一个按钮就多一次误点；周/月才是「这段时间过得怎么样」的答案。
  */
 
-import { ReportViewModel, ReportState, REPORT_PERIOD_LABELS } from '../viewmodel/ReportViewModel';
+import { router } from '@kit.ArkUI';
 import { AppTheme } from '../common/AppTheme';
-import { Formatter } from '../common/Formatter';
-import { SectionTitle, StatTile, InfoRow, PrimaryButton } from '../components/CommonViews';
-import { HourlyBars, DailyBuckets } from '../components/Charts';
-import { LoadingView, ErrorView } from '../components/StateViews';
-import {
-  ActivityReport, TrendReport, SummaryReport, SummaryAlertPart, HourlyBucket
-} from '../model/Types';
+import { UserCopy } from '../common/UserCopy';
+import { PrimaryButton } from '../components/CommonViews';
+import { DailyBuckets } from '../components/Charts';
+import { ErrorView, LoadingView } from '../components/StateViews';
+import { ReportState, ReportViewModel } from '../viewmodel/ReportViewModel';
+import { SummaryReport } from '../model/Types';
 
+@Entry
 @Component
-export struct ReportPage {
+struct ReportPage {
   @StorageProp('deviceId') deviceId: number = 0;
-  @StorageProp('foregroundSeq') @Watch('onForeground') foregroundSeq: number = 0;
+  /** 0 = 这周、1 = 这个月（对应契约 period=week|month） */
+  @State periodIndex: number = 0;
   @State state: ReportState = new ReportState();
-  @State nowMs: number = Date.now();
-  @State refreshing: boolean = false;
   private vm: ReportViewModel = new ReportViewModel();
 
   aboutToAppear(): void {
     this.reload();
   }
 
-  onForeground(): void {
-    this.nowMs = Date.now();
-    this.reload();
-  }
-
   private async reload(): Promise<void> {
-    if (this.deviceId <= 0) {
-      const s: ReportState = new ReportState();
-      s.loading = false;
-      s.errorText = '尚未绑定设备';
-      this.state = s;
-      return;
-    }
-    const next: ReportState = await this.vm.load(this.deviceId, this.state.periodIndex);
-    next.periodIndex = this.state.periodIndex;
+    const idx: number = this.periodIndex === 0 ? 1 : 2;
+    const next: ReportState = await this.vm.load(this.deviceId, idx);
+    next.periodIndex = idx;
     this.state = next;
-    this.refreshing = false;
-    this.nowMs = Date.now();
   }
 
-  private switchPeriod(index: number): void {
-    if (index === this.state.periodIndex) {
+  private switchTo(i: number): void {
+    if (i === this.periodIndex) {
       return;
     }
-    const next: ReportState = new ReportState();
-    next.periodIndex = index;
-    next.loading = true;
-    this.state = next;
+    this.periodIndex = i;
     this.reload();
+  }
+
+  private periodWord(): string {
+    return this.periodIndex === 0 ? '这周' : '这个月';
   }
 
   @Builder
   periodBar() {
-    Row({ space: 8 }) {
-      ForEach(REPORT_PERIOD_LABELS, (label: string, index: number) => {
+    Row({ space: 0 }) {
+      ForEach(['这周', '这个月'], (label: string, index: number) => {
         Text(label)
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(this.state.periodIndex === index ? Color.White : AppTheme.COLOR_TEXT_SECONDARY)
-          .backgroundColor(this.state.periodIndex === index
-            ? AppTheme.COLOR_PRIMARY : AppTheme.COLOR_BG)
-          .height(36)
-          .layoutWeight(1)
+          .fontSize(AppTheme.FONT_BODY)
+          .fontColor(this.periodIndex === index ? Color.White : AppTheme.COLOR_TEXT_SECONDARY)
+          .backgroundColor(this.periodIndex === index ? AppTheme.COLOR_PRIMARY : Color.Transparent)
           .textAlign(TextAlign.Center)
+          .height(38)
+          .layoutWeight(1)
           .borderRadius(AppTheme.BTN_RADIUS)
-          .onClick(() => {
-            this.switchPeriod(index);
-          })
+          .onClick(() => this.switchTo(index))
       }, (label: string) => label)
     }
     .width('100%')
+    .padding(3)
+    .backgroundColor(AppTheme.COLOR_SURFACE)
+    .borderRadius(AppTheme.BTN_RADIUS)
   }
 
   @Builder
-  activityCard(a: ActivityReport) {
-    Column({ space: 8 }) {
-      SectionTitle({
-        text: `活动量（${REPORT_PERIOD_LABELS[this.state.periodIndex]}）`,
-        note: `${a.from} ~ ${a.to}`
-      })
-      Column({ space: 8 }) {
-        Row({ space: AppTheme.CARD_GAP }) {
-          StatTile({ value: `${a.total}`, unit: '次', label: '活动总次数' })
-            .layoutWeight(1)
-          StatTile({
-            value: `${this.peakHour(a)}`,
-            unit: '点',
-            label: '最活跃时刻'
-          })
-            .layoutWeight(1)
-        }
+  bigCard() {
+    Column({ space: 6 }) {
+      Text(this.periodWord() + '在家走动')
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
         .width('100%')
-
-        // 契约 §6.16：day 出 hourly(24)、daily(1)；week/month 出 daily(7/30)、hourly 省略
-        if (this.state.periodIndex === 0) {
-          HourlyBars({ buckets: a.hourly })
-          Text('按小时统计（0–23 点，UTC+8）')
-            .fontSize(AppTheme.FONT_CAPTION - 1)
-            .fontColor(AppTheme.COLOR_TEXT_HINT)
-            .width('100%')
-        } else {
-          DailyBuckets({ buckets: a.daily })
-          Text(`按天统计（最近 ${a.daily.length} 天）`)
-            .fontSize(AppTheme.FONT_CAPTION - 1)
-            .fontColor(AppTheme.COLOR_TEXT_HINT)
-            .width('100%')
-        }
+      Row({ space: 6 }) {
+        Text(this.state.activity.total.toString())
+          .fontSize(38)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        Text('次')
+          .fontSize(AppTheme.FONT_BODY)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .margin({ top: 16 })
       }
       .width('100%')
-      .padding(AppTheme.CARD_PADDING)
-      .backgroundColor(AppTheme.COLOR_SURFACE)
-      .borderRadius(AppTheme.CARD_RADIUS)
-    }
-    .width('100%')
-  }
 
-  private peakHour(a: ActivityReport): number {
-    let best: number = 0;
-    for (let i = 0; i < a.hourly.length; i++) {
-      if (a.hourly[i].count > a.hourly[best].count) {
-        best = i;
-      }
-    }
-    return a.hourly.length === 0 ? 0 : a.hourly[best].hour;
-  }
-
-  /**
-   * §6.17 趋势卡。
-   * v1.2 的 `compare` 里 `title` 必现、`yesterday/delta_pct/text` 可缺省（无昨日基线时
-   * 服务器三个键全省略）。所以：note 用 `text ?? title` 兜底，两个依赖基线的格子退化为
-   * 「—」并补一行说明——**不能让缺键把整页渲染打断**（D7 周月报演示依赖这条）。
-   */
-  @Builder
-  trendCard(t: TrendReport) {
-    Column({ space: 4 }) {
-      SectionTitle({
-        text: `近 ${t.days} 天告警趋势`,
-        note: t.compare.text !== undefined && t.compare.text.length > 0 ? t.compare.text : t.compare.title
-      })
-      Column({ space: 6 }) {
-        Row({ space: AppTheme.CARD_GAP }) {
-          StatTile({ value: `${t.compare.today}`, unit: '条', label: '今天' })
-            .layoutWeight(1)
-          StatTile({
-            value: t.compare.yesterday !== undefined ? `${t.compare.yesterday}` : '—',
-            unit: '条',
-            label: '昨天'
-          })
-            .layoutWeight(1)
-          StatTile({
-            value: t.compare.delta_pct !== undefined
-              ? (t.compare.delta_pct > 0 ? `+${t.compare.delta_pct}` : `${t.compare.delta_pct}`)
-              : '—',
-            unit: '%',
-            label: '变化',
-            valueColor: t.compare.delta_pct !== undefined && t.compare.delta_pct > 0
-              ? AppTheme.COLOR_LEVEL2 : AppTheme.COLOR_LEVEL0
-          })
-            .layoutWeight(1)
-        }
-        .width('100%')
-        if (t.compare.yesterday === undefined) {
-          Text('暂无对比数据（无昨日基线：新设备或统计首日）')
-            .fontSize(AppTheme.FONT_CAPTION - 1)
-            .fontColor(AppTheme.COLOR_TEXT_HINT)
-            .width('100%')
-        }
-        HourlyBars({ buckets: this.trendToHours(t) })
-        Text('按天统计的告警条数（横轴为最近 N 天）')
-          .fontSize(AppTheme.FONT_CAPTION - 1)
-          .fontColor(AppTheme.COLOR_TEXT_HINT)
-          .width('100%')
-      }
-      .width('100%')
-      .padding(AppTheme.CARD_PADDING)
-      .backgroundColor(AppTheme.COLOR_SURFACE)
-      .borderRadius(AppTheme.CARD_RADIUS)
-    }
-    .width('100%')
-  }
-
-  /** 趋势接口给的是 daily 点；柱图组件吃 HourlyBucket(hour,count)，这里换个标签用。 */
-  private trendToHours(t: TrendReport): HourlyBucket[] {
-    const out: HourlyBucket[] = [];
-    for (let i = 0; i < t.series.length; i++) {
-      out.push({ hour: i, count: t.series[i].count });
-    }
-    return out;
-  }
-
-  @Builder
-  summaryCard(s: SummaryReport, periodLabel: string) {
-    Column({ space: 4 }) {
-      SectionTitle({ text: `${periodLabel}汇总`, note: `${s.from} ~ ${s.to}` })
-      Column({ space: 8 }) {
-        this.summaryBlock('活动', [
-          `总次数 ${s.activity.total}　活跃天数 ${s.activity.active_days}`,
-          `日均 ${s.activity.avg_daily}　最活跃 ${s.activity.peak_hour} 点`,
-          `较上期 ${s.activity.compare_prev}`
-        ])
-        this.summaryBlock('告警', [
-          `总数 ${s.alerts.total}　已处置 ${s.alerts.resolved}　待处置 ${s.alerts.pending}`,
-          `误报 ${s.alerts.false_alarm}`,
-          this.typeBreakdown(s.alerts)
-        ])
-        this.summaryBlock('环境', [
-          `温度 ${Formatter.fmtTemp(s.env.temp_avg)} °C（${Formatter.fmtTemp(s.env.temp_min)}`
-            + ` ~ ${Formatter.fmtTemp(s.env.temp_max)}）`,
-          `湿度 ${Formatter.fmtHumi(s.env.humi_avg)}`
-        ])
-      }
-      .width('100%')
-      .padding(AppTheme.CARD_PADDING)
-      .backgroundColor(AppTheme.COLOR_SURFACE)
-      .borderRadius(AppTheme.CARD_RADIUS)
-    }
-    .width('100%')
-  }
-
-  @Builder
-  summaryBlock(title: string, lines: string[]) {
-    Column({ space: 2 }) {
-      Text(title)
-        .fontSize(AppTheme.FONT_CAPTION)
-        .fontWeight(FontWeight.Medium)
-        .fontColor(AppTheme.COLOR_PRIMARY)
-        .width('100%')
-      ForEach(lines, (line: string) => {
-        Text(line)
+      if (this.state.trend.compare.text !== undefined && this.state.trend.compare.text.length > 0) {
+        Text(this.state.trend.compare.text)
           .fontSize(AppTheme.FONT_CAPTION)
           .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
           .width('100%')
-      }, (line: string) => line)
+      } else if (this.state.trend.compare.yesterday !== undefined) {
+        Text('昨天 ' + this.state.trend.compare.today.toString() + ' 次')
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .width('100%')
+      } else {
+        Text(UserCopy.NO_COMPARE)
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.COLOR_TEXT_HINT)
+          .width('100%')
+      }
     }
     .width('100%')
+    .padding(AppTheme.CARD_PADDING)
+    .backgroundColor(AppTheme.COLOR_SURFACE)
+    .borderRadius(AppTheme.CARD_RADIUS)
     .alignItems(HorizontalAlign.Start)
   }
 
-  /** 按类型拆分数：Record<string, number> 没有稳定顺序，固定按契约里的 5 类输出。 */
-  private typeBreakdown(a: SummaryAlertPart): string {
-    const types: string[] = ['gas', 'fall', 'door', 'presence', 'heartbeat'];
-    const parts: string[] = [];
-    for (let i = 0; i < types.length; i++) {
-      const v: number | undefined = a.by_type[types[i]];
-      if (v !== undefined && v > 0) {
-        parts.push(`${Formatter.alertTypeText(types[i])} ${v}`);
+  @Builder
+  dailyCard() {
+    Column({ space: 8 }) {
+      Text(this.periodIndex === 0 ? '每天走动次数' : '每天走动次数（近 30 天）')
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+      DailyBuckets({ buckets: this.state.activity.daily })
+    }
+    .width('100%')
+    .padding(AppTheme.CARD_PADDING)
+    .backgroundColor(AppTheme.COLOR_SURFACE)
+    .borderRadius(AppTheme.CARD_RADIUS)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  alertsCard(s: SummaryReport) {
+    Column({ space: 8 }) {
+      Text(UserCopy.REPORT_ALERTS_TITLE)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+      Row({ space: 8 }) {
+        Column({ space: 2 }) {
+          Text(s.alerts.total.toString())
+            .fontSize(24)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+          Text('条提醒')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Column({ space: 2 }) {
+          Text(s.alerts.pending.toString())
+            .fontSize(24)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(s.alerts.pending > 0 ? AppTheme.COLOR_LEVEL2 : AppTheme.COLOR_TEXT_PRIMARY)
+          Text('还没处理')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        Column({ space: 2 }) {
+          Text(s.alerts.false_alarm.toString())
+            .fontSize(24)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+          Text('误报')
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+
+      if (s.activity.compare_prev.length > 0) {
+        Text(s.activity.compare_prev)
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.COLOR_TEXT_HINT)
+          .width('100%')
       }
     }
-    return parts.length === 0 ? '按类型：暂无' : `按类型：${parts.join('　')}`;
+    .width('100%')
+    .padding(AppTheme.CARD_PADDING)
+    .backgroundColor(AppTheme.COLOR_SURFACE)
+    .borderRadius(AppTheme.CARD_RADIUS)
+    .alignItems(HorizontalAlign.Start)
   }
 
   build() {
-    Column({ space: 8 }) {
-      Column({ space: 8 }) {
-        Row({ space: 8 }) {
-          Text('报表')
-            .fontSize(AppTheme.FONT_TITLE)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-            .layoutWeight(1)
-          Text('更新于 ' + Formatter.fmtClock(this.nowMs))
-            .fontSize(AppTheme.FONT_CAPTION - 1)
-            .fontColor(AppTheme.COLOR_TEXT_HINT)
-        }
-        .width('100%')
-        this.periodBar()
+    Column() {
+      Row() {
+        Text('‹ ' + UserCopy.BACK)
+          .fontSize(AppTheme.FONT_BODY)
+          .fontColor(AppTheme.COLOR_PRIMARY)
+          .onClick(() => {
+            router.back();
+          })
+        Blank()
       }
       .width('100%')
-      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 8 })
+      .height(44)
+      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+
+      Text(UserCopy.REPORT_TITLE)
+        .fontSize(AppTheme.FONT_TITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        .width('100%')
+        .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, bottom: 8 })
 
       if (this.state.loading) {
-        LoadingView({ hint: '正在统计…' })
+        Column() {
+          LoadingView({ hint: UserCopy.LOADING })
+        }
+        .layoutWeight(1)
       } else if (this.state.errorText.length > 0) {
-        ErrorView({
-          message: this.state.errorText,
-          code: this.state.errorCode,
-          onRetry: () => {
-            this.reload();
-          }
-        })
+        Column() {
+          ErrorView({
+            message: this.state.errorText,
+            code: this.state.errorCode,
+            retryText: UserCopy.RETRY,
+            onRetry: () => {
+              this.reload();
+            }
+          })
+        }
+        .layoutWeight(1)
       } else {
         Scroll() {
           Column({ space: AppTheme.CARD_GAP }) {
-            this.activityCard(this.state.activity)
-            this.trendCard(this.state.trend)
-            this.summaryCard(this.state.summary, REPORT_PERIOD_LABELS[this.state.periodIndex])
-
-            if (this.state.activityError.length > 0 || this.state.trendError.length > 0
-              || this.state.summaryError.length > 0) {
-              Column({ space: 2 }) {
-                Text('部分数据没取到（页面其余部分仍可用）')
-                  .fontSize(AppTheme.FONT_CAPTION)
-                  .fontColor(AppTheme.COLOR_LEVEL1)
-                  .width('100%')
-                if (this.state.activityError.length > 0) {
-                  Text(`活动：${this.state.activityError}`)
-                    .fontSize(AppTheme.FONT_CAPTION - 1)
-                    .fontColor(AppTheme.COLOR_TEXT_HINT)
-                    .width('100%')
-                }
-                if (this.state.trendError.length > 0) {
-                  Text(`趋势：${this.state.trendError}`)
-                    .fontSize(AppTheme.FONT_CAPTION - 1)
-                    .fontColor(AppTheme.COLOR_TEXT_HINT)
-                    .width('100%')
-                }
-                if (this.state.summaryError.length > 0) {
-                  Text(`汇总：${this.state.summaryError}`)
-                    .fontSize(AppTheme.FONT_CAPTION - 1)
-                    .fontColor(AppTheme.COLOR_TEXT_HINT)
-                    .width('100%')
-                }
-              }
-              .width('100%')
-              .padding(AppTheme.CARD_PADDING)
-              .backgroundColor(AppTheme.COLOR_SURFACE)
-              .borderRadius(AppTheme.CARD_RADIUS)
+            this.periodBar()
+            this.bigCard()
+            if (this.state.activity.daily.length > 0) {
+              this.dailyCard()
             }
-
-            PrimaryButton({
-              text: '重新统计',
-              plain: true,
-              onTap: () => {
-                this.refreshing = true;
-                this.reload();
-              }
-            })
-            Text('接口：GET /api/reports/activity　/api/reports/trend　/api/reports/summary')
-              .fontSize(AppTheme.FONT_CAPTION - 1)
-              .fontColor(AppTheme.COLOR_TEXT_HINT)
-              .width('100%')
-              .textAlign(TextAlign.Center)
-              .margin({ bottom: 12 })
+            if (this.state.summaryError.length === 0) {
+              this.alertsCard(this.state.summary)
+            }
           }
           .width('100%')
-          .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 8 })
+          .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, bottom: 24 })
         }
-        .scrollBar(BarState.Off)
         .layoutWeight(1)
+        .scrollBar(BarState.Off)
       }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(AppTheme.COLOR_BG)
+    .alignItems(HorizontalAlign.Start)
   }
 }

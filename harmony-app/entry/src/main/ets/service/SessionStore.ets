@@ -11,6 +11,8 @@
  * 实时/报表接口都必填）。若只存在首页 @State 里，从告警页返回就得重新拉设备列表。
  */
 
+import { RuntimeConfig } from '../common/RuntimeConfig';
+
 /** 会话令牌（契约 §6.1 鉴权：`Authorization: Bearer <JWT>`）。 */
 export const KEY_TOKEN: string = 'authToken';
 /** 当前用户 id（JWT 的 `sub`）。 */
@@ -60,6 +62,8 @@ export class SessionStore {
     PersistentStorage.persistProp<string>(KEY_DEVICE_SN, '');
     PersistentStorage.persistProp<string>(KEY_DEVICE_NAME, '');
     PersistentStorage.persistProp<string>(KEY_GATEWAY_URL, '');
+    // 服务器地址与离线开关也落盘（t150：地址内置但维护入口可改，改完重启仍在）
+    RuntimeConfig.initPersistence();
     // 进前台序号与"已加载"标记是**进程内**状态，不落盘：重启 App 必须重新拉一次
     AppStorage.setOrCreate<number>(KEY_FOREGROUND_SEQ, 0);
     AppStorage.setOrCreate<boolean>(KEY_DEVICE_LOADED, false);
@@ -110,6 +114,16 @@ export class SessionStore {
   /** 让入口页感知登录态变化。只自增，不递减，避免"两次变化抵消"的坑。 */
   private static bumpAuthSeq(): void {
     AppStorage.setOrCreate<number>(KEY_AUTH_SEQ, SessionStore.authSeq() + 1);
+  }
+
+  /**
+   * 注册成功后**主动**通知入口页可以进主界面（t150）。
+   *
+   * 为什么单独开一个：注册页走的是 `router.back()` 回登录页，入口页 `Index`
+   * 只在 aboutToAppear 判一次登录态，回栈时不会重跑；不通知就会停在登录页。
+   */
+  static notifyLogin(): void {
+    SessionStore.bumpAuthSeq();
   }
 
   static authSeq(): number {

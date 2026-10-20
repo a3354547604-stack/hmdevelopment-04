@@ -1,21 +1,22 @@
 /**
- * 主界面：四个 Tab 的容器（首页实时 / 告警 / 报表 / 设置）。
+ * 主界面：三个页签的容器（首页 / 提醒 / 我的，规范 §2）。
  *
- * 为什么 Tab 放在一个 @Entry 页里而不用 router：
- *  Tab 之间应该是"平级切换"、不产生返回栈；用 router 会出现
- *  「从告警按返回回到首页再按返回退出」这种别扭的栈行为。
+ * 为什么页签放在一个 @Entry 页里而不用 router：
+ *  页签之间应该是「平级切换」、不产生返回栈；用 router 会出现
+ *  「从提醒按返回回到首页再按返回退出」这种别扭的栈行为。
  *
- * 角标：告警 Tab 上显示待处置条数。数据来源是 AppStorage 的 pendingCount，
- * 由首页/告警列表页在每次拉取后写入（谁拉到谁写，避免多处分叉轮询）。
+ * 顶部条只写「家里的小盒子」与一句状态，不出现数据源/服务器地址/离线标记：
+ * 普通用户不关心数据从哪来，看到「离线演示」反而会以为坏了。维护信息在
+ * 「我的 → 连点版本号 5 次 → 高级」里。
+ *
+ * 角标：提醒页签上显示未处理条数（AppStorage 的 pendingCount，谁拉到谁写）。
  */
 
-import { AppTheme, LiteralConstants } from '../common/AppTheme';
-import { SessionStore } from '../service/SessionStore';
-import { ServiceHub } from '../service/ServiceHub';
+import { AppTheme } from '../common/AppTheme';
+import { UserCopy } from '../common/UserCopy';
 import { HomePage } from './HomePage';
 import { AlertListPage } from './AlertListPage';
-import { ReportPage } from './ReportPage';
-import { SettingsPage } from './SettingsPage';
+import { ProfilePage } from './ProfilePage';
 
 const KEY_PENDING: string = 'pendingCount';
 
@@ -23,11 +24,10 @@ const KEY_PENDING: string = 'pendingCount';
 export struct MainTabs {
   @StorageProp('deviceId') deviceId: number = 0;
   @StorageLink('pendingCount') pending: number = 0;
-  @StorageProp('foregroundSeq') foregroundSeq: number = 0;
   @State index: number = 0;
 
   aboutToAppear(): void {
-    // 防止"后台进程被系统杀过、内存里的 pendingCount 丢了"导致角标不显示
+    // 防止「后台进程被系统杀过、内存里的 pendingCount 丢了」导致角标不显示
     AppStorage.setOrCreate<number>(KEY_PENDING, this.pending);
   }
 
@@ -65,21 +65,15 @@ export struct MainTabs {
 
   build() {
     Column() {
-      // 顶部条：设备名 + 数据源，四个 Tab 共用（老人/家属一眼看清"在看谁家的数据"）
+      // 顶部条：只写「家里的小盒子」——一句话说明这些数据是谁家的
       Row({ space: 8 }) {
-        Text(SessionStore.deviceName().length > 0 ? SessionStore.deviceName() : '未绑定设备')
+        Text(UserCopy.BOX_NAME)
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Medium)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(ServiceHub.modeLabel())
-          .fontSize(AppTheme.FONT_CAPTION - 1)
-          .fontColor(AppTheme.COLOR_PRIMARY)
-          .backgroundColor(AppTheme.COLOR_BG)
-          .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-          .borderRadius(AppTheme.BADGE_RADIUS)
       }
       .width('100%')
       .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 8, bottom: 8 })
@@ -89,22 +83,17 @@ export struct MainTabs {
         TabContent() {
           HomePage()
         }
-        .tabBar(this.tabBarItem('首页', '🏠', 0))
+        .tabBar(this.tabBarItem(UserCopy.TAB_HOME, '🏠', 0))
 
         TabContent() {
           AlertListPage()
         }
-        .tabBar(this.tabBarItem('告警', '🔔', 1))
+        .tabBar(this.tabBarItem(UserCopy.TAB_ALERTS, '🔔', 1))
 
         TabContent() {
-          ReportPage()
+          ProfilePage()
         }
-        .tabBar(this.tabBarItem('报表', '📊', 2))
-
-        TabContent() {
-          SettingsPage()
-        }
-        .tabBar(this.tabBarItem('设置', '⚙️', 3))
+        .tabBar(this.tabBarItem(UserCopy.TAB_PROFILE, '👤', 2))
       }
       .barHeight(64)
       .barMode(BarMode.Fixed)

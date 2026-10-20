@@ -1,5 +1,5 @@
 HMProgram 应用端（harmony-app）无设备自检日志
-生成时间（UTC+8）：2026-10-20 21:03:30
+生成时间（UTC+8）：2026-10-20 22:22:43
 Node：v22.22.1　esbuild：0.28.2
 被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,MockTransport,SessionStore}.ets
 ----------------------------------------------------------------------
@@ -10,8 +10,8 @@ PASS  #04  POST /devices/bind                     §6.6    code=   0 http=201  d
 PASS  #05  GET /devices/{id}/status               §6.7    code=   0 http=200  online=true alarm_state=2 nodes=3 pending=3 props=[presence,last_motion_ts,door,window,temp,humi,smoke,lpg,co,nodes_online,battery,alarm_state,bound_nodes,pair_state]
 PASS  #06  GET /devices/{id}/readings             §6.8    code=   0 http=200  total=12 first_payload_keys=smoke+temp+humi+adc_mv+warmup
 PASS  #07  GET /devices/{id}/settings             §6.9    code=   0 http=200  source=local keys=21
-PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792501412075
-PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792501412197-7 accepted=no_motion_min timeout_s=10
+PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792506164695
+PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792506164816-7 accepted=no_motion_min timeout_s=10
 PASS  #10  POST /devices/{id}/demo                §6.12   code=   0 http=200  event=gas accepted=demo_trigger
 PASS  #11  GET /alerts                            §6.13   code=   0 http=200  total=4 first=#101/gas/lv2
 PASS  #12  GET /alerts/{id}                       §6.14   code=   0 http=200  alert=#101/confirmed dispositions=0 before=5 after=5
@@ -46,8 +46,12 @@ PASS  #40  F4 云密钥不落盘（只随请求体发送）                     
 PASS  #41  §9.2 1602 预检失败（auth / not_found 分母文案）  §12.4   code=1602 http=400  auth='Wi-Fi 连接失败（原因=密码不对（认证失败））' notfound='Wi-Fi 连接失败（原因=没扫到这个 Wi-Fi（名字写错或 5G））'
 PASS  #42  §9.2 1600/1603/1605 降级文案               §9.2    code=1600 http=409  1600='网关不在配网模式' 1603='网关正忙（扫描或连接未结束）' 1605='汇聚离线，网关无法下发'
 PASS  #43  配网地址容错（补 http:// / 去尾斜杠与 /api）         CAL-12  code=   0 http=200  '192.168.2.1/'→http://192.168.2.1 'http://192.168.4.1/api'→http://192.168.4.1 'https://gw.local'→https://gw.local ''→http://192.168.2.1
+PASS  #44  手机号校验只收 11 位数字                         t150    code=   0 http=200  '13800000000'→ok '1380000000'→no '138000000001'→no '1380000000a'→no ''→no ' 13800000000'→no
+PASS  #45  主界文案无技术词（规范 §3）                        t150    code=   0 http=200  检查 113 条主界文案 × 12 个禁词，命中 0 条
+PASS  #46  服务器地址可改可复位 + 离线开关                      t150    code=   0 http=200  默认=http://123.206.99.28 改后=http://10.0.0.9:3000 customFlag=true 复位=http://123.206.99.28 mock关=false
+PASS  #47  登录/退出触发界面重建（authSeq）                   t150    code=   0 http=200  authSeq 5→7（登录+1、退出+1） clearedUser=''
 
-合计 43 项，通过 43 项，失败 0 项
+合计 47 项，通过 47 项，失败 0 项
 说明：本自检跑的是「真实 HttpApiService + Mock 传输层」，证明 URL 拼接/鉴权头/错误码翻译/契约字段解析可跑通；不代表真实服务器可用。
 ----------------------------------------------------------------------
 结论：以上为「真实 HttpApiService + Mock 传输层」的运行结果。

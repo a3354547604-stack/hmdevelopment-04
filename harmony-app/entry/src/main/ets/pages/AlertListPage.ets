@@ -1,26 +1,28 @@
 /**
- * 告警列表（契约 §6.13 GET /api/alerts）。
+ * 提醒列表（契约 §6.13 GET /api/alerts）。
  *
- * 界面决策：
- *  · 默认停在「待处置」而不是「全部」——家属打开 App 想知道的是"有没有事要我做"；
- *  · 四个筛选片做成一行大按钮（高度 36 vp），老人手指点得中；
- *  · 每 10 s 自动刷新 + 下拉刷新：告警是"等不了"的信息，
- *    但不能更密——mock/服务器都会被轮询压垮（契约 §6.6 同样建议 10 s）；
- *  · 进前台立刻拉一次（App 在后台时定时器会被系统挂起）。
+ * 界面决策（t150）：
+ *  · 标题就叫「提醒」，筛片只留两个：**全部 / 未处理**。三个技术态
+ *    （pending/confirmed/resolved）对用户没有意义——他只关心「还有没有要我做的」。
+ *  · 一行一条：`14:32 · 厨房 · 燃气浓度偏高`（见 components/AlertRow）。
+ *  · 每 10 s 自动刷新 + 下拉刷新：提醒是"等不了"的信息，但不能更密
+ *    （契约 §6.6 同样建议 10 s）；进前台立刻拉一次（后台定时器会被系统挂起）。
  */
 
 import { router } from '@kit.ArkUI';
 import { AlertListViewModel, AlertListState } from '../viewmodel/AlertViewModel';
 import { AppTheme, LiteralConstants } from '../common/AppTheme';
-import { Formatter } from '../common/Formatter';
+import { UserCopy } from '../common/UserCopy';
 import { AlertRow } from '../components/AlertRow';
 import { SegmentedBar } from '../components/SettingRows';
-import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
-import { AlertItem } from '../model/Types';
+import { LoadingView, EmptyView } from '../components/StateViews';
+import { DeviceStatus, NodeItem, AlertItem } from '../model/Types';
+import { ServiceHub } from '../service/ServiceHub';
+import { ApiResult } from '../model/Result';
 
 const POLL_INTERVAL_MS: number = 10 * LiteralConstants.MS_PER_SECOND;
-/** 筛选片 ↔ 契约 §6.13 的 status 取值（index 与 SegmentedBar 对齐）。 */
-const STATUS_VALUES: string[] = ['all', 'pending', 'confirmed', 'resolved'];
+/** 筛片 ↔ 契约 §6.13 的 status 取值（index 与 SegmentedBar 对齐）。 */
+const STATUS_VALUES: string[] = ['all', 'pending'];
 
 @Component
 export struct AlertListPage {
@@ -28,14 +30,15 @@ export struct AlertListPage {
   @StorageProp('foregroundSeq') @Watch('onForeground') foregroundSeq: number = 0;
   @State state: AlertListState = new AlertListState();
   @State refreshing: boolean = false;
-  @State nowMs: number = Date.now();
+  /** 节点 SN → 房间名（提醒行要写「厨房」而不是 `M1`）。 */
+  @State rooms: string[] = [];
   private vm: AlertListViewModel = new AlertListViewModel();
   private timerId: number = -1;
 
   aboutToAppear(): void {
+    this.state.filterIndex = 1; // 默认停在「未处理」
     this.reload();
     this.timerId = setInterval(() => {
-      this.nowMs = Date.now();
       this.reload();
     }, POLL_INTERVAL_MS);
   }
@@ -48,7 +51,6 @@ export struct AlertListPage {
   }
 
   onForeground(): void {
-    this.nowMs = Date.now();
     this.reload();
   }
 
@@ -56,13 +58,48 @@ export struct AlertListPage {
     return STATUS_VALUES[index];
   }
 
+  /**
+   * 用一次状态接口拿「SN → 房间」的对应关系。
+   * 为什么不用别名的固定映射：房间名是用户在服务器上给节点起的（`location`），
+   * 硬编码 M1=厨房 会在换板子/改名后说错话。
+   */
+  private async loadRooms(): Promise<void> {
+    if (this.deviceId <= 0) {
+      return;
+    }
+    const r: StatusLite = await ServiceHubLite.status(this.deviceId);
+    if (!r.ok) {
+      return;
+    }
+    const nodes: NodeItem[] = r.nodes;
+    const list: string[] = [];
+    for (let i = 0; i < nodes.length; i++) {
+      list.push(nodes[i].sn + '=' + nodes[i].location);
+    }
+    this.rooms = list;
+  }
+
+  private roomOf(sn: string): string {
+    for (let i = 0; i < this.rooms.length; i++) {
+      const one: string = this.rooms[i];
+      const eq: number = one.indexOf('=');
+      if (eq > 0 && one.substring(0, eq) === sn) {
+        return one.substring(eq + 1);
+      }
+    }
+    return '';
+  }
+
   private async reload(): Promise<void> {
     if (this.deviceId <= 0) {
       const s: AlertListState = new AlertListState();
       s.loading = false;
-      s.errorText = '尚未绑定设备';
+      s.errorText = '还没有添加设备';
       this.state = s;
       return;
+    }
+    if (this.rooms.length === 0) {
+      await this.loadRooms();
     }
     const next: AlertListState = await this.vm.load(this.deviceId, this.statusOf(this.state.filterIndex));
     next.filterIndex = this.state.filterIndex;
@@ -73,12 +110,10 @@ export struct AlertListPage {
     }
     this.state = next;
     this.refreshing = false;
-    this.nowMs = Date.now();
   }
 
   private openDetail(id: number): void {
-    // 用 AppStorage 传参而不用 router params：ArkTS 里对 getParams() 的
-    // 返回值做类型断言容易被 arkts 规则拦，键值对更直白也不丢类型。
+    // 用 AppStorage 传参而不用 router params：类型断言容易被 arkts 规则拦，键值对更直白
     AppStorage.setOrCreate<number>('openAlertId', id);
     router.pushUrl({ url: 'pages/AlertDetailPage' });
   }
@@ -86,20 +121,8 @@ export struct AlertListPage {
   build() {
     Column({ space: 8 }) {
       Column({ space: 8 }) {
-        Row({ space: 8 }) {
-          Text('告警')
-            .fontSize(AppTheme.FONT_TITLE)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-            .layoutWeight(1)
-          Text(`共 ${this.state.total} 条`)
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-        }
-        .width('100%')
-
         SegmentedBar({
-          options: ['全部', '待处置', '已读', '已处置'],
+          options: [UserCopy.ALERT_FILTER_ALL, UserCopy.ALERT_FILTER_PENDING],
           selectedIndex: this.state.filterIndex,
           onSelect: (index: number) => {
             if (index === this.state.filterIndex) {
@@ -117,20 +140,12 @@ export struct AlertListPage {
       .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 8 })
 
       if (this.state.loading && this.state.items.length === 0) {
-        LoadingView({ hint: '正在加载告警…' })
-      } else if (this.state.errorText.length > 0 && this.state.items.length === 0) {
-        ErrorView({
-          message: this.state.errorText,
-          code: this.state.errorCode,
-          onRetry: () => {
-            this.reload();
-          }
-        })
+        LoadingView({ hint: UserCopy.LOADING })
       } else if (this.state.items.length === 0) {
         EmptyView({
-          icon: '✅',
-          title: this.statusOf(this.state.filterIndex) === 'resolved' ? '还没有已处置的告警' : '当前没有告警',
-          hint: '系统每 10 秒自动检查一次'
+          icon: '🌿',
+          title: UserCopy.ALERT_EMPTY,
+          hint: '有情况会自动出现在这里'
         })
       } else {
         Refresh({ refreshing: this.refreshing }) {
@@ -139,24 +154,14 @@ export struct AlertListPage {
               ListItem() {
                 AlertRow({
                   alert: item,
-                  nowMs: this.nowMs,
+                  room: this.roomOf(item.node_sn),
                   onTap: (id: number) => {
                     this.openDetail(id);
                   }
                 })
               }
               .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
-            }, (item: AlertItem) => `${item.id}-${item.status}-${item.push_count}`)
-
-            ListItem() {
-              Text(`GET /api/alerts?device_id=${this.deviceId}&status=${this.statusOf(this.state.filterIndex)}`
-                + `&limit=50　每 10 s 刷新`)
-                .fontSize(AppTheme.FONT_CAPTION - 1)
-                .fontColor(AppTheme.COLOR_TEXT_HINT)
-                .width('100%')
-                .textAlign(TextAlign.Center)
-                .padding({ top: 8, bottom: 12 })
-            }
+            }, (item: AlertItem) => `${item.id}-${item.status}`)
           }
           .width('100%')
           .layoutWeight(1)
@@ -173,4 +178,24 @@ export struct AlertListPage {
     .height('100%')
     .backgroundColor(AppTheme.COLOR_BG)
   }
+}
+
+/** 只为拿「SN → 房间」调用一次状态接口；不抽 viewmodel 是因为只有本页用。 */
+class ServiceHubLite {
+  static async status(deviceId: number): Promise<StatusLite> {
+    const out: StatusLite = new StatusLite();
+    const r: ApiResult<DeviceStatus> = await ServiceHub.api().deviceStatus(deviceId);
+    if (!r.ok || r.data === undefined) {
+      return out;
+    }
+    const st: DeviceStatus = r.data;
+    out.ok = true;
+    out.nodes = st.nodes;
+    return out;
+  }
+}
+
+class StatusLite {
+  ok: boolean = false;
+  nodes: NodeItem[] = [];
 }

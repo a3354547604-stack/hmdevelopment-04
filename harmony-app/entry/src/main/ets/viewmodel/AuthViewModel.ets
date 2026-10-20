@@ -13,8 +13,9 @@ import { ApiPort } from '../service/ApiPort';
 import { ServiceHub } from '../service/ServiceHub';
 import { SessionStore } from '../service/SessionStore';
 import { ApiResult } from '../model/Result';
-import { DeviceListResult, LoginResult } from '../model/Types';
+import { DeviceListResult, LoginResult, RegisterResult } from '../model/Types';
 import { emptyDeviceList, emptyLogin } from '../model/Defaults';
+import { UserCopy } from '../common/UserCopy';
 
 /** 登录页状态。 */
 export class LoginState {
@@ -42,7 +43,9 @@ export class AuthViewModel {
     const r: ApiResult<LoginResult> = await this.api().login(username, password);
     state.submitting = false;
     if (!r.ok) {
-      state.errorText = r.message;
+      // 1102 = 账号或密码错误（契约 §9.2）。给子女看的话是「手机号或密码不对」，
+      // 不暴露业务码，也不要说「账号不存在」——那会让人以为要另注册一个。
+      state.errorText = r.code === 1102 ? UserCopy.LOGIN_BAD : r.message;
       state.errorCode = r.code;
       return state;
     }
@@ -72,6 +75,28 @@ export class AuthViewModel {
     const first = list.items[0];
     SessionStore.setDevice(first.id, first.sn, first.name);
     return true;
+  }
+
+  /**
+   * 注册（契约 §6.3 POST /api/auth/register）→ 立刻登录。
+   *
+   * 为什么手机号同时当 username 与 phone 传：服务器把账号当字符串存，
+   * 登录时用户输入的就是手机号；若注册时另起一个 username，登录就再也对不上了。
+   * `phone` 字段按契约 §6.3 是可选的补充信息，这里一并写成同一个号（便于后台对账）。
+   */
+  async register(phone: string, password: string): Promise<LoginState> {
+    const state: LoginState = new LoginState();
+    state.submitting = true;
+    const reg: ApiResult<RegisterResult> = await this.api().register(phone, password, phone);
+    if (!reg.ok && reg.code !== 1103) {
+      // 1103 = 账号已存在。已存在时继续尝试登录（用户可能是老账号，重复点注册）——
+      // 密码对就进去了，密码不对登录那步会给「手机号或密码不对」。
+      state.submitting = false;
+      state.errorText = reg.message;
+      state.errorCode = reg.code;
+      return state;
+    }
+    return this.login(phone, password);
   }
 
   /** 退出登录：只清鉴权与会话，不动本地其它状态。 */

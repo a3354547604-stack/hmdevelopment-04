@@ -1,23 +1,26 @@
 /**
- * 首页：实时状态（契约 §6.6 GET /api/devices/{id}/status）。
+ * 首页：一眼看到「爸妈今天好不好」（规范 §3.1）。
  *
  * 三个"为什么"：
- *  · 顶部「一键求助/报警中」横幅放在最上方且通栏 —— 出事时家属第一眼要看的是
- *    "现在安不安全"，不是温湿度；有告警时横幅变成红色并整屏可见。
- *  · 每 10 s 轮询一次（契约 §6.6 的建议节奏）。老人家里不需要秒级；
- *    真报警靠服务器推送，轮询只负责把"平常状态"刷新，省电也省服务器。
- *  · 进前台立刻刷一次：App 在后台时轮询是停的（系统限制），
- *    回到前台必须马上把"已经过去几十分钟"的差距补上，
- *    否则用户会看到上一小时的心跳时间，误以为设备掉线。
+ *  · 最上面那张大字卡回答**唯一**一个用户真正想问的问题：「爸妈今天有没有事」。
+ *    正常说「爸妈今天一切都好」，有提醒说「爸妈那边有 3 条提醒」，紧急说「有紧急情况」。
+ *    技术细节（心跳、报警等级、传感器 mV）一律不上首页——那是给运维看的。
+ *  · 三张房间卡（厨房/卧室/门厅）放在大字卡之后，按「哪个房间出了什么情况」组织，
+ *    而不是按传感器型号/节点 SN 组织：用户记的是房间，不是 M1/M2。
+ *  · 每 10 s 轮询 + 进前台立刻刷一次：App 在后台时轮询停了，回前台必须马上补上，
+ *    否则用户看到的还是几十分钟前的状态。
  */
 
+import { router } from '@kit.ArkUI';
 import { HomeViewModel, HomeState } from '../viewmodel/HomeViewModel';
 import { AppTheme, LiteralConstants } from '../common/AppTheme';
 import { Formatter } from '../common/Formatter';
-import { SensorCard } from '../components/SensorCard';
-import { SectionTitle, StatTile, DividerLine, InfoRow } from '../components/CommonViews';
-import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
-import { DeviceStatus, GatewayProperties, NodeItem } from '../model/Types';
+import { UserCopy } from '../common/UserCopy';
+import { PrimaryButton } from '../components/CommonViews';
+import { LoadingView, EmptyView } from '../components/StateViews';
+import { ActivityReport, DeviceStatus, GatewayProperties, HourlyBucket, NodeItem } from '../model/Types';
+import { ServiceHub } from '../service/ServiceHub';
+import { ApiResult } from '../model/Result';
 
 const POLL_INTERVAL_MS: number = 10 * LiteralConstants.MS_PER_SECOND;
 
@@ -28,6 +31,9 @@ export struct HomePage {
   @State state: HomeState = new HomeState();
   @State refreshing: boolean = false;
   @State nowMs: number = Date.now();
+  @State todayTotal: number = 0;
+  @State todayHourly: HourlyBucket[] = [];
+  @State todayOk: boolean = false;
   private vm: HomeViewModel = new HomeViewModel();
   private timerId: number = -1;
 
@@ -51,6 +57,12 @@ export struct HomePage {
     this.reload();
   }
 
+  private async refresh(): Promise<void> {
+    this.refreshing = true;
+    await this.reload();
+    this.refreshing = false;
+  }
+
   private async reload(): Promise<void> {
     if (this.deviceId <= 0) {
       const s: HomeState = new HomeState();
@@ -61,303 +73,379 @@ export struct HomePage {
     }
     const next: HomeState = await this.vm.load(this.deviceId);
     this.state = next;
-    this.refreshing = false;
     this.nowMs = Date.now();
-    // 角标数据由这里写（见 MainTabs 注释：谁拉谁写）
+    // 角标数据由这里写（谁拉谁写，避免多处分叉轮询）
     AppStorage.setOrCreate<number>('pendingCount', next.status.pending_alerts);
+    await this.loadToday();
   }
 
-  // ------------------------------------------------------------- 顶部安全横幅
-  private alarmColor(): string {
-    const lv: number = this.state.status.alarm_state;
-    if (lv >= 2) {
+  /** 今日小结要的数据：走动次数 + 按小时分布（算「最长一段没动静」）。 */
+  private async loadToday(): Promise<void> {
+    const r = await ServiceHubApi.todayActivity(this.deviceId);
+    this.todayOk = r.ok;
+    this.todayTotal = r.total;
+    this.todayHourly = r.hourly;
+  }
+
+  // ------------------------------------------------------------ 大字卡（结论）
+  private hasEmergency(): boolean {
+    return this.state.status.alarm_state >= 2;
+  }
+
+  private pending(): number {
+    return this.state.status.pending_alerts;
+  }
+
+  private headline(): string {
+    if (this.hasEmergency()) {
+      return UserCopy.HOME_EMERGENCY;
+    }
+    if (this.pending() > 0) {
+      return '爸妈那边有 ' + this.pending().toString() + ' 条提醒';
+    }
+    return UserCopy.HOME_ALL_WELL;
+  }
+
+  private headlineColor(): string {
+    if (this.hasEmergency()) {
       return AppTheme.COLOR_LEVEL2;
     }
-    if (lv === 1) {
+    if (this.pending() > 0) {
       return AppTheme.COLOR_LEVEL1;
     }
-    return this.state.status.online ? AppTheme.COLOR_LEVEL0 : AppTheme.COLOR_OFFLINE;
+    return AppTheme.COLOR_PRIMARY;
   }
 
-  private alarmText(): string {
-    const lv: number = this.state.status.alarm_state;
-    if (lv >= 2) {
-      return '警报中：请立即查看告警并处置';
+  private headlineIcon(): string {
+    if (this.hasEmergency()) {
+      return '⚠️';
     }
-    if (lv === 1) {
-      return '提醒：有异常需要注意';
+    if (this.pending() > 0) {
+      return '💬';
+    }
+    return '🌤️';
+  }
+
+  /** 副标题：「刚刚看过一遍」/「3 分钟前看过」——让用户知道数据新不新。 */
+  private checkedText(): string {
+    if (this.state.updatedAt <= 0) {
+      return '';
+    }
+    const ms: number = this.nowMs - this.state.updatedAt;
+    if (ms < 60000) {
+      return UserCopy.HOME_CHECKED_NOW;
+    }
+    return Formatter.fmtAgo(this.state.updatedAt, this.nowMs) + '看过';
+  }
+
+  /** 网络不好 / 小盒子联系不上：只在真出问题时出现，正常时整条不占空间。 */
+  private troubleText(): string {
+    if (this.state.errorText.length > 0) {
+      return UserCopy.HOME_NET_WEAK;
     }
     if (!this.state.status.online) {
-      return '设备离线，数据可能不是最新';
+      return UserCopy.HOME_BOX_LOST;
     }
-    return '当前安全';
+    return '';
+  }
+
+  // ------------------------------------------------------------ 房间卡
+  private nodeOf(type: string): NodeItem | undefined {
+    const nodes: NodeItem[] = this.state.status.nodes;
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].type === type) {
+        return nodes[i];
+      }
+    }
+    return undefined;
+  }
+
+  private roomName(type: string, fallback: string): string {
+    const n: NodeItem | undefined = this.nodeOf(type);
+    if (n !== undefined && n.location.length > 0) {
+      return n.location;
+    }
+    return fallback;
+  }
+
+  private gasLine(): string {
+    const lv: number = this.gasLevel();
+    return UserCopy.SENSOR_GAS + ' ' + UserCopy.gasText(lv);
+  }
+
+  private gasLevel(): number {
+    const p: GatewayProperties = this.state.status.properties;
+    const smoke: number = p.smoke === undefined ? -1 : p.smoke;
+    if (smoke < 0) {
+      return 0;
+    }
+    // 与服务器 §8.3 的燃气告警阈值同源（2500 / 3500 mV，已折算回 AO 侧）。
+    if (smoke >= 3500) {
+      return 2;
+    }
+    if (smoke >= 2500) {
+      return 1;
+    }
+    return 0;
+  }
+
+  private gasLineColor(): string {
+    return AppTheme.levelColor(this.gasLevel());
+  }
+
+  private doorwayLine(): string {
+    const p: GatewayProperties = this.state.status.properties;
+    if (p.door === undefined) {
+      return UserCopy.SENSOR_DOOR + ' ' + LiteralConstants.PLACEHOLDER;
+    }
+    return UserCopy.SENSOR_DOOR + ' ' + (p.door ? UserCopy.DOOR_OPEN : UserCopy.DOOR_CLOSED);
+  }
+
+  private doorwayColor(): string {
+    const p: GatewayProperties = this.state.status.properties;
+    return p.door === true ? AppTheme.COLOR_LEVEL1 : AppTheme.COLOR_TEXT_SECONDARY;
+  }
+
+  private motionLine(): string {
+    const p: GatewayProperties = this.state.status.properties;
+    if (p.presence === undefined) {
+      return UserCopy.SENSOR_PRESENCE + ' ' + LiteralConstants.PLACEHOLDER;
+    }
+    return UserCopy.SENSOR_PRESENCE + ' ' + (p.presence ? UserCopy.PRESENCE_YES : UserCopy.PRESENCE_NO);
+  }
+
+  private nodeStateLine(type: string): string {
+    const n: NodeItem | undefined = this.nodeOf(type);
+    if (n === undefined) {
+      return UserCopy.ROOM_PREFIX + '还没装';
+    }
+    return n.online ? UserCopy.NODE_NORMAL : UserCopy.NODE_LOST;
+  }
+
+  private nodeStateColor(type: string): string {
+    const n: NodeItem | undefined = this.nodeOf(type);
+    if (n === undefined) {
+      return AppTheme.COLOR_TEXT_HINT;
+    }
+    return n.online ? AppTheme.COLOR_LEVEL0 : AppTheme.COLOR_LEVEL2;
+  }
+
+  /** 「最长一段没动静」：按小时桶数连续为 0 的段。 */
+  private longestQuiet(): string {
+    if (this.todayHourly.length === 0) {
+      return LiteralConstants.PLACEHOLDER;
+    }
+    let best: number = 0;
+    let cur: number = 0;
+    for (let i = 0; i < this.todayHourly.length; i++) {
+      if (this.todayHourly[i].count === 0) {
+        cur = cur + 1;
+        if (cur > best) {
+          best = cur;
+        }
+      } else {
+        cur = 0;
+      }
+    }
+    if (best === 0) {
+      return '一直有动静';
+    }
+    return best.toString() + ' 小时';
   }
 
   @Builder
-  banner() {
-    Row({ space: 10 }) {
-      Text(this.state.status.alarm_state > 0 ? '⚠️' : (this.state.status.online ? '🛡️' : '📴'))
-        .fontSize(26)
-      Column({ space: 2 }) {
-        Text(this.alarmText())
+  roomCard(icon: string, room: string, line: string, lineColor: string, nodeState: string, nodeColor: string) {
+    Column({ space: 6 }) {
+      Row({ space: 6 }) {
+        Text(icon)
+          .fontSize(AppTheme.FONT_SECTION)
+        Text(room)
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Medium)
-          .fontColor(Color.White)
-        Text(`心跳 ${Formatter.fmtAgo(this.state.status.last_heartbeat, this.nowMs)} · `
-          + `待处置 ${this.state.status.pending_alerts} 条`)
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor('#F0F4F2')
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-    }
-    .width('100%')
-    .padding(AppTheme.CARD_PADDING)
-    .backgroundColor(this.alarmColor())
-    .borderRadius(AppTheme.CARD_RADIUS)
-  }
-
-  // ------------------------------------------------------------- 传感器卡片区
-  @Builder
-  sensorGrid(p: GatewayProperties) {
-    Column({ space: AppTheme.CARD_GAP }) {
-      Row({ space: AppTheme.CARD_GAP }) {
-        SensorCard({
-          icon: '🔥',
-          title: '燃气',
-          value: `${Formatter.fmtMv(p.smoke)} mV`,
-          stateText: this.gasStateText(),
-          stateColor: this.gasStateColor(),
-          subText: 'MQ-2 分压后 ADC'
-        })
-          .layoutWeight(1)
-        SensorCard({
-          icon: '🚪',
-          title: '门磁',
-          value: p.door === true ? '打开' : (p.door === false ? '关闭' : '--'),
-          stateText: p.door === true ? '门未关' : '门窗正常',
-          stateColor: p.door === true ? AppTheme.COLOR_LEVEL1 : AppTheme.COLOR_LEVEL0,
-          subText: '干簧管 ×2'
-        })
-          .layoutWeight(1)
+          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        Blank()
+        Text(nodeState)
+          .fontSize(AppTheme.FONT_CAPTION - 1)
+          .fontColor(nodeColor)
       }
       .width('100%')
 
-      Row({ space: AppTheme.CARD_GAP }) {
-        SensorCard({
-          icon: '🚶',
-          title: '人体活动',
-          value: p.presence === true ? '有人' : '无人',
-          stateText: p.last_motion_ts !== undefined
-            ? Formatter.fmtAgo(p.last_motion_ts, this.nowMs) : '暂无记录',
-          stateColor: p.presence === true ? AppTheme.COLOR_LEVEL0 : AppTheme.COLOR_TEXT_HINT,
-          subText: 'PIR + 雷达'
-        })
-          .layoutWeight(1)
-        SensorCard({
-          icon: '🌡️',
-          title: '温湿度',
-          value: `${Formatter.fmtTemp(p.temp)}°C`,
-          stateText: `湿度 ${Formatter.fmtHumi(p.humi)}`,
-          stateColor: AppTheme.COLOR_TEXT_PRIMARY,
-          subText: 'AHT20'
-        })
-          .layoutWeight(1)
-      }
-      .width('100%')
-    }
-    .width('100%')
-  }
-
-  private gasStateText(): string {
-    if (this.state.status.alarm_state >= 2) {
-      return '浓度超标';
-    }
-    if (this.state.status.alarm_state === 1) {
-      return '浓度升高';
-    }
-    return '正常';
-  }
-
-  private gasStateColor(): string {
-    const lv: number = this.state.status.alarm_state;
-    if (lv >= 2) {
-      return AppTheme.COLOR_LEVEL2;
-    }
-    if (lv === 1) {
-      return AppTheme.COLOR_LEVEL1;
-    }
-    return AppTheme.COLOR_LEVEL0;
-  }
-
-  // ------------------------------------------------------------- 节点在线表
-  @Builder
-  nodeList(nodes: NodeItem[]) {
-    Column({ space: 0 }) {
-      ForEach(nodes, (node: NodeItem) => {
-        Column() {
-          Row({ space: 8 }) {
-            Text(node.online ? '●' : '○')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(node.online ? AppTheme.COLOR_LEVEL0 : AppTheme.COLOR_OFFLINE)
-            Column({ space: 2 }) {
-              Text(`${Formatter.nodeTypeText(node.type)}　${node.sn}`)
-                .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-              Text(`最后上报 ${Formatter.fmtAgo(node.last_seen, this.nowMs)}`
-                + `　信号 ${Formatter.fmtRssi(node.rssi)}`
-                + `　电池 ${Formatter.fmtBattery(node.battery)}`)
-                .fontSize(AppTheme.FONT_CAPTION - 1)
-                .fontColor(AppTheme.COLOR_TEXT_HINT)
-              // SLE 地址是 §4.3.1 的可选字段：有就显示（排障时能对上实物），没有就整行不占位
-              if (node.mac !== undefined && node.mac.length > 0) {
-                Text(`SLE ${Formatter.fmtMac(node.mac)}`)
-                  .fontSize(AppTheme.FONT_CAPTION - 2)
-                  .fontColor(AppTheme.COLOR_TEXT_HINT)
-              }
-            }
-            .alignItems(HorizontalAlign.Start)
-            .layoutWeight(1)
-            Text(Formatter.onlineText(node.online))
-              .fontSize(AppTheme.FONT_CAPTION - 1)
-              .fontColor(node.online ? AppTheme.COLOR_LEVEL0 : AppTheme.COLOR_OFFLINE)
-          }
-          .width('100%')
-          .padding({ top: 8, bottom: 8 })
-          if (node !== nodes[nodes.length - 1]) {
-            DividerLine()
-          }
-        }
+      Text(line)
+        .fontSize(AppTheme.FONT_SECTION)
+        .fontColor(lineColor)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
         .width('100%')
-      }, (node: NodeItem) => `${node.sn}-${node.online}-${node.last_seen}`)
     }
-    .width('100%')
-    .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
+    .layoutWeight(1)
+    .padding(AppTheme.CARD_PADDING)
     .backgroundColor(AppTheme.COLOR_SURFACE)
     .borderRadius(AppTheme.CARD_RADIUS)
-  }
-
-  // ------------------------------------------------------------- 网关 v1.1 属性（只读）
-  /**
-   * `bound_nodes` / `pair_state` 是 §4.3 v1.1 新增的第 13/14 个属性。
-   * 它们在 P0 只用于**展示与排障**：配网由手机浏览器直连网关 SoftAP 完成（PM 裁定），
-   * App 内配网页属 P1，所以这里不提供任何"配网/解绑"按钮，避免给出做不到的承诺。
-   */
-  @Builder
-  gatewayInfo() {
-    Column({ space: 8 }) {
-      SectionTitle({ text: '网关', note: '§4.3 v1.1 属性' })
-      Column({ space: 0 }) {
-        InfoRow({
-          label: '配网状态',
-          value: Formatter.pairStateText(this.state.status.properties.pair_state)
-        })
-        DividerLine()
-        InfoRow({
-          label: '已绑定节点',
-          value: Formatter.boundNodesText(this.state.status.properties.bound_nodes)
-        })
-      }
-      .width('100%')
-      .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
-      .backgroundColor(AppTheme.COLOR_SURFACE)
-      .borderRadius(AppTheme.CARD_RADIUS)
-    }
-    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
   build() {
     Column() {
-      if (!this.state.hasDevice && !this.state.loading) {
-        EmptyView({
-          icon: '📱',
-          title: '尚未绑定设备',
-          // 配网交接（PM 裁定 F-02 / ADR-0001）：P0 的配网由手机浏览器直连网关 SoftAP
-          // 的 H5 页面完成，App 内配网页是 P1 —— 空态是用户找"添加设备"的地方，
-          // 必须在这里就说清楚去哪儿配，否则用户会一直找 App 里不存在的按钮。
-          hint: '请先在服务器端把设备绑定到当前账号，再回到本页\n'
-            + '配网（P0）：手机浏览器打开网关热点页面 http://192.168.4.1/ ；App 内配网页为 P1'
-        })
-      } else if (this.state.loading && this.state.updatedAt === 0) {
-        LoadingView({ hint: '正在获取实时状态…' })
-      } else if (this.state.errorText.length > 0 && this.state.updatedAt === 0) {
-        ErrorView({
-          message: this.state.errorText,
-          code: this.state.errorCode,
-          onRetry: () => {
-            this.reload();
-          }
-        })
+      if (this.state.loading) {
+        LoadingView({ hint: UserCopy.LOADING })
+      } else if (!this.state.hasDevice) {
+        EmptyView({ icon: '📱', title: '还没有添加设备', hint: '去「我的」里点「添加设备」' })
       } else {
-        Refresh({ refreshing: this.refreshing }) {
+        Refresh({ refreshing: $$this.refreshing }) {
           Scroll() {
             Column({ space: AppTheme.CARD_GAP }) {
-              this.banner()
+              // 大字卡：今天有没有事
+              Column({ space: 6 }) {
+                Row({ space: 8 }) {
+                  Text(this.headlineIcon())
+                    .fontSize(28)
+                  Text(this.headline())
+                    .fontSize(AppTheme.FONT_SECTION + 2)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(Color.White)
+                    .layoutWeight(1)
+                    .maxLines(2)
+                }
+                .width('100%')
 
-              // 今天的活动/告警概览（数字大、老人也看得清）
-              Row({ space: AppTheme.CARD_GAP }) {
-                StatTile({
-                  value: `${this.state.status.pending_alerts}`,
-                  unit: '条',
-                  label: '待处置告警',
-                  valueColor: this.state.status.pending_alerts > 0
-                    ? AppTheme.COLOR_LEVEL2 : AppTheme.COLOR_TEXT_PRIMARY
-                })
-                  .layoutWeight(1)
-                StatTile({
-                  value: `${this.state.status.nodes.length}`,
-                  unit: '个',
-                  label: '在线节点（共上报数）'
-                })
-                  .layoutWeight(1)
-                StatTile({
-                  value: Formatter.fmtClock(this.state.updatedAt),
-                  label: '刷新时间'
-                })
-                  .layoutWeight(1)
+                if (this.checkedText().length > 0) {
+                  Text(this.checkedText())
+                    .fontSize(AppTheme.FONT_CAPTION)
+                    .fontColor('#EAF2EF')
+                }
               }
               .width('100%')
+              .padding(AppTheme.CARD_PADDING + 4)
+              .backgroundColor(this.headlineColor())
+              .borderRadius(AppTheme.CARD_RADIUS)
+              .alignItems(HorizontalAlign.Start)
 
-              SectionTitle({ text: '居家环境', note: '数据来自网关属性快照' })
-              this.sensorGrid(this.state.status.properties)
-
-              SectionTitle({
-                text: '节点状态',
-                note: `${this.state.status.nodes.length} 个`
-              })
-              if (this.state.status.nodes.length === 0) {
-                EmptyView({ icon: '🛰️', title: '暂无节点上报', hint: '节点上电后会自动注册' })
-              } else {
-                this.nodeList(this.state.status.nodes)
+              // 网络/小盒子异常：只在真有问题时出现
+              if (this.troubleText().length > 0) {
+                Text(this.troubleText())
+                  .fontSize(AppTheme.FONT_CAPTION)
+                  .fontColor(AppTheme.COLOR_LEVEL1)
+                  .width('100%')
+                  .padding({ left: 4 })
               }
 
-              // §4.3（v1.1）的第 13/14 个属性：加网白名单与配网状态都是**只读展示**——
-              // P0 的配网由手机浏览器直连网关 SoftAP 完成（PM 裁定），App 内配网页属 P1。
-              this.gatewayInfo()
+              // 三个房间
+              Row({ space: AppTheme.CARD_GAP }) {
+                this.roomCard('🔥', this.roomName('gas', UserCopy.ROOM_KITCHEN),
+                  this.gasLine(), this.gasLineColor(),
+                  this.nodeStateLine('gas'), this.nodeStateColor('gas'))
+                this.roomCard('🚶', this.roomName('presence', UserCopy.ROOM_BEDROOM),
+                  this.motionLine(), AppTheme.COLOR_TEXT_PRIMARY,
+                  this.nodeStateLine('presence'), this.nodeStateColor('presence'))
+                this.roomCard('🚪', this.roomName('door', UserCopy.ROOM_HALL),
+                  this.doorwayLine(), this.doorwayColor(),
+                  this.nodeStateLine('door'), this.nodeStateColor('door'))
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Top)
 
-              Text(`接口：GET /api/devices/${this.deviceId}/status　` +
-                `更新于 ${Formatter.fmtDateTime(this.state.updatedAt)}　每 10 s 自动刷新`)
-                .fontSize(AppTheme.FONT_CAPTION - 1)
-                .fontColor(AppTheme.COLOR_TEXT_HINT)
+              // 今日小结
+              Column({ space: 10 }) {
+                Text('今天的小结')
+                  .fontSize(AppTheme.FONT_BODY)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+                  .width('100%')
+                Row({ space: AppTheme.CARD_GAP }) {
+                  this.statBlock(UserCopy.HOME_TODAY_WALK,
+                    this.todayOk ? this.todayTotal.toString() : LiteralConstants.PLACEHOLDER, '次')
+                  this.statBlock(UserCopy.HOME_TODAY_ALERT, this.pending().toString(), '条')
+                  this.statBlock(UserCopy.HOME_QUIET, this.longestQuiet(), '')
+                }
                 .width('100%')
-                .textAlign(TextAlign.Center)
-                .margin({ top: 4, bottom: 12 })
+              }
+              .width('100%')
+              .padding(AppTheme.CARD_PADDING)
+              .backgroundColor(AppTheme.COLOR_SURFACE)
+              .borderRadius(AppTheme.CARD_RADIUS)
+              .alignItems(HorizontalAlign.Start)
+
+              // 看看这周
+              PrimaryButton({
+                text: UserCopy.HOME_WEEK_LINK,
+                canTap: true,
+                loading: false,
+                plain: true,
+                onTap: () => {
+                  router.pushUrl({ url: 'pages/ReportPage' });
+                }
+              })
+
+              if (this.state.errorText.length > 0) {
+                Text(UserCopy.HOME_NET_WEAK)
+                  .fontSize(AppTheme.FONT_CAPTION)
+                  .fontColor(AppTheme.COLOR_TEXT_HINT)
+                  .width('100%')
+                  .textAlign(TextAlign.Center)
+              }
             }
             .width('100%')
-            .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 8 })
+            .padding(AppTheme.PAGE_PADDING)
           }
           .scrollBar(BarState.Off)
-          .layoutWeight(1)
+          .edgeEffect(EdgeEffect.Spring)
         }
         .onRefreshing(() => {
-          this.refreshing = true;
-          this.reload();
+          this.refresh();
         })
-        .layoutWeight(1)
       }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(AppTheme.COLOR_BG)
   }
+
+  @Builder
+  statBlock(label: string, value: string, unit: string) {
+    Column({ space: 2 }) {
+      Row({ space: 2 }) {
+        Text(value)
+          .fontSize(AppTheme.FONT_NUMBER_MD)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        if (unit.length > 0) {
+          Text(unit)
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        }
+      }
+      Text(label)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+    }
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Start)
+  }
+}
+
+/**
+ * 今日活动量（报表 §6.16 period=day）。放在页面文件里是因为只有首页用，
+ * 且它必须和轮询同生命周期——单独抽 service 反而多一层。
+ */
+class ServiceHubApi {
+  static async todayActivity(deviceId: number): Promise<ActivityDay> {
+    const out: ActivityDay = new ActivityDay();
+    if (deviceId <= 0) {
+      return out;
+    }
+    const r: ApiResult<ActivityReport> = await ServiceHub.api().activityReport(deviceId, 'day', '');
+    if (!r.ok || r.data === undefined) {
+      return out;
+    }
+    out.ok = true;
+    out.total = r.data.total;
+    out.hourly = r.data.hourly;
+    return out;
+  }
+}
+
+class ActivityDay {
+  ok: boolean = false;
+  total: number = 0;
+  hourly: HourlyBucket[] = [];
 }

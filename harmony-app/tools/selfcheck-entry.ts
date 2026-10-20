@@ -28,6 +28,10 @@ import { Formatter } from '../ets/common/Formatter';
 import { GatewayApiService, normalizeGatewayUrl } from '../ets/service/GatewayApiService';
 import { MockGatewayTransport } from '../ets/service/MockGatewayTransport';
 import { ProvisionStatus, ScanCache, WifiResult, WifiSubmit } from '../ets/model/ProvisionTypes';
+import { AppConfig } from '../ets/common/AppConfig';
+import { RuntimeConfig } from '../ets/common/RuntimeConfig';
+import { UserCopy } from '../ets/common/UserCopy';
+import { KEY_AUTH_SEQ, KEY_USERNAME } from '../ets/service/SessionStore';
 
 /**
  * ArkUI 全局对象的 Node 替身。
@@ -585,6 +589,75 @@ class Runner {
         && n4.length > 0,
       code: 0, httpStatus: 200,
       detail: `'192.168.2.1/'→${n1} 'http://192.168.4.1/api'→${n2} 'https://gw.local'→${n3} ''→${n4}`
+    });
+    this.case150();
+  }
+
+  /** t150：普通用户界面的四条机械断言（手机号、主界无技术词、地址可配、登录态切换）。 */
+  private case150(): void {
+    // #44 手机号校验：只收 11 位数字（卡面：非 11 位提示「请输入 11 位手机号」）
+    const v: string[] = ['13800000000', '1380000000', '138000000001', '1380000000a', '', ' 13800000000'];
+    const want: boolean[] = [true, false, false, false, false, false];
+    let ok44: boolean = true;
+    for (let i = 0; i < v.length; i++) {
+      if (AppConfig.phoneValid(v[i]) !== want[i]) {
+        ok44 = false;
+      }
+    }
+    this.cases.push({
+      seq: 44, name: '手机号校验只收 11 位数字', contract: 't150',
+      ok: ok44, code: 0, httpStatus: 200,
+      detail: v.map((x: string, i: number) => `'${x}'→${AppConfig.phoneValid(x) ? 'ok' : 'no'}`).join(' ')
+    });
+
+    // #45 主界文案不得出现技术词（规范 §3：每页改完先自查技术词 grep=0）
+    const banned: string[] = ['服务器', '接口', '契约', '§', 'JSON', 'HTTP', 'API', 'Token', '令牌', '密钥', 'D1', 'Mock'];
+    const mainText: string[] = UserCopy.mainList();
+    const hits: string[] = [];
+    for (const t of mainText) {
+      for (const b of banned) {
+        if (t.indexOf(b) >= 0) {
+          hits.push(`${b}@${t}`);
+        }
+      }
+    }
+    this.cases.push({
+      seq: 45, name: '主界文案无技术词（规范 §3）', contract: 't150',
+      ok: hits.length === 0, code: 0, httpStatus: 200,
+      detail: `检查 ${mainText.length} 条主界文案 × ${banned.length} 个禁词，命中 ${hits.length} 条`
+        + (hits.length > 0 ? `：${hits.join(' ')}` : '')
+    });
+
+    // #46 服务器地址可配置且可复位（界面不出现，只在「关于」连点 5 次后可见）
+    const def: string = RuntimeConfig.baseUrl();
+    RuntimeConfig.setBaseUrl('http://10.0.0.9:3000');
+    const custom: string = RuntimeConfig.baseUrl();
+    const isCustom: boolean = RuntimeConfig.isCustomBaseUrl();
+    RuntimeConfig.resetBaseUrl();
+    const back: string = RuntimeConfig.baseUrl();
+    const mockDefault: boolean = RuntimeConfig.mockMode();
+    RuntimeConfig.setMockMode(false);
+    const mockOff: boolean = RuntimeConfig.mockMode();
+    RuntimeConfig.setMockMode(mockDefault);
+    this.cases.push({
+      seq: 46, name: '服务器地址可改可复位 + 离线开关', contract: 't150',
+      // 注意：baseUrl() 是「主机根」形式（拼接时再加 /api），所以与常量比较要先归一化。
+      ok: def === RuntimeConfig.normalize(AppConfig.SERVER_BASE_URL) && custom.indexOf('10.0.0.9') >= 0
+        && isCustom && back === def && mockOff === false,
+      code: 0, httpStatus: 200,
+      detail: `默认=${def} 改后=${custom} customFlag=${isCustom} 复位=${back} mock关=${mockOff}`
+    });
+
+    // #47 登录态切换要触发页面重建（否则退出登录后仍停在首页）
+    const before: number = AppStorage.get<number>(KEY_AUTH_SEQ) ?? 0;
+    SessionStore.saveLogin('13800000000', 1, '小盒子');
+    SessionStore.clear();
+    const after: number = AppStorage.get<number>(KEY_AUTH_SEQ) ?? 0;
+    const name: string = AppStorage.get<string>(KEY_USERNAME) ?? '';
+    this.cases.push({
+      seq: 47, name: '登录/退出触发界面重建（authSeq）', contract: 't150',
+      ok: after >= before + 2 && name === '', code: 0, httpStatus: 200,
+      detail: `authSeq ${before}→${after}（登录+1、退出+1） clearedUser='${name}'`
     });
   }
 

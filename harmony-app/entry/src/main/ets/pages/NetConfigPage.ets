@@ -1,501 +1,402 @@
 /**
- * 设备配网页（F1–F4，与安卓侧同交互；口径见 docs/技术/App功能对齐清单.md）。
+ * 添加设备（配网）4 步向导（规范 §5：连热点 → 选 Wi-Fi → 正在连接 → 完成）。
  *
- * 为什么是「一页五步」而不是五页向导：
- *  现场配网最常发生的不是"按顺序走完"，而是「Wi-Fi 提交失败了改密码重试」、
- *  「热点名改了要重连」这类乱序重做（安卓侧同样不强行卡步骤）。
- *  一页五张卡让每一步都能单独重试，且失败文案始终留在眼前。
+ * 入口只有一个：「我的 → 添加设备」（未绑定的新用户也一样，先注册登录再添加）。
  *
- * 与云端页面的关键差别：
- *  · 只调**网关本地 API**（§12 + t143 `/api/scan`），**不依赖服务器**——
- *    配网时手机连的是网关热点，云端根本不可达；
- *  · 没有登录态，所以不经 `ApiPort`、不带 JWT（见 GatewayPort 的分层理由）。
+ * 为什么是 4 步而不是把字段堆一页：
+ *  · 用户（子女）第一次做这件事时手上拿着手机、家里老人在旁边等，页面越短越好；
+ *  · 每一步只问一件事，失败时能明确告诉他是哪一步出了问题（连不上热点 / 选不到 Wi-Fi /
+ *    密码不对 / 小盒子联系不上），而不是一句「配网失败」。
  *
- * 五步对应卡面 F1–F4：
- *  ① 连网关热点（显示热点名 + 「看不到/连不上」三步对策）
- *  ② 家庭 Wi-Fi 下拉（来自 `/api/scan` 缓存；空列表 → 手输）
- *  ③ 密码 + 提交（`POST /api/provision/wifi`）
- *  ④ 结果（成功显示将回连的 SSID；失败按 1600–1606 文案 + reason）
- *  ⑤ IoTDA 三件套（可跳过，跳过时提示"云端推送收不到"的影响）
+ * 网关接口口径（契约 §12，网关固件实际路由）：
+ *  · `GET /api/provision/status` → 热点名、剩余秒数、是否在线；
+ *  · `GET /api/scan` → 开窗前扫到的 Wi-Fi 缓存（成功回 `code=200`，见 §14.7）；
+ *  · `POST /api/provision/wifi` → 提交 SSID + 密码（**不是** `/api/config`：
+ *    固件里没有这个路由，见 rk2206-gateway/src/gw_prov_route.c 的 5+1 条路由）。
+ * 云凭据（IoTDA 三件套）不在这 4 步里：原型阶段由部署时写进网关（P1），
+ * 页面上不出现「IoTDA/密钥」这类词——普通人看不懂，也不该在这里填。
  */
+
 import { router } from '@kit.ArkUI';
 import { AppConfig } from '../common/AppConfig';
 import { AppTheme } from '../common/AppTheme';
-import { ProvisionStatus, ScanCache, ScanItem, WifiResult, WifiSubmit } from '../model/ProvisionTypes';
-import { ApiResult } from '../model/Result';
-import { GatewayPort } from '../service/GatewayPort';
+import { UserCopy } from '../common/UserCopy';
+import { PrimaryButton } from '../components/CommonViews';
+import { LoadingView } from '../components/StateViews';
+import { ScanCache, ScanItem, WifiResult, WifiSubmit } from '../model/ProvisionTypes';
 import { ProvisionHub } from '../service/ProvisionHub';
-import { SectionTitle, InfoRow, PrimaryButton, DividerLine } from '../components/CommonViews';
-import { SwitchRow } from '../components/SettingRows';
+import { SessionStore } from '../service/SessionStore';
 
 @Entry
 @Component
 struct NetConfigPage {
-  private gw: GatewayPort = ProvisionHub.gateway();
-
-  @State baseUrlEdit: string = ProvisionHub.configuredUrl();
-  @State status: ProvisionStatus | undefined = undefined;
-  @State scan: ScanCache | undefined = undefined;
-  @State loading: boolean = false;
-  @State submitting: boolean = false;
+  /** 1 连热点 / 2 选 Wi-Fi / 3 正在连接 / 4 完成 */
+  @State step: number = 1;
+  @State loading: boolean = true;
+  @State apName: string = '';
+  @State remainS: number = 0;
+  @State scan: ScanCache = new ScanCache();
   @State ssid: string = '';
+  @State manual: boolean = false;
+  @State manualSsid: string = '';
   @State password: string = '';
-  @State showPassword: boolean = false;
-  @State hiddenNetwork: boolean = false;
-  @State cloudHost: string = '';
-  @State cloudDevice: string = '';
-  @State cloudSecret: string = '';
-  @State showSecret: boolean = false;
-  @State resultOk: boolean = false;
-  @State resultText: string = '';
+  @State hidden: boolean = false;
+  @State submitting: boolean = false;
   @State errorText: string = '';
+  @State resultSsid: string = '';
+  @State showAddr: boolean = false;
+  @State addrInput: string = '';
 
   aboutToAppear(): void {
-    this.refreshAll();
+    this.addrInput = ProvisionHub.configuredUrl();
+    this.loadStatus();
   }
 
-  /** 同时拉「窗口状态」与「SSID 缓存」：两个都失败也各自给文案，不互相挡。 */
-  private async refreshAll(): Promise<void> {
+  private async loadStatus(): Promise<void> {
     this.loading = true;
-    this.errorText = '';
-    const st: ApiResult<ProvisionStatus> = await this.gw.status();
-    if (st.ok && st.data !== undefined) {
-      this.status = st.data;
-    } else {
-      this.errorText = `读网关状态失败：${st.message}`;
-    }
-    const sc: ApiResult<ScanCache> = await this.gw.scanCache();
-    if (sc.ok && sc.data !== undefined) {
-      this.scan = sc.data;
-      if (this.ssid.length === 0 && sc.data.list.length > 0) {
-        this.ssid = sc.data.list[0].ssid;
-      }
-    } else if (this.errorText.length === 0) {
-      this.errorText = `读 Wi-Fi 列表失败：${sc.message}`;
-    }
+    const r = await ProvisionHub.gateway().status();
     this.loading = false;
+    if (!r.ok) {
+      this.errorText = r.message;
+      return;
+    }
+    if (r.data !== undefined) {
+      this.apName = r.data.ssid;
+      this.remainS = r.data.remainS;
+    }
+    this.errorText = '';
   }
 
-  /** 用户改地址：落盘 + 重建实例 + 重新拉一轮（改错也能立刻看到"连不上"）。 */
-  private applyUrl(): void {
-    ProvisionHub.setUrl(this.baseUrlEdit);
-    this.gw = ProvisionHub.gateway();
-    this.status = undefined;
-    this.scan = undefined;
-    this.refreshAll();
+  private async loadScan(): Promise<void> {
+    this.loading = true;
+    const r = await ProvisionHub.gateway().scanCache();
+    this.loading = false;
+    if (r.ok && r.data !== undefined) {
+      this.scan = r.data;
+    }
   }
 
-  private cloudFilled(): boolean {
-    return this.cloudHost.length > 0 || this.cloudDevice.length > 0 || this.cloudSecret.length > 0;
-  }
-
-  private cloudComplete(): boolean {
-    return this.cloudHost.length > 0 && this.cloudDevice.length > 0 && this.cloudSecret.length > 0;
-  }
-
-  private canSubmit(): boolean {
-    if (this.submitting) {
-      return false;
-    }
-    if (this.ssid.trim().length === 0 || this.password.length < 8) {
-      return false;
-    }
-    // 云凭据要么三项全填、要么全空（§10.2「出现任意一个就要求三件套齐全」）
-    if (this.cloudFilled() && !this.cloudComplete()) {
-      return false;
-    }
-    if (this.status !== undefined && this.status.busy.length > 0) {
-      return false;
-    }
-    return true;
+  private async goStep2(): Promise<void> {
+    this.step = 2;
+    await this.loadScan();
   }
 
   private async submit(): Promise<void> {
-    this.submitting = true;
+    const target: string = this.manual ? this.manualSsid.trim() : this.ssid;
+    if (target.length === 0) {
+      this.errorText = UserCopy.NC_EMPTY_SSID;
+      return;
+    }
+    if (this.password.length === 0) {
+      this.errorText = UserCopy.NC_EMPTY_PWD;
+      return;
+    }
     this.errorText = '';
-    this.resultText = '';
+    this.step = 3;
+    this.submitting = true;
     const req: WifiSubmit = new WifiSubmit();
-    req.ssid = this.ssid.trim();
+    req.ssid = target;
     req.password = this.password;
-    req.hidden = this.hiddenNetwork;
-    req.host = this.cloudHost.trim();
-    req.deviceId = this.cloudDevice.trim();
-    req.secret = this.cloudSecret;
-    const r: ApiResult<WifiResult> = await this.gw.submitWifi(req);
-    const d: WifiResult | undefined = r.data;
-    if (r.ok && d !== undefined) {
-      this.resultOk = true;
-      const cloud: string = d.cloudSaved ? '（云凭据已一并保存）' : '';
-      this.resultText = `已提交，网关正在连接「${d.ssid.length > 0 ? d.ssid : req.ssid}」${cloud}。`
-        + `${d.settleS > 0 ? `约 ${d.settleS} s 后网关重启、热点消失；` : ''}`
-        + '随后请把手机 Wi-Fi 切回家里的 Wi-Fi，再回 App 首页刷新。'
-        + (d.note.length > 0 ? `\n网关说明：${d.note}` : '');
-    } else {
-      this.resultOk = false;
-      this.resultText = r.message;
-      // 密码错/没扫到 → 把用户送回第③步改，别让人在结果卡上猜
-      if (r.code === 1602) {
-      }
-    }
+    req.hidden = this.hidden;
+    const r = await ProvisionHub.gateway().submitWifi(req);
     this.submitting = false;
+    if (!r.ok) {
+      this.errorText = r.message;
+      this.step = 2;
+      return;
+    }
+    const res: WifiResult = r.data === undefined ? new WifiResult() : r.data;
+    this.resultSsid = res.ssid.length > 0 ? res.ssid : target;
+    this.step = 4;
   }
 
-  private scanOptions(): SelectOption[] {
-    const out: SelectOption[] = [];
-    const sc: ScanCache | undefined = this.scan;
-    if (sc === undefined) {
-      return out;
-    }
-    let i: number = 0;
-    while (i < sc.list.length) {
-      const it: ScanItem = sc.list[i];
-      out.push({ value: `${it.ssid}（${it.rssi} dBm / ch${it.ch}）` });
-      i = i + 1;
-    }
-    return out;
-  }
-
-  private scanAgeText(): string {
-    const sc: ScanCache | undefined = this.scan;
-    if (sc === undefined) {
-      return '--';
-    }
-    if (!sc.cached) {
-      return '网关开窗前没扫到（请手输）';
-    }
-    const s: number = Math.floor(sc.ageMs / 1000);
-    return `扫描于开机后 ${Math.floor(sc.scannedAt / 1000)} s（${s} s 前），共 ${sc.list.length} 条`;
+  private saveAddr(): void {
+    ProvisionHub.setUrl(this.addrInput.trim());
+    this.addrInput = ProvisionHub.configuredUrl();
+    this.showAddr = false;
+    this.loadStatus();
   }
 
   @Builder
-  private stepHeader(no: string, title: string, done: boolean) {
-    Row({ space: 8 }) {
-      Text(no)
+  stepBar() {
+    Column({ space: 6 }) {
+      Row({ space: 6 }) {
+        ForEach([1, 2, 3, 4], (n: number) => {
+          Column()
+            .height(4)
+            .layoutWeight(1)
+            .backgroundColor(n <= this.step ? AppTheme.COLOR_PRIMARY : AppTheme.COLOR_DIVIDER)
+            .borderRadius(2)
+        }, (n: number) => `${n}`)
+      }
+      .width('100%')
+      Text('第 ' + this.step.toString() + ' 步 / 共 4 步')
         .fontSize(AppTheme.FONT_CAPTION)
-        .fontColor(Color.White)
-        .backgroundColor(done ? AppTheme.COLOR_PRIMARY : AppTheme.COLOR_TEXT_HINT)
-        .width(24)
-        .height(24)
-        .textAlign(TextAlign.Center)
-        .borderRadius(12)
-      Text(title)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+    }
+    .width('100%')
+    .padding({ top: 4, bottom: 10 })
+  }
+
+  @Builder
+  stepOne() {
+    Column({ space: 10 }) {
+      Text(UserCopy.NC_STEP1)
         .fontSize(AppTheme.FONT_SECTION)
         .fontWeight(FontWeight.Medium)
         .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-        .layoutWeight(1)
-      if (done) {
-        Text('✓')
-          .fontSize(AppTheme.FONT_CAPTION)
+        .width('100%')
+      Text(UserCopy.NC_STEP1_BODY)
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+      if (this.apName.length > 0) {
+        Text('小盒子的 Wi-Fi：' + this.apName)
+          .fontSize(AppTheme.FONT_BODY)
           .fontColor(AppTheme.COLOR_PRIMARY)
+          .width('100%')
+      }
+      Text(UserCopy.NC_STEP1_TROUBLE)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_HINT)
+        .width('100%')
+
+      PrimaryButton({
+        text: '我已连上，下一步',
+        canTap: true,
+        loading: false,
+        plain: false,
+        onTap: () => {
+          this.goStep2();
+        }
+      })
+        .margin({ top: 6 })
+
+      Text('连不上？手动填小盒子地址')
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_HINT)
+        .width('100%')
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          this.showAddr = !this.showAddr;
+        })
+      if (this.showAddr) {
+        TextInput({ text: this.addrInput, placeholder: 'http://192.168.2.1' })
+          .height(44)
+          .fontSize(AppTheme.FONT_CAPTION)
+          .backgroundColor(AppTheme.COLOR_BG)
+          .borderRadius(AppTheme.BTN_RADIUS)
+          .onChange((v: string) => {
+            this.addrInput = v;
+          })
+        PrimaryButton({
+          text: '用这个地址重试',
+          canTap: true,
+          loading: false,
+          plain: true,
+          onTap: () => this.saveAddr()
+        })
       }
     }
     .width('100%')
-    .alignItems(VerticalAlign.Center)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  stepTwo() {
+    Column({ space: 10 }) {
+      Text(UserCopy.NC_STEP2)
+        .fontSize(AppTheme.FONT_SECTION)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        .width('100%')
+
+      if (this.loading) {
+        Text(UserCopy.NC_LOADING)
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.COLOR_TEXT_HINT)
+          .width('100%')
+      } else if (this.scan.list.length > 0 && !this.manual) {
+        Text(UserCopy.NC_STEP2_PICK)
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .width('100%')
+        ForEach(this.scan.list, (item: ScanItem) => {
+          Row({ space: 8 }) {
+            Text(item.ssid)
+              .fontSize(AppTheme.FONT_BODY)
+              .fontColor(this.ssid === item.ssid ? AppTheme.COLOR_PRIMARY : AppTheme.COLOR_TEXT_PRIMARY)
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (this.ssid === item.ssid) {
+              Text('✓')
+                .fontSize(AppTheme.FONT_BODY)
+                .fontColor(AppTheme.COLOR_PRIMARY)
+            }
+          }
+          .width('100%')
+          .height(44)
+          .padding({ left: 12, right: 12 })
+          .backgroundColor(this.ssid === item.ssid ? AppTheme.COLOR_BG : AppTheme.COLOR_SURFACE)
+          .borderRadius(AppTheme.BTN_RADIUS)
+          .onClick(() => {
+            this.ssid = item.ssid;
+          })
+        }, (item: ScanItem) => item.ssid)
+      } else {
+        Text(UserCopy.NC_NO_LIST)
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.COLOR_TEXT_HINT)
+          .width('100%')
+      }
+
+      Text(this.manual || this.scan.list.length === 0 ? 'Wi-Fi 名字' : UserCopy.NC_MANUAL)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+        .onClick(() => {
+          this.manual = !this.manual;
+        })
+      if (this.manual || this.scan.list.length === 0) {
+        TextInput({ text: this.manualSsid, placeholder: '输入你家的 Wi-Fi 名字' })
+          .height(AppTheme.INPUT_HEIGHT)
+          .fontSize(AppTheme.FONT_BODY)
+          .backgroundColor(AppTheme.COLOR_BG)
+          .borderRadius(AppTheme.BTN_RADIUS)
+          .onChange((v: string) => {
+            this.manualSsid = v;
+          })
+      }
+
+      Text(UserCopy.NC_HIDDEN)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+        .onClick(() => {
+          this.hidden = !this.hidden;
+        })
+
+      Text(UserCopy.NC_PASSWORD)
+        .fontSize(AppTheme.FONT_CAPTION)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+      TextInput({ text: this.password, placeholder: '8 位以上' })
+        .type(InputType.Password)
+        .height(AppTheme.INPUT_HEIGHT)
+        .fontSize(AppTheme.FONT_BODY)
+        .backgroundColor(AppTheme.COLOR_BG)
+        .borderRadius(AppTheme.BTN_RADIUS)
+        .maxLength(63)
+        .onChange((v: string) => {
+          this.password = v;
+        })
+
+      PrimaryButton({
+        text: UserCopy.NC_SUBMIT,
+        canTap: !this.submitting,
+        loading: this.submitting,
+        onTap: () => {
+          this.submit();
+        }
+      })
+        .margin({ top: 6 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  stepThree() {
+    Column({ space: 10 }) {
+      Text(UserCopy.NC_STEP3)
+        .fontSize(AppTheme.FONT_SECTION)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        .width('100%')
+      Text(UserCopy.NC_CONNECTING)
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+      LoadingProgress()
+        .width(40)
+        .height(40)
+        .color(AppTheme.COLOR_PRIMARY)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  stepFour() {
+    Column({ space: 10 }) {
+      Text('✅')
+        .fontSize(40)
+      Text(UserCopy.NC_STEP4)
+        .fontSize(AppTheme.FONT_SECTION)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        .width('100%')
+      Text(UserCopy.NC_OK)
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+      if (this.resultSsid.length > 0) {
+        Text('现在连的是：' + this.resultSsid)
+          .fontSize(AppTheme.FONT_BODY)
+          .fontColor(AppTheme.COLOR_PRIMARY)
+          .width('100%')
+      }
+      PrimaryButton({
+        text: UserCopy.NC_BACK_HOME,
+        canTap: true,
+        loading: false,
+        onTap: () => {
+          router.back();
+        }
+      })
+        .margin({ top: 4 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
   build() {
-    Column({ space: 8 }) {
-      Text('设备配网')
-        .fontSize(AppTheme.FONT_TITLE)
-        .fontWeight(FontWeight.Bold)
-        .width('100%')
-      Row({ space: 12 }) {
-        Text('◀ 返回')
-          .fontSize(AppTheme.FONT_CAPTION)
+    Column() {
+      Row() {
+        Text('‹ ' + UserCopy.BACK)
+          .fontSize(AppTheme.FONT_BODY)
           .fontColor(AppTheme.COLOR_PRIMARY)
           .onClick(() => {
             router.back();
           })
-        Text(ProvisionHub.isMock() ? '数据源：Mock 假网关（无需真实热点）'
-          : '数据源：真实网关（手机需先连网关热点）')
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(AppTheme.COLOR_TEXT_HINT)
+        Blank()
       }
       .width('100%')
+      .height(44)
+      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+
+      Text(UserCopy.NC_TITLE)
+        .fontSize(AppTheme.FONT_TITLE)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        .width('100%')
+        .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
 
       Scroll() {
         Column({ space: AppTheme.CARD_GAP }) {
-          // ---------- 网关地址（卡面要求③：默认 192.168.2.1，允许用户改）
-          Column({ space: 8 }) {
-            SectionTitle({ text: '网关地址', note: '以网关日志为准' })
-            TextInput({ text: this.baseUrlEdit, placeholder: AppConfig.GATEWAY_BASE_URL })
-              .height(AppTheme.INPUT_HEIGHT)
-              .fontSize(AppTheme.FONT_BODY)
-              .borderRadius(AppTheme.BTN_RADIUS)
-              .backgroundColor(AppTheme.COLOR_BG)
-              .width('100%')
-              .onChange((v: string) => {
-                this.baseUrlEdit = v;
-              })
-            Row({ space: 8 }) {
-              PrimaryButton({
-                text: '保存并重连',
-                canTap: this.baseUrlEdit.length > 0 && !this.loading,
-                loading: false,
-                onTap: () => {
-                  this.applyUrl();
-                }
-              })
-                .layoutWeight(1)
-              PrimaryButton({
-                text: '刷新状态',
-                canTap: !this.loading,
-                loading: this.loading,
-                plain: true,
-                onTap: () => {
-                  this.refreshAll();
-                }
-              })
-                .layoutWeight(1)
-            }
-            .width('100%')
-            Text('默认 http://192.168.2.1；实际值以网关串口日志「[NET] SoftAP 已启动 … 地址 http://…/」为准（CAL-12）')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_TEXT_HINT)
-              .width('100%')
-            InfoRow({ label: '当前请求地址', value: this.gw.baseUrl() })
-          }
-          .width('100%')
-          .padding(AppTheme.CARD_PADDING)
-          .backgroundColor(AppTheme.COLOR_SURFACE)
-          .borderRadius(AppTheme.CARD_RADIUS)
-          .alignItems(HorizontalAlign.Start)
-
-          // ---------- ① 连热点
-          Column({ space: 10 }) {
-            this.stepHeader('1', '连上网关热点', this.status !== undefined)
-            Text('打开手机「设置 → WLAN」，连接下面的热点（没有密码 / 或见网关贴纸）：')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-              .width('100%')
-            InfoRow({
-              label: '热点名',
-              value: this.status !== undefined && this.status.ssid.length > 0
-                ? this.status.ssid : 'ElderCare-XXXX（看网关贴纸/串口日志）'
-            })
-            if (this.status !== undefined) {
-              InfoRow({
-                label: '配网窗口',
-                value: this.status.remainS > 0 ? `剩余 ${this.status.remainS} s` : '未开启（长按配对键 3 s）'
-              })
-              InfoRow({ label: '汇聚在线', value: this.status.hubOnline ? '是' : '否（配完仍需开汇聚）' })
-              InfoRow({ label: '网关固件', value: this.status.firmware })
-              InfoRow({ label: '当前家庭 Wi-Fi', value: this.status.staSsid.length > 0 ? this.status.staSsid : '--' })
-            }
-            Text('看不到热点？① 确认长按配对键满 3 s（窗口 600 s）；② 手机 WLAN 关掉再开；'
-              + '③ 换一台手机试（部分机型会隐藏无密码热点）。')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-              .width('100%')
-            Text('连不上？① 忘记该热点后重连；② 关闭手机流量/自动切换网络；'
-              + '③ 重启网关再长按配对键。连上后点「刷新状态」应看到窗口剩余秒数。')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-              .width('100%')
-          }
-          .width('100%')
-          .padding(AppTheme.CARD_PADDING)
-          .backgroundColor(AppTheme.COLOR_SURFACE)
-          .borderRadius(AppTheme.CARD_RADIUS)
-          .alignItems(HorizontalAlign.Start)
-
-          // ---------- ② 选家庭 Wi-Fi
-          Column({ space: 10 }) {
-            this.stepHeader('2', '选择家里的 Wi-Fi（2.4 GHz）', this.ssid.length > 0)
-            Text('列表来自网关开窗前扫到的那一批 2.4 G 热点；没有你的 Wi-Fi 就在下面手输（单射频限制，不是故障）。')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-              .width('100%')
-            InfoRow({ label: '列表', value: this.scanAgeText() })
-            if (this.scanOptions().length > 0) {
-              Select(this.scanOptions())
-                .selected(0)
-                .value(this.ssid.length > 0 ? this.ssid : '从列表选择')
-                .font({ size: AppTheme.FONT_BODY })
-                .width('100%')
-                .onSelect((index: number, value: string) => {
-                  const sc: ScanCache | undefined = this.scan;
-                  if (sc !== undefined && index >= 0 && index < sc.list.length) {
-                    this.ssid = sc.list[index].ssid;
-                    this.hiddenNetwork = false;
-                  }
-                })
+          this.stepBar()
+          Column() {
+            if (this.step === 1) {
+              this.stepOne()
+            } else if (this.step === 2) {
+              this.stepTwo()
+            } else if (this.step === 3) {
+              this.stepThree()
             } else {
-              Text('列表为空（网关开窗前没扫到，或缓存已清）→ 直接手输名称')
-                .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_TEXT_HINT)
-                .width('100%')
+              this.stepFour()
             }
-            TextInput({ text: this.ssid, placeholder: 'Wi-Fi 名称（可从上方选择，也可手输）' })
-              .height(AppTheme.INPUT_HEIGHT)
-              .fontSize(AppTheme.FONT_BODY)
-              .borderRadius(AppTheme.BTN_RADIUS)
-              .backgroundColor(AppTheme.COLOR_BG)
-              .width('100%')
-              .onChange((v: string) => {
-                this.ssid = v;
-              })
-            SwitchRow({
-              label: '这是隐藏网络',
-              hint: '隐藏 SSID 不会出现在扫描列表里，勾上后网关不做"名字必须出现在列表"的预检',
-              checked: this.hiddenNetwork,
-              onToggle: (next: boolean) => {
-                this.hiddenNetwork = next;
-              }
-            })
-          }
-          .width('100%')
-          .padding(AppTheme.CARD_PADDING)
-          .backgroundColor(AppTheme.COLOR_SURFACE)
-          .borderRadius(AppTheme.CARD_RADIUS)
-          .alignItems(HorizontalAlign.Start)
-
-          // ---------- ③ 密码 + 提交
-          Column({ space: 10 }) {
-            this.stepHeader('3', '输入 Wi-Fi 密码并提交', this.resultOk)
-            Row({ space: 8 }) {
-              TextInput({ text: this.password, placeholder: 'Wi-Fi 密码（8–63 位）' })
-                .type(this.showPassword ? InputType.Normal : InputType.Password)
-                .height(AppTheme.INPUT_HEIGHT)
-                .fontSize(AppTheme.FONT_BODY)
-                .borderRadius(AppTheme.BTN_RADIUS)
-                .backgroundColor(AppTheme.COLOR_BG)
-                .maxLength(63)
-                .layoutWeight(1)
-                .onChange((v: string) => {
-                  this.password = v;
-                })
-              Text(this.showPassword ? '隐藏' : '显示')
-                .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_PRIMARY)
-                .onClick(() => {
-                  this.showPassword = !this.showPassword;
-                })
-            }
-            .width('100%')
-            if (this.password.length > 0 && this.password.length < 8) {
-              Text('密码不足 8 位（WPA2-PSK 最少 8 位）')
-                .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_LEVEL1)
-                .width('100%')
-            }
-            if (this.status !== undefined && this.status.busy.length > 0) {
-              Text(`网关正忙（${this.status.busy}），请等它结束再提交`)
-                .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_LEVEL1)
-                .width('100%')
-            }
-            PrimaryButton({
-              text: '提交配网',
-              canTap: this.canSubmit(),
-              loading: this.submitting,
-              onTap: () => {
-                this.submit();
-              }
-            })
-            Text(this.cloudFilled()
-              ? (this.cloudComplete() ? '提交时会一并保存云凭据' : '云凭据要三项都填（接入地址 / 设备 ID / 密钥），或全部留空')
-              : '云凭据留空 = 只配 Wi-Fi（见第⑤步的影响说明）')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_TEXT_HINT)
-              .width('100%')
-          }
-          .width('100%')
-          .padding(AppTheme.CARD_PADDING)
-          .backgroundColor(AppTheme.COLOR_SURFACE)
-          .borderRadius(AppTheme.CARD_RADIUS)
-          .alignItems(HorizontalAlign.Start)
-
-          // ---------- ④ 结果
-          if (this.resultText.length > 0) {
-            Column({ space: 10 }) {
-              this.stepHeader('4', this.resultOk ? '提交成功' : '提交失败', this.resultOk)
-              Text(this.resultText)
-                .fontSize(AppTheme.FONT_BODY)
-                .fontColor(this.resultOk ? AppTheme.COLOR_TEXT_PRIMARY : AppTheme.COLOR_LEVEL2)
-                .width('100%')
-              if (!this.resultOk) {
-                Text('可以改一下再试：密码错 → 重新输入；名字不对 → 回第②步换一个；'
-                  + '1600/1601 → 长按配对键重开窗口；1603 → 等网关忙完；1605 → 先把汇聚上电。')
-                  .fontSize(AppTheme.FONT_CAPTION)
-                  .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-                  .width('100%')
-                PrimaryButton({
-                  text: '重新提交',
-                  canTap: this.canSubmit(),
-                  loading: this.submitting,
-                  plain: true,
-                  onTap: () => {
-                    this.submit();
-                  }
-                })
-              } else {
-                PrimaryButton({
-                  text: '回到首页刷新',
-                  canTap: true,
-                  loading: false,
-                  onTap: () => {
-                    router.clear();
-                    router.replaceUrl({ url: 'pages/Index' });
-                  }
-                })
-              }
-            }
-            .width('100%')
-            .padding(AppTheme.CARD_PADDING)
-            .backgroundColor(AppTheme.COLOR_SURFACE)
-            .borderRadius(AppTheme.CARD_RADIUS)
-            .alignItems(HorizontalAlign.Start)
-          }
-
-          // ---------- ⑤ IoTDA 云凭据（可跳过）
-          Column({ space: 10 }) {
-            this.stepHeader('5', '华为云 IoTDA（可跳过）', this.cloudComplete())
-            Text('填了 → 网关会把告警经 IoTDA 推到云端与 App；不填 → 本地闭环仍然可用，但云端收不到。')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-              .width('100%')
-            TextInput({ text: this.cloudHost, placeholder: '接入地址（如 xxx.iotda.example.com）' })
-              .height(AppTheme.INPUT_HEIGHT)
-              .fontSize(AppTheme.FONT_BODY)
-              .borderRadius(AppTheme.BTN_RADIUS)
-              .backgroundColor(AppTheme.COLOR_BG)
-              .width('100%')
-              .onChange((v: string) => {
-                this.cloudHost = v;
-              })
-            TextInput({ text: this.cloudDevice, placeholder: '设备 ID' })
-              .height(AppTheme.INPUT_HEIGHT)
-              .fontSize(AppTheme.FONT_BODY)
-              .borderRadius(AppTheme.BTN_RADIUS)
-              .backgroundColor(AppTheme.COLOR_BG)
-              .width('100%')
-              .onChange((v: string) => {
-                this.cloudDevice = v;
-              })
-            Row({ space: 8 }) {
-              TextInput({ text: this.cloudSecret, placeholder: '设备密钥' })
-                .type(this.showSecret ? InputType.Normal : InputType.Password)
-                .height(AppTheme.INPUT_HEIGHT)
-                .fontSize(AppTheme.FONT_BODY)
-                .borderRadius(AppTheme.BTN_RADIUS)
-                .backgroundColor(AppTheme.COLOR_BG)
-                .layoutWeight(1)
-                .onChange((v: string) => {
-                  this.cloudSecret = v;
-                })
-              Text(this.showSecret ? '隐藏' : '显示')
-                .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_PRIMARY)
-                .onClick(() => {
-                  this.showSecret = !this.showSecret;
-                })
-            }
-            .width('100%')
-            Text('密钥只随本次提交发往网关，App 不落盘、不回显；三项要么都填、要么都空。')
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_TEXT_HINT)
-              .width('100%')
           }
           .width('100%')
           .padding(AppTheme.CARD_PADDING)
@@ -504,32 +405,30 @@ struct NetConfigPage {
           .alignItems(HorizontalAlign.Start)
 
           if (this.errorText.length > 0) {
-            Text(this.errorText)
-              .fontSize(AppTheme.FONT_CAPTION)
-              .fontColor(AppTheme.COLOR_LEVEL2)
-              .width('100%')
-              .padding(AppTheme.CARD_PADDING)
-              .backgroundColor(AppTheme.COLOR_SURFACE)
-              .borderRadius(AppTheme.CARD_RADIUS)
-          }
-
-          DividerLine()
-          Text('说明：本页只访问网关本地接口（§12）：/api/provision/status、/api/scan、'
-            + '/api/provision/wifi；不访问云端，也不索取账号密码。')
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_TEXT_HINT)
+            Column({ space: 8 }) {
+              Text(this.errorText)
+                .fontSize(AppTheme.FONT_CAPTION)
+                .fontColor(AppTheme.COLOR_LEVEL2)
+                .width('100%')
+              Text(UserCopy.NC_RETRY_HINT)
+                .fontSize(AppTheme.FONT_CAPTION)
+                .fontColor(AppTheme.COLOR_TEXT_HINT)
+                .width('100%')
+            }
             .width('100%')
+            .padding({ left: 4 })
+            .alignItems(HorizontalAlign.Start)
+          }
         }
         .width('100%')
-        .padding({ bottom: 24 })
+        .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, bottom: 24 })
       }
       .layoutWeight(1)
-      .width('100%')
       .scrollBar(BarState.Off)
     }
-    .padding(AppTheme.PAGE_PADDING)
     .width('100%')
     .height('100%')
     .backgroundColor(AppTheme.COLOR_BG)
+    .alignItems(HorizontalAlign.Start)
   }
 }

@@ -1,8 +1,9 @@
 {
   "src": [
     "pages/Index",
+    "pages/RegisterPage",
     "pages/AlertDetailPage",
-    "pages/SmokePage",
-    "pages/NetConfigPage"
+    "pages/NetConfigPage",
+    "pages/ReportPage"
   ]
 }
