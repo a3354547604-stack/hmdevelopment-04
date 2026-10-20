@@ -121,6 +121,15 @@
 #define GW_TASK_PRIO_MAIN       25
 #define GW_TASK_PRIO_NET        26          /* 联网最不急：UART/声光必须先跑 */
 #define GW_LOG_TAG              "gw"
+
+/* 临时诊断：tick 循环分阶段打点（定位"心跳只打一次"）。定位完置 0。 */
+#define GW_TICK_TRACE           1
+
+/* SoftAP 配网开关（2026-10-20 恢复为 1）。
+ * 之前卡死的根因已定位：EnableHotspot() 内部用 LOS_SemPend(…, 0xFFFFFFFF) 等固件事件，
+ * 没有超时；从 tick 任务里同步调用就把整个 tick 循环钉住了。现在 AP 起停放在专用任务
+ * gwAp 里异步执行（见 gw_net.c 的 net_ap_worker），tick 只登记请求。 */
+#define GW_PROV_AP_ENABLE       1
 /* 构建脚本的断言锚点（tools/gw-build.sh 到 images/Firmware.img 里 grep 这个整串，
  * 用来证明"从源码编出来的固件里确实有网关代码"，而不是只有 SDK 自带的壳）。
  * 改这个值时要同步 tools/gw-build.sh 的 GW_IMAGE_TAG。 */
@@ -233,6 +242,14 @@
  * 家庭 Wi-Fi 口令则绝不允许打印/回显（§12.6）。 */
 #define GW_PROV_AP_PSK              "echub8888"
 #define GW_PROV_AP_CHANNEL          6u      /* §12.3 信道 1 或 6 */
+
+/* SoftAP 异步任务与等待窗口（t142）。
+ * 为什么要单开任务：EnableHotspot() 里的 wifi_send_cmd 用 LOS_SemPend(sem, 0xFFFFFFFF)
+ * 等固件事件，**没有超时**；放在 tick 任务里一旦固件不回事件，按键/心跳/声光全部停摆。
+ * 优先级刻意最低：起 AP 慢几百毫秒没关系，不能抢 UART(24)/tick(25)/net(26)。 */
+#define GW_AP_TASK_STACK             4096u   /* 只调 SDK 接口 + printf，不用 cJSON */
+#define GW_AP_TASK_PRIO              29u
+#define GW_AP_IP_WAIT_MS             10000u  /* EnableHotspot 返回后等 AP 口地址的上限 */
 #define GW_PROV_FIRMWARE            "0.1.0" /* §12.5 firmware */
 /* §12.5 device_sn 占位：真实值优先取 Vendor Flash 里的 SN，取不到才用它。 */
 #define GW_DEVICE_SN                "M0-3F1A2B"

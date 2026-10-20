@@ -26,6 +26,7 @@
 #include "los_task.h"          /* LOS_Msleep：只在 gw_net_sta_connect_wait 里用 */
 #include "wifi_device.h"
 #include "wifi_error_code.h"
+#include "wifi_event.h"       /* WIFI_STATE_AVALIABLE：IsWifiActive() 的返回值 */
 #include "wifi_hotspot.h"
 #include "wifi_linked_info.h"
 #include "wifi_scan_info.h"
@@ -181,44 +182,204 @@ int gw_net_scan_list(char *out, uint32_t cap)
 
 /* ------------------------------------------------------------------ AP */
 
-int gw_net_ap_start(const char *ssid, const char *psk, uint8_t channel)
+/*
+ * SoftAP 起停必须异步（2026-10-20 现场根因，反汇编 libhardware.a 确认）：
+ *
+ *   EnableHotspot() → WifiStartAP → rk_wifi_start_ap → wifi_start_ap_internal
+ *                   → wifi_send_cmd()，而 wifi_send_cmd 等固件事件用的是
+ *                     LOS_SemPend(sem, 0xFFFFFFFF)（反汇编里 `mvn r1,#1`），
+ *                     **没有超时**。固件不回事件时调用者永远不返回。
+ *
+ * 之前 gw_net_ap_start() 是从 tick 任务里同步调用的，于是整个 tick 循环
+ * （按键采样、心跳、声光指示）一起停在那里——现场看到的就是"卡死"。
+ *
+ * 现在：调用方只登记请求（微秒级返回），真正的阻塞调用放在专用任务 gwAp 里。
+ * 即使固件仍然不回事件，tick/UART/上云都不受影响，日志停在
+ * 「[NET] AP: EnableHotspot 开始…」这一行本身就是可判读的证据。
+ *
+ * 另一个必须做的事：单射频下 STA 开着时启 AP 会撞车。SDK 自己的
+ * TaskConfigApModeEntry() 也是先 SetWifiModeOff() 再 SetApModeOn()，
+ * 所以起 AP 前先把 STA 关掉（不调 EnableWifi）。
+ */
+#define GW_AP_IDLE      0u
+#define GW_AP_STARTING  1u
+#define GW_AP_ON        2u
+#define GW_AP_FAILED    3u
+#define GW_AP_STOPPED   4u
+
+#define GW_AP_REQ_NONE  0u
+#define GW_AP_REQ_START 1u
+#define GW_AP_REQ_STOP  2u
+
+static volatile uint8_t  s_ap_state = GW_AP_IDLE;
+static volatile uint8_t  s_ap_req = GW_AP_REQ_NONE;
+static volatile uint8_t  s_ap_channel;
+static char     s_ap_ssid[GW_PROV_SSID_MAX + 1];
+static char     s_ap_psk[GW_PROV_PSK_MAX + 1u];
+static char     s_ap_ip[16];
+static UINT32   s_ap_task = 0u;
+
+const char *gw_net_ap_state_text(void)
+{
+    switch (s_ap_state) {
+    case GW_AP_STARTING: return "正在启动";
+    case GW_AP_ON:       return "已启动";
+    case GW_AP_FAILED:   return "启动失败";
+    case GW_AP_STOPPED:  return "已关闭";
+    default:             return "未启动";
+    }
+}
+
+int gw_net_ap_state(void)
+{
+    return (int)s_ap_state;
+}
+
+/* 关 STA：AP 与 STA 共用一根射频，SDK 官方样例也是先关 STA 再起 AP。 */
+static void net_sta_off_for_ap(void)
+{
+    if (IsWifiActive() == WIFI_STATE_AVALIABLE) {
+        printf("[NET] AP: 先关 STA（单射频，STA 与 AP 不能同时开）\n");
+        if (DisableWifi() != WIFI_SUCCESS) {
+            printf("[NET] ⚠ AP: DisableWifi 失败（继续尝试起 AP）\n");
+        }
+        s_wifi_on = 0u;
+        s_sta_pending = 0u;
+        LOS_Msleep(300u);
+    }
+}
+
+/* 等 AP 口拿到地址（异步起 AP 后地址不会立刻有） */
+static int net_ap_wait_ip(char *ip, uint32_t cap, uint32_t timeout_ms)
+{
+    uint32_t waited = 0u;
+
+    while (waited <= timeout_ms) {
+        char tmp[16];
+
+        if (gw_net_ap_ip(tmp, sizeof(tmp)) == 0) {
+            (void)snprintf(ip, cap, "%s", tmp);
+            return 0;
+        }
+        LOS_Msleep(100u);
+        waited += 100u;
+    }
+    ip[0] = '\0';
+    return -1;
+}
+
+/* 真正会阻塞的那一段（只在 gwAp 任务里跑） */
+static void net_ap_run_start(void)
 {
     HotspotConfig cfg;
+    char ip[16];
 
+    s_ap_state = GW_AP_STARTING;
+    net_sta_off_for_ap();
+
+    memset(&cfg, 0, sizeof(cfg));
+    (void)snprintf(cfg.ssid, sizeof(cfg.ssid), "%s", s_ap_ssid);
+    (void)snprintf(cfg.preSharedKey, sizeof(cfg.preSharedKey), "%s", s_ap_psk);
+    cfg.channelNum = (s_ap_channel >= 1u && s_ap_channel <= 13u)
+                     ? (int)s_ap_channel : (int)GW_PROV_AP_CHANNEL;
+    cfg.band = 0;           /* 交给驱动按 2.4 G 处理（SDK 自己的 SetApModeOn 也不填） */
+    cfg.securityType = 0;   /* 会被忽略；psk 非空即 WPA2 */
+
+    printf("[NET] AP: SetHotspotConfig ssid=%s ch=%d（口令不回显）\n", cfg.ssid, cfg.channelNum);
+    if (SetHotspotConfig(&cfg) != WIFI_SUCCESS) {
+        printf("[NET] ⚠ AP: SetHotspotConfig 失败（ssid/口令/信道可能不合法）\n");
+        s_ap_state = GW_AP_FAILED;
+        return;
+    }
+    printf("[NET] AP: EnableHotspot 开始（SDK 内部永久等待固件事件，最坏情况这行之后不再打印）\n");
+    if (EnableHotspot() != WIFI_SUCCESS) {
+        printf("[NET] ⚠ AP: EnableHotspot 返回失败（固件不接受 AP 模式？）\n");
+        s_ap_state = GW_AP_FAILED;
+        return;
+    }
+    if (net_ap_wait_ip(ip, sizeof(ip), GW_AP_IP_WAIT_MS) != 0) {
+        printf("[NET] ⚠ AP: EnableHotspot 返回成功，但 %u ms 内没拿到 AP 口地址\n",
+               (unsigned)GW_AP_IP_WAIT_MS);
+        s_ap_state = GW_AP_FAILED;
+        return;
+    }
+    (void)snprintf(s_ap_ip, sizeof(s_ap_ip), "%s", ip);
+    s_ap_state = GW_AP_ON;
+    printf("[NET] SoftAP 已启动 ssid=%s 地址 http://%s/ （手机连这个热点后打开该地址）\n",
+           s_ap_ssid, ip);
+}
+
+static int net_ap_worker(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        uint8_t req = s_ap_req;
+
+        if (req == GW_AP_REQ_START) {
+            s_ap_req = GW_AP_REQ_NONE;
+            net_ap_run_start();
+        } else if (req == GW_AP_REQ_STOP) {
+            s_ap_req = GW_AP_REQ_NONE;
+            if (DisableHotspot() == WIFI_SUCCESS) {
+                s_ap_state = GW_AP_STOPPED;
+                s_ap_ip[0] = '\0';
+                printf("[NET] SoftAP 已关闭\n");
+            } else {
+                printf("[NET] ⚠ DisableHotspot 失败\n");
+            }
+        }
+        LOS_Msleep(100u);
+    }
+    return 0;
+}
+
+static int net_ap_task_ensure(void)
+{
+    TSK_INIT_PARAM_S p;
+    UINT32 tid = 0u;
+
+    if (s_ap_task != 0u) {
+        return 0;
+    }
+    memset(&p, 0, sizeof(p));
+    p.pfnTaskEntry = (TSK_ENTRY_FUNC)net_ap_worker;
+    p.usTaskPrio = GW_AP_TASK_PRIO;
+    p.uwStackSize = GW_AP_TASK_STACK;
+    p.pcName = (CHAR *)"gwAp";
+    p.uwArg = 0u;
+    if (LOS_TaskCreate(&tid, &p) != LOS_OK) {
+        printf("[NET] ⚠ 起 AP 任务失败（AP 配网不可用，可改用串口 wifi set）\n");
+        return -1;
+    }
+    s_ap_task = tid;
+    return 0;
+}
+
+int gw_net_ap_start(const char *ssid, const char *psk, uint8_t channel)
+{
     if (ssid == NULL || psk == NULL || ssid[0] == '\0' || psk[0] == '\0') {
         return -1;
     }
-    if (net_wifi_on() != 0) {
+    if (net_ap_task_ensure() != 0) {
         return -1;
     }
-    memset(&cfg, 0, sizeof(cfg));
-    (void)snprintf(cfg.ssid, sizeof(cfg.ssid), "%s", ssid);
-    (void)snprintf(cfg.preSharedKey, sizeof(cfg.preSharedKey), "%s", psk);
-    cfg.channelNum = (channel >= 1u && channel <= 13u) ? (int)channel : (int)GW_PROV_AP_CHANNEL;
-    cfg.band = 0;           /* 交给驱动按 2.4 G 处理（SDK 自己的 SetApModeOn 也不填） */
-    cfg.securityType = 0;   /* 会被忽略；psk 非空即 WPA2 */
-    if (SetHotspotConfig(&cfg) != WIFI_SUCCESS) {
-        printf("[NET] ⚠ SetHotspotConfig 失败\n");
-        return -1;
-    }
-    if (EnableHotspot() != WIFI_SUCCESS) {
-        printf("[NET] ⚠ EnableHotspot 失败（可能 STA 已连接且驱动不允许 AP+STA）\n");
-        return -1;
-    }
-    printf("[NET] SoftAP 已启动 ssid=%s ch=%d（口令不回显）\n", cfg.ssid, cfg.channelNum);
+    (void)snprintf(s_ap_ssid, sizeof(s_ap_ssid), "%s", ssid);
+    (void)snprintf(s_ap_psk, sizeof(s_ap_psk), "%s", psk);
+    s_ap_channel = (channel >= 1u && channel <= 13u) ? channel : (uint8_t)GW_PROV_AP_CHANNEL;
+    s_ap_ip[0] = '\0';
+    s_ap_state = GW_AP_STARTING;
+    s_ap_req = GW_AP_REQ_START;
+    printf("[NET] AP: 已登记启动请求（异步执行，结果见随后的 [NET] 行）\n");
     return 0;
 }
 
 int gw_net_ap_stop(void)
 {
-    if (s_wifi_on == 0u) {
+    if (s_ap_state != GW_AP_ON && s_ap_state != GW_AP_STARTING) {
         return 0;
     }
-    if (DisableHotspot() != WIFI_SUCCESS) {
-        printf("[NET] ⚠ DisableHotspot 失败\n");
-        return -1;
-    }
-    printf("[NET] SoftAP 已关闭\n");
+    (void)net_ap_task_ensure();
+    s_ap_req = GW_AP_REQ_STOP;
     return 0;
 }
 
@@ -230,6 +391,10 @@ int gw_net_ap_ip(char *out, uint32_t cap)
         return -1;
     }
     out[0] = '\0';
+    if (s_ap_state == GW_AP_ON && s_ap_ip[0] != '\0') {
+        (void)snprintf(out, cap, "%s", s_ap_ip);
+        return 0;
+    }
     for (i = 0; i < sizeof(k_ap_ifname) / sizeof(k_ap_ifname[0]); i++) {
         struct netif *nif = netifapi_netif_find_by_name(k_ap_ifname[i]);
         if (nif == NULL) {

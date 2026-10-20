@@ -299,6 +299,14 @@ const char *gw_prov_pair_state(const gw_prov_t *p);
 uint32_t gw_prov_bound_nodes_json(const gw_prov_t *p, char *out, uint32_t cap);
 /* 契约 §12.5 remain_s（settle 阶段按 settle_s 倒数） */
 uint32_t gw_prov_remain_s(const gw_prov_t *p, uint32_t now_ms);
+
+/* 串口 `prov on|off|status`（t142）：交给 gw_main.c 实现——只有它同时看得到
+ * s_prov（配网状态机）与 gw_net 的 AP/STA 状态。纯板级，主机自测不编。
+ * 返回 0 成功（含"窗口本来就开着"），-1 失败或参数不认识。 */
+int gw_prov_cmd(const char *line, char *out, uint32_t cap);
+
+/* 把 `prov` 挂到 SDK 自带 shell（实现在 gw_kvcfg_shell.c：板上只有它 include shell.h）。 */
+void gw_prov_shell_register(void);
 /* AP SSID 规则：ElderCare-<SN 后 4 位十六进制>（§12.3）。sn 含非十六进制时退化为大写字母数字。 */
 void gw_prov_make_ap_ssid(const char *device_sn, char *out, uint32_t cap);
 

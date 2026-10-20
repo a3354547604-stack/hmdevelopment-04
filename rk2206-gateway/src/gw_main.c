@@ -1173,6 +1173,7 @@ static const gw_prov_ops_t s_prov_ops = {
 /* t137：首次配网的两个一次性状态（tick 任务独占，无需加锁） */
 static uint8_t s_wifi_probed;
 static int     s_wifi_configured;
+static uint8_t s_prov_auto_note;
 
 /* 本地配网 HTTP 任务（§12.1：只绑 AP 口）。
  * 监听 fd 打开一次就常驻，不随窗口开关反复关——关一个正被 accept 阻塞的 fd 是
@@ -1190,12 +1191,12 @@ static void prov_http_task(void *arg)
                     printf("[%s] [PROV] 本地配网服务就绪 http://%s/（H5 单页，契约 §12.11）\n",
                            GW_LOG_TAG, ip);
                 }
-            } else if (++s_ap_ip_retry >= 20u) {
+            } else if (++s_ap_ip_retry >= 150u) {
                 /* 拿不到 AP 口地址（不同 SDK 版本的 netif 名不一样）：退化为绑 0.0.0.0。
                  * 取舍写在实现说明里——宁可服务可访问，也不让配网彻底打不开（CAL-12）。 */
                 s_http_fd = gw_http_listen((uint16_t)GW_PROV_HTTP_PORT, NULL);
                 if (s_http_fd >= 0) {
-                    printf("[%s] [PROV] ⚠ 取不到 AP 口地址，HTTP 已绑 0.0.0.0（STA 侧也可达，见 CAL-12）\n",
+                    printf("[%s] [PROV] ⚠ 30 s 内没等到 AP 口地址，HTTP 改绑 0.0.0.0（AP 起来后同一地址仍可访问，见 CAL-12）\n",
                            GW_LOG_TAG);
                 }
                 s_ap_ip_retry = 0u;
@@ -1227,12 +1228,23 @@ static gw_pairkey_state_t s_board_key = { 1u, 0u, 0u };
 static void pair_key_step(gw_pairkey_state_t *st, uint8_t pressed, uint32_t now_ms)
 {
     if (gw_pairkey_step(st, pressed, now_ms, GW_PAIRKEY_LONG_MS) != 0) {
+#if GW_PROV_AP_ENABLE
         (void)gw_prov_toggle(&s_prov, now_ms);
+#else
+        printf("[%s] 长按已识别（配网窗口本次构型关闭：用串口 `wifi set` / `gwkv set`）\n", GW_LOG_TAG);
+#endif
     }
 }
 
+#if GW_TICK_TRACE
+#define GW_TR(tag, i) do { if ((i) < 6u) { printf("[%s] loop%u %s\n", GW_LOG_TAG, (unsigned)(i), (tag)); } } while (0)
+#else
+#define GW_TR(tag, i) do { } while (0)
+#endif
+
 static void tick_task(void *arg)
 {
+    uint32_t tr_i = 0u;
     uint32_t now;
     uint32_t hb_last_ms = 0u;   /* 0 = 还没打过，首次调用立即给一条 */
     uint32_t hb_n = 0u;
@@ -1245,6 +1257,7 @@ static void tick_task(void *arg)
             entered = 1u;
             printf("[%s] tick #1 进入\n", GW_LOG_TAG);
         }
+        GW_TR("A", tr_i);
         gw_alarm_tick(&s_alarm, now);
         gw_433_poll(&s_433, now);
 
@@ -1278,6 +1291,7 @@ static void tick_task(void *arg)
 #endif
 
         /* 配网状态机（契约 §12.2）：窗口/settle/扫描超时、STA 连接推进、指示灯节拍 */
+        GW_TR("B", tr_i);
         gw_prov_tick(&s_prov, now);
         /* t137：全新网关自动进配网窗口。放 tick 任务里（不是 gw_main_entry）：
          * SoftAP 要 wifi 服务先就绪，开机早期直接调 wifi 接口会拿到"设备忙"。
@@ -1286,7 +1300,16 @@ static void tick_task(void *arg)
             s_wifi_probed = 1u;
             s_wifi_configured = (s_prov_ops.cred_probe != NULL) ? s_prov_ops.cred_probe() : 0;
         }
+        GW_TR("C", tr_i);
+#if GW_PROV_AP_ENABLE
         (void)gw_prov_auto_boot(&s_prov, now, s_wifi_configured);
+#else
+        if (s_wifi_probed != 0u && s_wifi_configured == 0 && s_prov_auto_note == 0u) {
+            s_prov_auto_note = 1u;
+            printf("[%s] 未配置家庭 Wi-Fi：本次构型不自动开 SoftAP，用串口 `wifi set ssid=<名称> psk=<口令>`\n", GW_LOG_TAG);
+        }
+#endif
+        GW_TR("D", tr_i);
         if (gw_prov_active(&s_prov)) {
             /* 配网期间 LED 让位给配网指示（同一 GPIO 两处写会互相打架）；
              * 蜂鸣器只在"配网成功"时短响一次，且尊重 mute_alarm（§12.2 可静音）。 */
@@ -1297,6 +1320,7 @@ static void tick_task(void *arg)
         }
         /* 汇聚回来后按网关白名单重建它那边的表（§12.9）：放 tick 任务里做，
          * 每次最多一帧、短等待（GW_PROV_RESYNC_WAIT_MS），不会长时间卡住指示与按键。 */
+        GW_TR("E", tr_i);
         if (s_prov.resync_wanted) {
             (void)gw_prov_resync_step(&s_prov);
         }
@@ -1313,7 +1337,10 @@ static void tick_task(void *arg)
             gw_refresh_alarm(now);
             gw_emit(GW_EV_SOS, "M0", now);
         }
+        GW_TR("F", tr_i);
+        tr_i++;
         LOS_Msleep(GW_TICK_PERIOD_MS);
+        GW_TR("G", tr_i);
     }
 }
 
@@ -1785,6 +1812,101 @@ static UINT32 task_create(TSK_ENTRY_FUNC fn, void *arg, UINT32 stack, UINT16 pri
     return LOS_TaskCreate(&tid, &p);
 }
 
+/*
+ * 串口 `prov on|off|status`（t142）。
+ *
+ * 为什么要有这条命令：①板载键要按住 3 s，而按键链路本身可能就是坏的；②AP 起停已经
+ * 改成异步（EnableHotspot 内部永久等固件事件，不能放 tick 里），所以"到底起没起来"
+ * 必须能问一句；③现场排障时人在手机边上，串口能少一次复位就少一次。
+ *
+ * 刻意不做的事：不改窗口语义（开/关仍然走 gw_prov_enter/exit），不看 AP 状态去
+ * 猜窗口该不该开——两处状态各说各话，迟早互相打脸。
+ */
+int gw_prov_cmd(const char *line, char *out, uint32_t cap)
+{
+    const char *arg;
+    uint32_t now;
+    uint32_t remain;
+    int n;
+
+    if (out == NULL || cap == 0u) {
+        return -1;
+    }
+    out[0] = '\0';
+    if (line == NULL) {
+        return -1;
+    }
+    arg = line;
+    while (*arg == ' ' || *arg == '\t') {
+        arg++;
+    }
+    if (strncmp(arg, "prov", 4) == 0) {
+        arg += 4;
+        while (*arg == ' ' || *arg == '\t') {
+            arg++;
+        }
+    }
+    now = gw_now_ms();
+    remain = gw_prov_remain_s(&s_prov, now);
+
+    if (*arg == '\0' || strcmp(arg, "status") == 0) {
+        char ip[24];
+        char sta[GW_PROV_SSID_MAX + 1];
+        int has_ip;
+
+        ip[0] = '\0';
+        has_ip = (gw_net_ap_ip(ip, (uint32_t)sizeof(ip)) == 0) ? 1 : 0;
+        sta[0] = '\0';
+        (void)gw_net_sta_ssid(sta, (uint32_t)sizeof(sta));
+        n = snprintf(out, cap,
+                     "  [prov] 配网窗口 : %s（剩余 %u s）\n"
+                     "  [prov] SoftAP   : %s，ssid=%s\n"
+                     "  [prov] 页面地址 : %s\n"
+                     "  [prov] STA      : %s%s\n"
+                     "  [prov] 用法     : prov on | prov off | prov status\n",
+                     (gw_prov_active(&s_prov) != 0) ? "开" : "关", (unsigned)remain,
+                     gw_net_ap_state_text(), s_prov.ap_ssid,
+                     (has_ip != 0) ? ip : "（未就绪：等 `[NET] SoftAP 已启动 … 地址 http://…/` 行）",
+                     (sta[0] != '\0') ? "已连 " : "未连", sta);
+        if (n > 0 && (uint32_t)n < cap && has_ip != 0) {
+            /* 有地址时把完整 URL 单独给一行，方便直接照抄到手机浏览器 */
+            int m = snprintf(out + n, cap - (uint32_t)n,
+                             "  [prov] 请在手机浏览器打开：http://%s/\n", ip);
+            (void)m;
+        }
+        return 0;
+    }
+
+    if (strcmp(arg, "on") == 0) {
+        if (gw_prov_active(&s_prov) != 0) {
+            (void)snprintf(out, cap, "  [prov] 配网窗口已经开着（剩余 %u s）\n", (unsigned)remain);
+            return 0;
+        }
+        if (gw_prov_enter(&s_prov, now) != 0) {
+            (void)snprintf(out, cap, "  [prov] 开窗失败：见串口 [PROV]/[NET] 行（SoftAP 起不来时仍可用串口 wifi set）\n");
+            return -1;
+        }
+        (void)snprintf(out, cap,
+                       "  [prov] 已开窗：手机连热点「%s」（口令见 [PROV] enter AP mode 行）\n"
+                       "  [prov] SoftAP 是异步起的，等 `[NET] SoftAP 已启动 … 地址 http://…/` 出现再打开页面\n",
+                       s_prov.ap_ssid);
+        return 0;
+    }
+
+    if (strcmp(arg, "off") == 0) {
+        if (gw_prov_active(&s_prov) == 0) {
+            (void)snprintf(out, cap, "  [prov] 配网窗口本来就是关的\n");
+            return 0;
+        }
+        gw_prov_exit(&s_prov, now);
+        (void)snprintf(out, cap, "  [prov] 已关窗（SoftAP 停止请求已发出）\n");
+        return 0;
+    }
+
+    (void)snprintf(out, cap, "  [prov] 用法：prov on | prov off | prov status\n");
+    return -1;
+}
+
 static void gw_main_entry(void)
 {
     /* 这行里的 GW_IMAGE_TAG 是构建脚本的断言锚点：tools/gw-build.sh 会在
@@ -1861,6 +1983,7 @@ static void gw_main_entry(void)
     /* 8.2) 板载键诊断（t138）：`keys` 打印 ADC 各通道 raw/mV 与按下判定依据，
      * 用于烧板后逐键标定（通道号/阈值不猜，实测回填配网实现说明）。 */
     gw_keys_shell_register();
+    gw_prov_shell_register();
 
     /* 9) 任务 */
     if (task_create(uart_task, NULL, GW_TASK_STACK_UART, GW_TASK_PRIO_UART, "gwUart") != LOS_OK) {

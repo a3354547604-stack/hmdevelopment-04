@@ -304,8 +304,8 @@ int gw_prov_enter(gw_prov_t *p, uint32_t now_ms)
             printf("[PROV] enter AP mode ssid=%s psk=%s remain=%u url=http://%s/\n",
                    p->ap_ssid, p->ap_psk, (unsigned)GW_PROV_WINDOW_S, apip);
         } else {
-            printf("[PROV] enter AP mode ssid=%s psk=%s remain=%u url=http://<ap_ip>/"
-                   "（地址见稍后的 `[PROV] 本地配网服务就绪` 行）\n",
+            printf("[PROV] enter AP mode ssid=%s psk=%s remain=%u url=待定"
+                   "（SoftAP 异步启动中，地址见稍后的 `[NET] SoftAP 已启动 … 地址 http://…/` 行）\n",
                    p->ap_ssid, p->ap_psk, (unsigned)GW_PROV_WINDOW_S);
         }
     }

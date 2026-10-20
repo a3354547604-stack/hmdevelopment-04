@@ -16,6 +16,11 @@ int gw_net_ap_start(const char *ssid, const char *psk, uint8_t channel);
 int gw_net_ap_stop(void);
 /* AP 口地址（如 "192.168.4.1"）。取不到返回 -1 —— 调用方据此决定 bind 什么地址。 */
 int gw_net_ap_ip(char *out, uint32_t cap);
+/* AP 状态（0 未启动 / 1 正在启动 / 2 已启动 / 3 失败 / 4 已关闭）与其中文名。
+ * 为什么要问状态：AP 是异步起的（EnableHotspot 会永久等固件事件，不能放 tick 里），
+ * 所以 ap_start() 返回 0 只代表"请求已登记"。 */
+int gw_net_ap_state(void);
+const char *gw_net_ap_state_text(void);
 
 /* STA：发起 + 轮询两半（见 gw_prov.h 的说明）。
  * sta_poll: 0 = 仍在连接，1 = 已连上，-1 = 失败（reason 写 "auth"/"timeout"/"internal"） */

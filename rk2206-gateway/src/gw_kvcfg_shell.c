@@ -21,6 +21,7 @@
 #include "gw_kvcfg.h"
 #include "gw_wifi_shell.h"
 #include "gw_hw.h"
+#include "gw_prov.h"
 
 /* dump 子命令要打 256 B 的十六进制（513 字符）+ 提示语 */
 #define GW_KVCFG_SHELL_OUT_MAX (GW_KVCFG_DUMP_HEX_LEN + 256u)
@@ -171,6 +172,47 @@ static const gw_keys_ops_t k_keys_ops = {
     gw_hw_key_report,
     gw_hw_key_probe,
 };
+
+/* `prov on|off|status`（t142）：argv 拼回一行交给 gw_prov_cmd（板级实现在 gw_main.c）。 */
+static UINT32 gw_prov_shell_cmd(UINT32 argc, const CHAR **argv)
+{
+    char line[64];
+    char out[512];
+    uint32_t used = 0;
+    UINT32 i;
+
+    line[0] = '\0';
+    for (i = 0; i < argc; i++) {
+        uint32_t n = (uint32_t)strlen(argv[i]);
+        if (used + n + 2u >= (uint32_t)sizeof(line)) {
+            printf("[prov] 参数太长\n");
+            return (UINT32)-1;
+        }
+        if (used > 0u) {
+            line[used++] = ' ';
+        }
+        memcpy(line + used, argv[i], n);
+        used += n;
+        line[used] = '\0';
+    }
+    (void)gw_prov_cmd(line, out, (uint32_t)sizeof(out));
+    printf("%s", out);
+    return 0;
+}
+
+void gw_prov_shell_register(void)
+{
+    static uint8_t s_registered = 0u;
+    UINT32 rc;
+
+    if (s_registered != 0u) {
+        return;
+    }
+    rc = osCmdReg(CMD_TYPE_STD, "prov", XARGS, (CMD_CBK_FUNC)gw_prov_shell_cmd);
+    s_registered = 1u;
+    printf("[%s] 配网诊断：命令 `prov on|off|status`（%s）\n",
+           GW_LOG_TAG, (rc == 0u) ? "注册成功" : "注册失败（shell 未初始化？）");
+}
 
 void gw_keys_shell_register(void)
 {

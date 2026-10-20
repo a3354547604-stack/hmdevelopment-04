@@ -16,6 +16,7 @@
 | J4 | **全新网关不按键也会自己进配网**（t137） | 串口出现 `[PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 10 min（手机连 Wi-Fi「ElderCare-XXXX」…）`；手机 Wi-Fi 列表里直接出现热点 |
 | J5 | **一次填完 Wi-Fi + 云端三件套**，页面刷新只显示「已配置（不回显）」（t137） | 串口出现 `[PROV] 收到 IoTDA 云凭据 host=… device=…（密钥 N 字节，不回显）`；刷新页面看到「华为云 IoTDA：已配置」，**密钥框永远空着** |
 | J6 | **`wifi clear` 能恢复出厂**（t137 补），复位后重新自动开窗 | 串口 `wifi clear` 回 `[wifi] 已清除家庭 Wi-Fi 凭据…`；`wifi show` 变 `未配置家庭 Wi-Fi`；断电冷启动后重新出现 `[PROV] 首次配网：…` |
+| J8 | `prov on` → 3 s 内出现 `[NET] SoftAP 已启动 ssid=… 地址 http://…/`（t142） |
 | J7 | **板载键 K1–K4 长按 3 s 也能进/退配网**（t138），不用接 `EX_GPIO_A3` | 串口出现 `[gw] 板载键基线：ch5 中位 … mV（… 点，跨度 … mV）→ 按下阈值 偏离 ≥300 mV / 持续 ≥50 ms`，按住时出现 `[gw] 板载键 K2（550 mV）按住 3000 ms，进入长按判定`，松手后出现 `[PROV] enter AP mode …` |
 
 **扫描/绑定（网页上的"扫描节点"/"绑定"）需要汇聚板在线**。当前汇聚固件还没上板，
@@ -173,6 +174,60 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 - 文档值（出处：小凌派课件 b1 ADC 按键示例）：空闲 ≈2.3 V、K1 0.01 V、K2 0.55 V、K3 1.00 V、K4 1.65 V；
 - 通道：`GPIO0_PC5` = `SRADC5`（官方样例 `samples/b1_adc/adc_example.c`），配在 `GW_KEY_ADC_CHANNEL`；
 - **本板实测：待回填**（t138 未上板；PM 烧板后逐键按一遍回传）。
+
+## 3.4 手机配网（t142：一条命令开窗，3 步）
+
+> 适用：新板 / 刚 `wifi clear` 过 / 想重新填 Wi-Fi 与华为云凭据。
+> 与 3.1（长按板载键）等价，只是把「按 3 s」换成「敲一条命令」——
+> 按键链路坏了的时候用这条。
+
+**第 1 步：开窗**
+
+- 做什么：串口（115200 8-N-1，关流控）敲 `prov on`，回车。
+- 看到什么：
+  ```
+  [gw] AP: 已登记启动请求（异步执行，结果见随后的 [NET] 行）
+    [prov] 已开窗：手机连热点「ElderCare-XXXX」（口令见 [PROV] enter AP mode 行）
+  ```
+  随后 1–3 秒内必须出现**这一行**（地址照抄，别背）：
+  ```
+  [NET] SoftAP 已启动 ssid=ElderCare-XXXX 地址 http://192.168.4.1/ （手机连这个热点后打开该地址）
+  ```
+- 失败怎么办：
+  - 只看到 `[NET] AP: EnableHotspot 开始…` 就没了 → 固件不回事件。板子其余功能仍在跑
+    （`prov status` 还能用），改用串口 `wifi set ssid=<名称> psk=<口令>` + `gwkv set …`。
+  - `[NET] ⚠ AP: SetHotspotConfig 失败` → 看 ssid/口令/信道，敲 `prov status` 看 AP 状态。
+  - 完全没有 `[NET]` 行 → 敲 `prov status`；AP 显示「未启动」说明请求没登记（把整段串口贴回来）。
+
+**第 2 步：手机连热点、打开页面**
+
+- 做什么：手机 Wi-Fi 连 **`ElderCare-XXXX`**（XXXX 是本机 SN 后四位），口令 **`echub8888`**；
+  连上后浏览器打开**第 1 步日志里那个地址**（常见 `http://192.168.4.1/`，
+  个别固件是 `http://192.168.2.1/`）。
+- 看到什么：页面标题「RK2206 网关配网」，顶部状态卡显示
+  「配网窗口：开」与剩余秒数；`SoftAP`、`设备 SN`、`固件` 三行有值。
+- 失败怎么办：打不开先看串口有没有 `[PROV] 本地配网服务就绪 http://…/`；
+  没有就等 30 s 再试（HTTP 服务可能在 AP 地址就绪后才绑）。手机浏览器别用 https。
+
+**第 3 步：填两段并提交**
+
+- 做什么：在同一个页面里 ①「第一步：家庭 Wi-Fi」填 SSID 与口令
+  （**只能手输**：SoftAP 开着时驱动不允许扫描，页面上没有下拉列表）；
+  ②「第二步：华为云 IoTDA」填接入地址 / 设备 ID / 设备密钥（已在串口
+  `gwkv set` 配过的可留空）；③点「**提交并连接**」。
+- 看到什么：页面提示提交成功；串口依次出现
+  ```
+  [PROV] 收到 Wi-Fi ssid=…（口令不回显），开始连接，timeout=…
+  [PROV] 收到 IoTDA 云凭据 host=…:1883 device=…（密钥 N 字节，不回显）
+  [PROV] Wi-Fi 已连接 ssid=…，90s 后关闭 SoftAP
+  [PROV] SoftAP 已关闭，网关进入 STA 模式（mode=sta）
+  [gw] 取时成功(HTTP) epoch=…
+  [gw] IoTDA 已连接 clientId=…_0_1_…
+  ```
+  手机热点会断开（正常，SoftAP 关了）。
+- 失败怎么办：见 §4.5 的失败对照表（`bad_password` / `not_found` / `bad_host` 等）。
+
+**收尾**：敲 `prov status` 确认「配网窗口：关」；想再进配网就 `prov on` 或长按板载键 3 s。
 
 ## 3.5 首次上电：不按键也会自己进配网（t137，3 步）
 
