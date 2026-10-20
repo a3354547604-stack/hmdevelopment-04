@@ -24,6 +24,7 @@
 #include "gw_plat.h"
 #include "gw_kvcfg.h"
 #include "gw_key.h"
+#include "gw_hw_adc.h"
 #include "gw_hw.h"
 #include "cJSON.h"
 
@@ -262,6 +263,125 @@ static void test_contract_frames(void)
         snprintf(msg, sizeof(msg), "%s：消费完这一帧后无残余字节", f->name);
         t_ok(gw_parser_poll(&p, &fr, &er) == GW_PARSE_NONE, msg);
     }
+}
+
+/* ---------------------------------------------------------------- t140 ADC */
+/* 假板级：SPI 风格地记录调用次数，用来证明「init 之后不再重复 mux」、
+ * 「SDK 说已初始化（saradc_init 返回非 0）时仍能读」、以及「读失败要留痕」。 */
+static unsigned s_fake_mux_calls;
+static unsigned s_fake_avdd_calls;
+static int      s_fake_mux_fail;
+static int      s_fake_read_fail;
+static int      s_fake_init_rc = 1;     /* 默认：模拟 SDK「已经初始化过」 */
+static uint32_t s_fake_raw = 512u;
+
+static int fake_pinctrl_set(uint32_t channel)
+{
+    (void)channel;
+    s_fake_mux_calls++;
+    return s_fake_mux_fail ? -1 : 0;
+}
+
+static int fake_saradc_init(void)
+{
+    return s_fake_init_rc;
+}
+
+static int fake_saradc_read(uint32_t channel, uint32_t *raw)
+{
+    (void)channel;
+    if (s_fake_read_fail || raw == NULL) {
+        return -1;
+    }
+    *raw = s_fake_raw;
+    return 0;
+}
+
+static void fake_select_avdd(void)
+{
+    s_fake_avdd_calls++;
+}
+
+static const gw_hw_adc_ops_t k_fake_adc_ops = {
+    fake_pinctrl_set,
+    fake_saradc_init,
+    fake_saradc_read,
+    fake_select_avdd,
+};
+
+static void adc_fakes_reset(void)
+{
+    s_fake_mux_calls = 0u;
+    s_fake_avdd_calls = 0u;
+    s_fake_mux_fail = 0;
+    s_fake_read_fail = 0;
+    s_fake_init_rc = 1;
+    s_fake_raw = 512u;
+    gw_hw_adc_reset_stats();
+}
+
+static void test_hw_adc(void)
+{
+    char out[GW_KEY_REPORT_MAX];
+    uint32_t raw = 0u;
+    uint32_t mv = 0u;
+    unsigned mux_after_init;
+
+    t_start("t140 板载 ADC：幂等复用 / SDK 已初始化仍可读 / 读失败留痕 / 不再重复 mux");
+
+    /* 没有板级实现时必须明确失败（不许静默当成「读到 0」） */
+    adc_fakes_reset();
+    gw_hw_adc_set_ops(NULL);
+    t_ok(gw_hw_adc_init(5u) != 0, "没有板级实现时 init 返回失败（不静默）");
+
+    /* 关键回归：SDK 的 LzSaradcInit 对「已初始化」返回非 0，HDF 驱动开机已调过，
+     * t138 因此把整条链路判死。现在判据是试读，不是 init 的返回值。 */
+    adc_fakes_reset();
+    gw_hw_adc_set_ops(&k_fake_adc_ops);
+    t_ok(gw_hw_adc_init(GW_KEY_ADC_CHANNEL) == 0,
+         "saradc_init 返回 1（SDK 已初始化）时 init 仍成功");
+    t_ok(s_fake_mux_calls == 1u, "init 只写一次 IOMUX（配置通道）");
+    t_ok(s_fake_avdd_calls == 1u, "选基准电压只做一次");
+    t_ok(gw_hw_adc_read_calls() == 1u, "init 末尾做了一次试读");
+
+    /* init 之后再读，不许再碰 IOMUX（t138 每读一次都 DevIoInit 才踩到 already-initialized） */
+    mux_after_init = s_fake_mux_calls;
+    t_ok(gw_hw_adc_read(GW_KEY_ADC_CHANNEL, &raw, &mv) == 0, "init 之后读通道成功");
+    t_ok(s_fake_mux_calls == mux_after_init, "读操作不再写 IOMUX（复用只做一次）");
+    t_ok(raw == 512u && mv == 1650u, "raw=512 → mV=1650（10 位 AVDD 口径）");
+
+    /* 扫描：每个通道各写一次 IOMUX，且要能看到配置通道标注 */
+    adc_fakes_reset();
+    gw_hw_adc_set_ops(&k_fake_adc_ops);
+    (void)gw_hw_adc_init(GW_KEY_ADC_CHANNEL);
+    s_fake_mux_calls = 0u;
+    (void)gw_hw_adc_scan(out, (uint32_t)sizeof(out));
+    t_ok(s_fake_mux_calls == (unsigned)(GW_KEY_ADC_SCAN_LAST - GW_KEY_ADC_SCAN_FIRST + 1u),
+         "扫描对每个通道各写一次 IOMUX");
+    t_ok(strstr(out, "ch5: raw=") != NULL && strstr(out, "← 配置通道") != NULL,
+         "扫描输出含 ch5 读数与配置通道标注");
+    t_ok(strstr(out, "ch0/ch1 未扫描") != NULL, "扫描输出说明了 ch0/ch1 不扫的原因");
+
+    /* 读失败：init 要失败、计数要涨、扫描里要留痕（不许静默跳过） */
+    adc_fakes_reset();
+    gw_hw_adc_set_ops(&k_fake_adc_ops);
+    s_fake_read_fail = 1;
+    t_ok(gw_hw_adc_init(GW_KEY_ADC_CHANNEL) != 0, "读不到数时 init 返回失败");
+    t_ok(gw_hw_adc_read_fails() >= 1u, "读失败被计数");
+    (void)gw_hw_adc_scan(out, (uint32_t)sizeof(out));
+    t_ok(strstr(out, "读失败") != NULL, "扫描里写明读失败（不静默跳过）");
+
+    /* IOMUX 写不进也不许判死：HDF 已经复用好了，照样读 */
+    adc_fakes_reset();
+    gw_hw_adc_set_ops(&k_fake_adc_ops);
+    s_fake_mux_fail = 1;
+    t_ok(gw_hw_adc_init(GW_KEY_ADC_CHANNEL) == 0, "IOMUX 写失败但能读时 init 仍成功");
+    (void)gw_hw_adc_scan(out, (uint32_t)sizeof(out));
+    t_ok(strstr(out, "IOMUX 写失败，仍试读") != NULL, "扫描里写明 IOMUX 写失败但继续试读");
+
+    /* 收尾：恢复成「有板级实现」的中性状态，别影响后面的用例 */
+    adc_fakes_reset();
+    gw_hw_adc_set_ops(&k_fake_adc_ops);
 }
 
 static void test_parser(void)
@@ -2184,6 +2304,7 @@ int main(void)
     test_wifi_cmd();                 /* t136 串口 wifi：边界校验 + 口令不回显 + 失败可判读 */
     test_key_events();               /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
     test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */
+    test_hw_adc();                   /* t140 ADC 链路：幂等复用 / 已初始化 / 读失败留痕 */
     test_parser();
     test_crypto_auth();
     test_time();

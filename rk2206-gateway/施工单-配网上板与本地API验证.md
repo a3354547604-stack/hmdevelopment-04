@@ -142,6 +142,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 3. mV 有变化但没到阈值 → 把 `keys` 的「基线 / 当前」两个数贴回来，
    阈值按实测改 `gw_config.h` 的 `GW_KEY_PRESS_DELTA_MV`（改完要重编）。
 
+> **t140 修过一次「`keys` 完全没读数」的故障**（t138 的板子就是这样）。
+> 现在这两行是**正常**的，看到它们不用管：
+> `[gw] ADC 控制器 init 返回 1（SDK 已初始化过时也非 0，继续试读）`
+> `[gw] ⚠ ADC ch5 复用写入失败（IOMUX）：继续试读，SDK 可能已复用该路`
+> 判据看紧跟着的那行：
+> - 正常：`[gw] 板载键：ADC ch5 试读成功 raw=712（2295 mV）`，之后 2 s 出「板载键基线」；
+> - 异常：`[gw] ⚠ 板载键：ADC ch5 试读失败（读不到数）→ 板载键停判`，把这段贴回来。
+>
+> 如果 `keys` 又只打印到「分档」就结束、看不到「当前 / 扫描」，说明镜像不是 t140 之后的
+> （t140 把报告改成逐行打印，绕开串口单次输出上限），先确认烧的是最新镜像。
+
 ### 标定：第一次跑这块板子时做一遍（3 步）
 
 1. 串口敲 `keys`（就是调试口，不用另接线）。它会打印：通道、基线、当前 raw/mV、
@@ -445,6 +456,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 | 收到 Wi-Fi | `[PROV] 收到 Wi-Fi ssid=%s（口令不回显），开始连接，timeout=%us` | `src/gw_prov.c:682` |
 | 连上 | `[PROV] Wi-Fi 已连接 ssid=%s，%us 后关闭 SoftAP（App 掉线是预期）` | `src/gw_prov.c:426` |
 | 连接失败 | `[PROV] Wi-Fi 连接失败 reason=%s（已退回 AP，窗口重置 %us）` | `src/gw_prov.c:424` |
+| ADC 控制器 init 返回非 0（正常，SDK 已初始化） | `[gw] ADC 控制器 init 返回 %d（SDK 已初始化过时也非 0，继续试读）` | `src/gw_hw_adc.c:133` |
+| IOMUX 写不进但继续试读（正常） | `[gw] ⚠ ADC ch%u 复用写入失败（IOMUX）：继续试读，SDK 可能已复用该路` | `src/gw_hw_adc.c:122` |
+| ADC 试读成功（t140 的判据行） | `[gw] 板载键：ADC ch%u 试读成功 raw=%u（%u mV）` | `src/gw_hw_adc.c:144` |
+| ADC 试读失败（板载键停判） | `[gw] ⚠ 板载键：ADC ch%u 试读失败（读不到数）→ 板载键停判；敲 `keys` 看各通道读数` | `src/gw_hw_adc.c:148` |
+| 板载键基线 | `[gw] 板载键基线：ch%u 中位 %u mV（%u 点，跨度 %u mV）→ 按下阈值 偏离 ≥%u mV / 持续 ≥%u ms` | `src/gw_hw.c:108` |
+| 通道扫描行 | `  ch%u: raw=%4u mV=%4u(%s)` / 读失败时 `读失败（返回错，见 [saradc] 日志）` | `src/gw_hw_adc.c:189-204` |
 | 连接超时 | `[PROV] Wi-Fi 连接超时（已退回 AP，窗口重置 %us）` | `src/gw_prov.c:445` |
 | SoftAP 关闭 | `[PROV] SoftAP 已关闭，网关进入 STA 模式（mode=sta）` | `src/gw_prov.c:458` |
 | 发 0x20 | `[gw] [PROV] → 0x20 扫描 id=%u duration=%us include_bound=%u` | `src/gw_main.c:954` |

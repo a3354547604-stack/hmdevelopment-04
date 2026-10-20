@@ -227,6 +227,10 @@ int gw_hw_key_report(char *out, uint32_t cap)
         if (warn != NULL) {
             used = (uint32_t)hw_append(out, cap, used, "  ⚠ %s\n", warn);
         }
+        used = (uint32_t)hw_append(out, cap, used,
+                                  "  采集     : 复用写入 %u 次 / 读 %u 次 / 读失败 %u 次\n",
+                                  gw_hw_adc_mux_calls(), gw_hw_adc_read_calls(),
+                                  gw_hw_adc_read_fails());
         if (s_read_fail != 0u) {
             used = (uint32_t)hw_append(out, cap, used, "  ⚠ ADC 读失败累计 %u 次\n", s_read_fail);
         }

@@ -129,12 +129,41 @@ void gw_wifi_shell_register(void)
  * 现在把 argc/argv 原样交给 gw_keys_cmd()（纯分派，主机可测三条路径），
  * 本函数只负责把输出打到串口。
  */
+/* 分片打印：LiteOS-M 的 printf 单次输出有上限（现场实测：整段报告只印到约
+ * 256 字节就没了，`keys` 因此看不到「当前/基线/扫描」几行——t140 证据）。这里
+ * 按行切、每行一次 printf，行长远小于上限，就不再依赖 printf 的缓冲大小。 */
+static void keys_print_lines(const char *text)
+{
+    char line[200];
+    uint32_t n = 0u;
+
+    if (text == NULL) {
+        return;
+    }
+    while (*text != '\0') {
+        if (*text == '\n' || n + 1u >= (uint32_t)sizeof(line)) {
+            line[n] = '\0';
+            printf("%s\n", line);
+            n = 0u;
+            if (*text == '\n') {
+                text++;
+            }
+            continue;
+        }
+        line[n++] = *text++;
+    }
+    if (n > 0u) {
+        line[n] = '\0';
+        printf("%s\n", line);
+    }
+}
+
 static UINT32 gw_keys_shell_cmd(UINT32 argc, const CHAR **argv)
 {
     char out[GW_KEY_REPORT_MAX];
     int rc = gw_keys_cmd((int)argc, (const char *const *)argv, out, (uint32_t)sizeof(out));
 
-    printf("%s", out);
+    keys_print_lines(out);
     return (rc == 0) ? 0u : (UINT32)-1;
 }
 
