@@ -765,6 +765,103 @@ int gw_prov_api_status(gw_prov_t *p, uint32_t now_ms, char *out, uint32_t cap)
     return 200;
 }
 
+/* ====================== t143：开窗前缓存的 Wi-Fi 列表 ====================== */
+/* 为什么是"缓存"而不是现扫：单射频，SoftAP 一开驱动就拒绝 Scan()，而页面恰恰
+ * 只有 AP 开着时才可达。所以列表只能是开窗那一刻（还在 STA 模式）扫出来的快照。
+ * 缓存为空不算错误：页面退回手输，不能因为扫不到就把人卡在配网页外面。 */
+#define GW_PROV_SCAN_LIST_MAX  20u
+
+/* SSID 可能含引号/反斜杠（中文 SSID 也常见），必须转义后再进 JSON，
+ * 否则一个带引号的名字就能把整个响应变成非法 JSON——页面会静默白屏。 */
+static void prov_esc(const char *in, char *out, uint32_t cap)
+{
+    uint32_t o = 0u;
+    uint32_t i;
+
+    if (out == NULL || cap == 0u) {
+        return;
+    }
+    for (i = 0u; in != NULL && in[i] != '\0' && (o + 2u) < cap; i++) {
+        unsigned char c = (unsigned char)in[i];
+
+        if (c == '"' || c == '\\') {
+            out[o++] = '\\';
+            out[o++] = (char)c;
+        } else if (c < 0x20u) {
+            out[o++] = ' ';
+        } else {
+            out[o++] = (char)c;
+        }
+    }
+    out[o] = '\0';
+}
+
+int gw_prov_api_wifi_scan_cache(gw_prov_t *p, uint32_t now_ms, char *out, uint32_t cap)
+{
+    char data[1600];
+    uint32_t scanned_at = 0u;
+    uint32_t n = 0u;
+    uint32_t i;
+    uint32_t used;
+    int have = 0;
+    int first = 1;
+
+    if (out == NULL || cap == 0u) {
+        return 500;
+    }
+    if (p == NULL) {
+        return 500;
+    }
+    if (p->ops->wifi_scan_cache != NULL) {
+        have = p->ops->wifi_scan_cache(&scanned_at, &n);
+    }
+    if (have != 1) {
+        n = 0u;
+        scanned_at = 0u;
+    }
+    if (n > GW_PROV_SCAN_LIST_MAX) {
+        n = GW_PROV_SCAN_LIST_MAX;
+    }
+    used = (uint32_t)snprintf(data, sizeof(data),
+                              "{\"cached\":%s,\"scanned_at\":%lu,\"age_ms\":%lu,"
+                              "\"count\":%lu,\"limit\":%u,\"list\":[",
+                              (have == 1) ? "true" : "false",
+                              (unsigned long)scanned_at,
+                              (unsigned long)((have == 1) ? (now_ms - scanned_at) : 0u),
+                              (unsigned long)n, (unsigned)GW_PROV_SCAN_LIST_MAX);
+    for (i = 0u; i < n && used + 8u < sizeof(data); i++) {
+        char ssid[GW_PROV_SSID_MAX + 1];
+        char esc[(GW_PROV_SSID_MAX + 1) * 2u];
+        int rssi = 0;
+        int ch = 0;
+        int w;
+
+        ssid[0] = '\0';
+        if (p->ops->wifi_scan_cache_get == NULL) {
+            break;
+        }
+        if (p->ops->wifi_scan_cache_get(i, ssid, (uint32_t)sizeof(ssid), &rssi, &ch) != 0) {
+            continue;
+        }
+        prov_esc(ssid, esc, (uint32_t)sizeof(esc));
+        w = snprintf(data + used, sizeof(data) - used,
+                     "%s{\"ssid\":\"%s\",\"rssi\":%d,\"ch\":%d}",
+                     (first != 0) ? "" : ",", esc, rssi, ch);
+        if (w <= 0 || (uint32_t)w >= (sizeof(data) - used)) {
+            break;
+        }
+        used += (uint32_t)w;
+        first = 0;
+    }
+    if (used + 3u < sizeof(data)) {
+        data[used++] = ']';
+        data[used++] = '}';
+        data[used] = '\0';
+    }
+    (void)prov_env(out, cap, GW_PROV_CODE_OK, "ok", data, prov_epoch_now(p));
+    return 200;
+}
+
 /* ============================== §12.6 wifi ============================== */
 /* t137：本接口现在一次收完「家庭 Wi-Fi + 华为云 IoTDA 三件套（接入地址/设备 ID/密钥）」。
  *

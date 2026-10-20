@@ -923,6 +923,9 @@ static int prov_op_ap_start(const char *ssid, const char *psk, uint8_t channel)
 }
 static int prov_op_ap_stop(void)                        { return gw_net_ap_stop(); }
 static int prov_op_ap_ip(char *out, uint32_t cap)       { return gw_net_ap_ip(out, cap); }
+static int prov_op_wifi_scan_cache(uint32_t *at, uint32_t *n)          { return gw_net_scan_cache(at, n); }
+static int prov_op_wifi_scan_cache_get(uint32_t i, char *s, uint32_t c, int *r, int *ch)
+{ return gw_net_scan_cache_get(i, s, c, r, ch); }
 static int prov_op_sta_start(const char *ssid, const char *psk) { return gw_net_sta_start(ssid, psk); }
 static int prov_op_sta_poll(char *reason, uint32_t cap)  { return gw_net_sta_poll(reason, cap); }
 static int prov_op_sta_ip(char *out, uint32_t cap)       { return gw_net_sta_ip(out, cap); }
@@ -1168,6 +1171,9 @@ static const gw_prov_ops_t s_prov_ops = {
     prov_op_cred_probe,
     prov_op_cloud_save,
     prov_op_cloud_load,
+    /* t143：开窗前缓存的 Wi-Fi 列表（同样加在表尾） */
+    prov_op_wifi_scan_cache,
+    prov_op_wifi_scan_cache_get,
 };
 
 /* t137：首次配网的两个一次性状态（tick 任务独占，无需加锁） */

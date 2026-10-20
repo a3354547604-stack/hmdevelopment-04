@@ -26,6 +26,9 @@ static const struct {
     { "/api/pair/scan",        "POST", 3u },
     { "/api/pair/nodes",       "GET",  4u },
     { "/api/pair/bind",        "POST", 5u },
+    /* t143：开窗前扫一次的 Wi-Fi 列表（只读缓存，不受配网窗口限制——
+     * 窗口外打开页面时能立刻知道"上次扫到过什么"，也不会 1600 卡住页面渲染） */
+    { "/api/scan",             "GET",  6u },
 };
 
 /* API 函数把响应体写进 r->out 并返回 HTTP 状态码；这里补上长度与 Content-Type。
@@ -100,6 +103,9 @@ void gw_prov_route(gw_http_req_t *r, void *arg)
                 return;
             case 4u:
                 route_finish(r, gw_prov_api_nodes(p, now, r->out, r->out_cap));
+                return;
+            case 6u:
+                route_finish(r, gw_prov_api_wifi_scan_cache(p, now, r->out, r->out_cap));
                 return;
             default:
                 route_finish(r, gw_prov_api_bind(p, now, r->body, r->out, r->out_cap));

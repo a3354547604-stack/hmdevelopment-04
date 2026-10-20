@@ -158,6 +158,15 @@ typedef struct {
                            const char *secret, char *err, uint32_t cap);
     int      (*cloud_load)(char *host, uint32_t host_cap, uint16_t *port,
                            char *device, uint32_t dev_cap, int *has_secret);
+
+    /* ---- t143：开窗前缓存的 Wi-Fi 列表（同样加在表尾）----
+     * 为什么要缓存：单射频，SoftAP 一开驱动就拒绝 Scan()，而页面恰恰只有那时可达。
+     * 所以列表必须在**开窗那一刻**（还在 STA 模式）扫一次存下来。
+     * wifi_scan_cache：返回 1 = 有缓存并回填扫描时刻（开机毫秒）与条数；0 = 没扫过/扫失败。
+     * wifi_scan_cache_get：按下标取一条（0 = 成功）。实现保证只含 2.4 G、同名取最强。 */
+    int      (*wifi_scan_cache)(uint32_t *scanned_at_ms, uint32_t *count);
+    int      (*wifi_scan_cache_get)(uint32_t idx, char *ssid, uint32_t cap,
+                                    int *rssi, int *ch);
 } gw_prov_ops_t;
 /* 加字段后的编译期护栏：上板那份 gw_prov_ops_t 支持"整表初始化 + 少写尾部"，
  * 少写的一项会是 NULL 而不是随机地址（gw_main.c 的注释里记着这个坑）。 */
@@ -304,6 +313,10 @@ uint32_t gw_prov_remain_s(const gw_prov_t *p, uint32_t now_ms);
  * s_prov（配网状态机）与 gw_net 的 AP/STA 状态。纯板级，主机自测不编。
  * 返回 0 成功（含"窗口本来就开着"），-1 失败或参数不认识。 */
 int gw_prov_cmd(const char *line, char *out, uint32_t cap);
+
+/* GET /api/scan（t143）：返回开窗前缓存的家用 Wi-Fi 列表（最多 20 条，只含 2.4 G）。
+ * 缓存为空时仍然 200，只是 cached=false、list=[]——页面据此退回手输，不卡人。 */
+int gw_prov_api_wifi_scan_cache(gw_prov_t *p, uint32_t now_ms, char *out, uint32_t cap);
 
 /* 把 `prov` 挂到 SDK 自带 shell（实现在 gw_kvcfg_shell.c：板上只有它 include shell.h）。 */
 void gw_prov_shell_register(void);

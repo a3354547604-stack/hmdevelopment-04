@@ -17,6 +17,7 @@
 | J5 | **一次填完 Wi-Fi + 云端三件套**，页面刷新只显示「已配置（不回显）」（t137） | 串口出现 `[PROV] 收到 IoTDA 云凭据 host=… device=…（密钥 N 字节，不回显）`；刷新页面看到「华为云 IoTDA：已配置」，**密钥框永远空着** |
 | J6 | **`wifi clear` 能恢复出厂**（t137 补），复位后重新自动开窗 | 串口 `wifi clear` 回 `[wifi] 已清除家庭 Wi-Fi 凭据…`；`wifi show` 变 `未配置家庭 Wi-Fi`；断电冷启动后重新出现 `[PROV] 首次配网：…` |
 | J8 | `prov on` → 3 s 内出现 `[NET] SoftAP 已启动 ssid=… 地址 http://…/`（t142） |
+| J9 | `prov on` 后先出现 `[NET] 开窗前扫描：…` 与 `[NET] 开窗前扫描完成：N 个 2.4 G 热点`，且页面下拉能展开出 N 条（t143） |
 | J7 | **板载键 K1–K4 长按 3 s 也能进/退配网**（t138），不用接 `EX_GPIO_A3` | 串口出现 `[gw] 板载键基线：ch5 中位 … mV（… 点，跨度 … mV）→ 按下阈值 偏离 ≥300 mV / 持续 ≥50 ms`，按住时出现 `[gw] 板载键 K2（550 mV）按住 3000 ms，进入长按判定`，松手后出现 `[PROV] enter AP mode …` |
 
 **扫描/绑定（网页上的"扫描节点"/"绑定"）需要汇聚板在线**。当前汇聚固件还没上板，
@@ -189,6 +190,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
   [gw] AP: 已登记启动请求（异步执行，结果见随后的 [NET] 行）
     [prov] 已开窗：手机连热点「ElderCare-XXXX」（口令见 [PROV] enter AP mode 行）
   ```
+  同时（在 AP 起来之前）会先看到扫描两行——这是下拉列表的来源：
+  ```
+  [NET] 开窗前扫描：在 STA 模式扫一次（AP 起来后单射频扫不了）
+  [NET] 开窗前扫描完成：7 个 2.4 G 热点（页面下拉可选；没有就手输）
+  ```
   随后 1–3 秒内必须出现**这一行**（地址照抄，别背）：
   ```
   [NET] SoftAP 已启动 ssid=ElderCare-XXXX 地址 http://192.168.4.1/ （手机连这个热点后打开该地址）
@@ -198,6 +204,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
     （`prov status` 还能用），改用串口 `wifi set ssid=<名称> psk=<口令>` + `gwkv set …`。
   - `[NET] ⚠ AP: SetHotspotConfig 失败` → 看 ssid/口令/信道，敲 `prov status` 看 AP 状态。
   - 完全没有 `[NET]` 行 → 敲 `prov status`；AP 显示「未启动」说明请求没登记（把整段串口贴回来）。
+  - `[NET] ⚠ 开窗前扫描被驱动拒绝…` → 扫描失败**不影响配网**：下拉里只有一行提示，
+    SSID 手输即可（这是硬件限制，不是故障）。
 
 **第 2 步：手机连热点、打开页面**
 
@@ -206,12 +214,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
   个别固件是 `http://192.168.2.1/`）。
 - 看到什么：页面标题「RK2206 网关配网」，顶部状态卡显示
   「配网窗口：开」与剩余秒数；`SoftAP`、`设备 SN`、`固件` 三行有值。
+  「第一步」里有一个 **Wi-Fi 下拉框**，展开应能看到附近 2.4 G 热点（最多 20 个，
+  条目形如 `HOME-2.4G   -41dBm   ch6`），下面一行写着
+  「扫描于开机后 N 秒」。**下拉只是方便**：列表里没有你的 Wi-Fi 就手输。
 - 失败怎么办：打不开先看串口有没有 `[PROV] 本地配网服务就绪 http://…/`；
   没有就等 30 s 再试（HTTP 服务可能在 AP 地址就绪后才绑）。手机浏览器别用 https。
 
 **第 3 步：填两段并提交**
 
-- 做什么：在同一个页面里 ①「第一步：家庭 Wi-Fi」填 SSID 与口令
+- 做什么：在同一个页面里 ①「第一步：家庭 Wi-Fi」**从下拉里选一个**
+  （选中会自动填进下面的输入框；没有就手输）并填口令
   （**只能手输**：SoftAP 开着时驱动不允许扫描，页面上没有下拉列表）；
   ②「第二步：华为云 IoTDA」填接入地址 / 设备 ID / 设备密钥（已在串口
   `gwkv set` 配过的可留空）；③点「**提交并连接**」。

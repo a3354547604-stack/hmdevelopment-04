@@ -41,6 +41,7 @@
 ".row:last-child{border-bottom:0}\n" \
 ".k{color:#666}.v{font-weight:600}\n" \
 "input{width:100%;box-sizing:border-box;padding:9px;margin:5px 0;border:1px solid #ccd2dd;border-radius:6px;font-size:15px}\n" \
+"select{width:100%;box-sizing:border-box;padding:9px;margin:5px 0;border:1px solid #ccd2dd;border-radius:6px;font-size:15px;background:#fff}\n" \
 "button{padding:10px;border:0;border-radius:8px;background:#2b7de9;color:#fff;font-size:15px;width:100%;margin-top:6px}\n" \
 "button.sec{background:#eef1f6;color:#334}\n" \
 "button.del{background:#fdecec;color:#c33}\n" \
@@ -70,7 +71,9 @@
 "</div>\n" \
 "<div class='card'>\n" \
 "<div class='b'><b>第一步：连接家庭 Wi-Fi</b>（只需 2.4G 网络）</div>\n" \
-"<input id='ssid' placeholder='Wi-Fi 名称' autocomplete='off' autocapitalize='off'>\n" \
+"<select id='ssidList'><option value=''>（扫描列表加载中…）</option></select>\n" \
+"<div class='tip'>若列表里没有你的 Wi-Fi，请在下方手动输入（列表是网关开窗前扫到的那一批 2.4G 热点：<span id='scanAt'>-</span>）。</div>\n" \
+"<input id='ssid' placeholder='Wi-Fi 名称（可在上方列表选，也可手输）' autocomplete='off' autocapitalize='off'>\n" \
 "<input id='pwd' type='password' placeholder='Wi-Fi 口令（8 位以上）' autocomplete='off'>\n" \
 "<label style='font-size:13px;color:#666'><input type='checkbox' id='hid' style='width:auto;margin-right:4px'>隐藏网络</label>\n" \
 "<div class='tip'>已经配过家庭 Wi-Fi 时，这两格可以留空（只改云端凭据）。</div>\n" \
@@ -137,6 +140,17 @@
 " if(d.sta_ssid){q('ssid').value=d.sta_ssid}\n" \
 "}\n" \
 "function refresh(){api('GET','/api/provision/status').then(stat).catch(show)}\n" \
+"function scanList(){\n" \
+" api('GET','/api/scan').then(function(d){\n" \
+"  var sel=q('ssidList');var list=d.list||[];\n" \
+"  while(sel.firstChild){sel.removeChild(sel.firstChild)}\n" \
+"  var o0=el('option',(d.cached&&list.length)?'（选一个，或在下面手输）':'（没有扫描列表：请在下面手动输入）');\n" \
+"  o0.value='';sel.appendChild(o0);\n" \
+"  list.forEach(function(x){var o=el('option',x.ssid+'   '+x.rssi+'dBm   ch'+x.ch);o.value=x.ssid;sel.appendChild(o)});\n" \
+"  sel.onchange=function(){if(sel.value){q('ssid').value=sel.value}};\n" \
+"  q('scanAt').textContent=(d.cached?('扫描于开机后 '+Math.round((d.age_ms||0)/1000)+' 秒'):'未扫描');\n" \
+" }).catch(function(){q('scanAt').textContent='扫描列表不可用（可手输）'})\n" \
+"}\n" \
 "function unbind(sn){api('POST','/api/pair/bind',{op:'del',sn:sn}).then(function(){say('已解绑 '+sn);loadNodes()}).catch(show)}\n" \
 "function loadNodes(){\n" \
 " api('GET','/api/pair/nodes').then(function(d){\n" \
@@ -200,7 +214,7 @@
 " api('POST','/api/pair/bind',{op:'clear',confirm:'CLEAR'}).then(function(){say('白名单已清空');loadNodes()}).catch(show)\n" \
 "}\n" \
 "q('btnwifi').onclick=wifi;q('btnscan').onclick=scan;q('btnclear').onclick=clearAll;\n" \
-"refresh();loadNodes();setInterval(refresh,2000);\n" \
+"refresh();loadNodes();scanList();setInterval(refresh,2000);\n" \
 "</script>\n" \
 "</body>\n" \
 "</html>\n"

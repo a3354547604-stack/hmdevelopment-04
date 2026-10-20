@@ -331,6 +331,52 @@ static int sim_hub_bind(const char *op, const char *sn, const char *mac, uint32_
  * "SEGV on address 0x68 in gw_prov_resync_step" —— 0x68 就是 now_ms 的偏移）。 */
 static gw_prov_ops_t g_ops;
 
+/* t143：开窗前扫描缓存（仿真）。条目里刻意放一个带引号的 SSID，
+ * 用来验证 JSON 转义——真机上中文/符号 SSID 很常见，转义漏了页面会静默白屏。 */
+#define SIM_SCAN_MAX 24u
+typedef struct { char ssid[GW_PROV_SSID_MAX + 1]; int rssi; int ch; } sim_scan_t;
+static sim_scan_t s_sim_scan[SIM_SCAN_MAX];
+static uint32_t s_sim_scan_n = 0u;
+static uint32_t s_sim_scan_at = 0u;
+static int      s_sim_scan_valid = 0;
+
+static int sim_wifi_scan_cache(uint32_t *at, uint32_t *n)
+{
+    if (at != NULL) { *at = s_sim_scan_at; }
+    if (n != NULL)  { *n = s_sim_scan_n; }
+    return (s_sim_scan_valid != 0) ? 1 : 0;
+}
+
+static int sim_wifi_scan_cache_get(uint32_t i, char *ssid, uint32_t cap, int *rssi, int *ch)
+{
+    if (ssid == NULL || cap == 0u || i >= s_sim_scan_n) {
+        return -1;
+    }
+    snprintf(ssid, cap, "%s", s_sim_scan[i].ssid);
+    if (rssi != NULL) { *rssi = s_sim_scan[i].rssi; }
+    if (ch != NULL)   { *ch = s_sim_scan[i].ch; }
+    return 0;
+}
+
+static void sim_scan_reset(void)
+{
+    memset(s_sim_scan, 0, sizeof(s_sim_scan));
+    s_sim_scan_n = 0u;
+    s_sim_scan_at = 0u;
+    s_sim_scan_valid = 0;
+}
+
+static void sim_scan_add(const char *ssid, int rssi, int ch)
+{
+    if (s_sim_scan_n >= SIM_SCAN_MAX) {
+        return;
+    }
+    snprintf(s_sim_scan[s_sim_scan_n].ssid, sizeof(s_sim_scan[s_sim_scan_n].ssid), "%s", ssid);
+    s_sim_scan[s_sim_scan_n].rssi = rssi;
+    s_sim_scan[s_sim_scan_n].ch = ch;
+    s_sim_scan_n++;
+}
+
 static void make_ops(gw_prov_ops_t *o)
 {
     memset(o, 0, sizeof(*o));
@@ -353,6 +399,9 @@ static void make_ops(gw_prov_ops_t *o)
     o->cred_probe = sim_cred_probe;
     o->cloud_save = sim_cloud_save;
     o->cloud_load = sim_cloud_load;
+    /* t143：两项同样加在表尾 */
+    o->wifi_scan_cache     = sim_wifi_scan_cache;
+    o->wifi_scan_cache_get = sim_wifi_scan_cache_get;
 }
 
 /* ---------------------------------------------------------------- 驱动 */
@@ -889,6 +938,54 @@ static void t_cloud_creds(void)
 
 /* t137：全新网关开机自动开配网窗口。板上由 tick 每拍调一次，
  * 这里直接调 gw_prov_auto_boot()，把“只判定一次”的语义钉死。 */
+/* t143：/api/scan 返回开窗前的缓存 */
+static void t_wifi_scan_cache(void)
+{
+    char out[4096];
+    int st;
+    uint32_t i;
+
+    printf("\n[?] GET /api/scan：开窗前缓存的 Wi-Fi 列表\n");
+
+    sim_scan_reset();
+    st = call("GET", "/api/scan", NULL, out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 200, "缓存为空也回 200（页面据此退回手输，不能卡人）");
+    check(has(out, "\"cached\":false") && has(out, "\"count\":0") && has(out, "\"list\":[]"),
+          "空缓存：cached=false / count=0 / list=[]");
+
+    /* 关掉窗口也照样能读：页面在窗口外也要能渲染出上次扫到的东西 */
+    gw_prov_exit(&g_prov, s_mono);
+    st = call("GET", "/api/scan", NULL, out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 200 && has(out, "\"cached\":false"), "窗口关闭时仍 200（只读缓存，不返回 1600）");
+
+    sim_scan_add("HOME-2.4G", -41, 6);
+    sim_scan_add("CMCC\"quote", -67, 11);      /* 带引号：验证 JSON 转义 */
+    s_sim_scan_at = 1234u;
+    s_sim_scan_valid = 1;
+    st = call("GET", "/api/scan", NULL, out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 200 && has(out, "\"cached\":true") && has(out, "\"count\":2"), "有缓存：cached=true / count=2");
+    check(has(out, "\"scanned_at\":1234"), "scanned_at 回填扫描时刻（开机毫秒）");
+    check(has(out, "HOME-2.4G") && has(out, "\"rssi\":-41") && has(out, "\"ch\":6"), "条目含 ssid/rssi/ch");
+    check(has(out, "CMCC\\\"quote"), "SSID 里的双引号被转义（否则整个响应变非法 JSON）");
+
+    /* 最多 20 条：塞 24 条，响应里只应出现前 20 条 */
+    sim_scan_reset();
+    for (i = 0u; i < SIM_SCAN_MAX; i++) {
+        char name[24];
+        snprintf(name, sizeof(name), "AP-%02u", (unsigned)i);
+        sim_scan_add(name, -50 - (int)i, 1 + (int)(i % 13u));
+    }
+    s_sim_scan_valid = 1;
+    st = call("GET", "/api/scan", NULL, out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 200 && has(out, "\"count\":20"), "最多 20 条（24 条只回前 20）");
+    check(has(out, "AP-19") && !has(out, "AP-20"), "截断发生在第 20 条之后");
+
+    st = call("POST", "/api/scan", "{}", out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 405, "方法不对 → 405（只给 GET）");
+
+    sim_scan_reset();
+}
+
 static void t_auto_boot(void)
 {
     uint32_t i;
@@ -940,6 +1037,7 @@ int main(void)
     t_window_timeout_and_resync();
     t_cloud_commands();
     t_cloud_creds();
+    t_wifi_scan_cache();
     t_auto_boot();
 
     printf("\n=== 通过 %d / 失败 %d ====\n", s_pass, s_fail);   /* 四个等号：与 gw_selftest.c / tools/gw-host-test.sh 的判定串一致 */

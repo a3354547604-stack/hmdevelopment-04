@@ -180,6 +180,119 @@ int gw_net_scan_list(char *out, uint32_t cap)
     return (int)n;
 }
 
+/* ------------------------------------------------- 开窗前的 Wi-Fi 列表缓存 */
+/*
+ * 单射频的硬约束：SoftAP 起来以后驱动直接拒绝 Scan()（见 gw_net_scan_list 的注释），
+ * 而配网页面恰恰只有 AP 开着时才可达。所以列表只能是"开窗那一刻"（还在 STA 模式）
+ * 扫出来的快照，缓存给 /api/scan 用（t143）。
+ *
+ * 口径：只留 2.4 G（5 G 连不上，列出来只会误导）、同名去重取最强、最多 20 条。
+ * 扫描失败不算错误：缓存保持上一次的样子/为空，页面退回手输。
+ */
+#define GW_NET_SCAN_CACHE_MAX 20u
+
+typedef struct {
+    char     ssid[GW_PROV_SSID_MAX + 1];
+    int16_t  rssi;
+    uint8_t  ch;
+} net_scan_cache_entry_t;
+
+static net_scan_cache_entry_t s_scan_cache[GW_NET_SCAN_CACHE_MAX];
+static uint32_t s_scan_cache_n = 0u;
+static uint32_t s_scan_cache_at = 0u;      /* 开机毫秒（与 gw_now_ms 同一个口径） */
+static uint8_t  s_scan_cache_valid = 0u;
+
+static uint32_t net_now_ms(void)
+{
+    /* 与 gw_main.c 的 gw_now_ms() 同一个算式：板级 tick 1000 Hz（target_config.h），
+     * 所以 tick 数就是毫秒。两边口径必须一致，否则 /api/scan 的 age_ms 会算成负数。 */
+    return (uint32_t)(LOS_TickCountGet() * 1000ull / (uint64_t)GW_TICK_PER_SECOND);
+}
+
+int gw_net_scan_cache(uint32_t *scanned_at_ms, uint32_t *count)
+{
+    if (scanned_at_ms != NULL) {
+        *scanned_at_ms = s_scan_cache_at;
+    }
+    if (count != NULL) {
+        *count = s_scan_cache_n;
+    }
+    return (s_scan_cache_valid != 0u) ? 1 : 0;
+}
+
+int gw_net_scan_cache_get(uint32_t idx, char *ssid, uint32_t cap, int *rssi, int *ch)
+{
+    if (ssid == NULL || cap == 0u || idx >= s_scan_cache_n) {
+        return -1;
+    }
+    (void)snprintf(ssid, cap, "%s", s_scan_cache[idx].ssid);
+    if (rssi != NULL) {
+        *rssi = (int)s_scan_cache[idx].rssi;
+    }
+    if (ch != NULL) {
+        *ch = (int)s_scan_cache[idx].ch;
+    }
+    return 0;
+}
+
+/* 真扫一次并刷新缓存（只在 AP 起来之前调；阻塞但可接受：在 gwAp 任务里） */
+static void net_scan_cache_refresh(void)
+{
+    WifiScanInfo list[GW_NET_SCAN_MAX];
+    unsigned int num = GW_NET_SCAN_MAX;
+    unsigned int i;
+    uint32_t n = 0u;
+
+    if (net_wifi_on() != 0) {
+        printf("[NET] 开窗前扫描：wifi 打不开，列表为空（页面仍可手输 SSID）\n");
+        return;
+    }
+    memset(list, 0, sizeof(list));
+    printf("[NET] 开窗前扫描：在 STA 模式扫一次（AP 起来后单射频扫不了）\n");
+    if (Scan() != WIFI_SUCCESS) {
+        printf("[NET] ⚠ 开窗前扫描被驱动拒绝，列表保持原样（页面仍可手输 SSID）\n");
+        return;
+    }
+    if (GetScanInfoList(list, &num) != WIFI_SUCCESS) {
+        printf("[NET] ⚠ 开窗前扫描取结果失败，列表保持原样（页面仍可手输 SSID）\n");
+        return;
+    }
+    if (num > GW_NET_SCAN_MAX) {
+        num = GW_NET_SCAN_MAX;
+    }
+    for (i = 0u; i < num && n < GW_NET_SCAN_CACHE_MAX; i++) {
+        int ch = net_freq_to_ch(list[i].frequency);
+        const char *name = (const char *)list[i].ssid;
+        uint32_t k;
+        int dup = 0;
+
+        if (ch == 0 || name[0] == '\0') {
+            continue;               /* 只要 2.4 G；隐藏 SSID 不列 */
+        }
+        for (k = 0u; k < n; k++) {
+            if (strcmp(s_scan_cache[k].ssid, name) == 0) {
+                dup = 1;
+                if (list[i].rssi > (int)s_scan_cache[k].rssi) {
+                    s_scan_cache[k].rssi = list[i].rssi;   /* 同名取最强 */
+                    s_scan_cache[k].ch = (uint8_t)ch;
+                }
+                break;
+            }
+        }
+        if (dup != 0) {
+            continue;
+        }
+        (void)snprintf(s_scan_cache[n].ssid, sizeof(s_scan_cache[n].ssid), "%s", name);
+        s_scan_cache[n].rssi = list[i].rssi;
+        s_scan_cache[n].ch = (uint8_t)ch;
+        n++;
+    }
+    s_scan_cache_n = n;
+    s_scan_cache_at = net_now_ms();
+    s_scan_cache_valid = 1u;
+    printf("[NET] 开窗前扫描完成：%u 个 2.4 G 热点（页面下拉可选；没有就手输）\n", (unsigned)n);
+}
+
 /* ------------------------------------------------------------------ AP */
 
 /*
@@ -275,6 +388,8 @@ static void net_ap_run_start(void)
     char ip[16];
 
     s_ap_state = GW_AP_STARTING;
+    /* 顺序不能反：先扫（要 STA/驱动可用），再关 STA，最后起 AP。 */
+    net_scan_cache_refresh();
     net_sta_off_for_ap();
 
     memset(&cfg, 0, sizeof(cfg));

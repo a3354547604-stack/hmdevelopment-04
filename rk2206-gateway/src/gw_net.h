@@ -33,6 +33,13 @@ int gw_net_sta_ssid(char *out, uint32_t cap);
  * （AP+STA 并发时驱动可能拒绝扫描，此时网关不拦用户，只把 ap_found 报 false） */
 int gw_net_scan_ap(const char *ssid, int *rssi, int *ch);
 
+/* 开窗前缓存的家用 Wi-Fi 列表（t143）。为什么要缓存：单射频，SoftAP 开着时驱动
+ * 拒绝 Scan()，而配网页面只有 AP 开着时才可达——所以列表是开窗那一刻的快照。
+ * gw_net_scan_cache：1 = 有缓存（回填扫描时刻=开机毫秒、条数），0 = 没扫过/扫失败。
+ * gw_net_scan_cache_get：按下标取一条，0 = 成功。只含 2.4 G、同名取最强、≤20 条。 */
+int gw_net_scan_cache(uint32_t *scanned_at_ms, uint32_t *count);
+int gw_net_scan_cache_get(uint32_t idx, char *ssid, uint32_t cap, int *rssi, int *ch);
+
 /* ---- 串口 `wifi` 命令与开机联网共用（t136） ----
  * 阻塞式连接：内部就是 sta_start + 每 GW_WIFI_CONNECT_POLL_MS 调一次 sta_poll，
  * 直到连上 / 失败 / 超时。为什么允许阻塞：调用方只有两个——开机时的 net_task
