@@ -11,11 +11,17 @@
 #include "gw_hw.h"
 #include "gw_config.h"
 #include "gw_key.h"
-#include "gw_hw_adc.h"
+#ifndef GW_HW_HOST
+#include "gw_hw_adc.h"   /* 板上才有：片上 SARADC 的 SDK 头 */
+#endif
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+/* 主机自测（tools/gw-host-test.sh 带 -DGW_HW_HOST）只编下面的**纯分派**部分：
+ * 采样、基线、报告文本都要碰 SDK 的 ADC，主机上没有这些符号。 */
+#ifndef GW_HW_HOST
 
 static gw_key_t  s_key;
 static uint8_t   s_inited;
@@ -261,4 +267,104 @@ int gw_hw_key_probe(unsigned channel, char *out, uint32_t cap)
                                gw_key_band_name(&s_key.band, mv),
                                (channel == GW_KEY_ADC_CHANNEL) ? "  <= 当前判定通道" : "");
     return (int)used;
+}
+
+#endif /* !GW_HW_HOST */
+
+/* ================================================================== *
+ * `keys` 命令的参数分派（t139）：纯逻辑，主机可测
+ *
+ * 为什么要单独一层：t138 在 shell handler 里直接判 `if (argc >= 1u)`，
+ * 而 LiteOS-M 的 `osCmdReg(..., XARGS, ...)` **会把命令名放进 argv[0]**
+ * （SDK 证据 `sdk_liteos/shell/src/shell_hwinfo.c:70` `if (argc == 1)` 表示
+ * 「没有参数」、`argv[1]` 才是第一个实参；实机证据 t139：裸 `keys` 的
+ * argc==1 且 argv[0]=="keys"）。于是裸 `keys` 永远进参数分支、第一个 token
+ * 是 "keys" 必判非法 → 完整报告永远打不出来。
+ *
+ * 分派逻辑放在这里并接受「argc/argv 原样传进来」，就能在主机上用假 ops
+ * 把三条路径（无参 / 合法数字 / 非法）都测到，不必上板。
+ * ================================================================== */
+
+static const gw_keys_ops_t *s_keys_ops;
+
+void gw_keys_set_ops(const gw_keys_ops_t *ops)
+{
+    s_keys_ops = ops;
+}
+
+/* 只认纯十进制数字，且必须落在通道扫描区间内。
+ * 不用 strtoul：它会接受 "0x5"、"-1"、前导空格这些 shell 里根本不该出现的东西，
+ * 现场想敲错都难，反而更难解释。 */
+static int keys_parse_channel(const char *s, unsigned *ch)
+{
+    unsigned v = 0u;
+    uint32_t i;
+
+    if (s == NULL || *s == '\0' || ch == NULL) {
+        return -1;
+    }
+    for (i = 0u; s[i] != '\0'; i++) {
+        if (i >= 3u || s[i] < '0' || s[i] > '9') {
+            return -1;
+        }
+        v = (v * 10u) + (unsigned)(s[i] - '0');
+    }
+    if (v > GW_KEY_ADC_SCAN_LAST) {
+        return -1;
+    }
+    *ch = v;
+    return 0;
+}
+
+static void keys_usage(char *out, uint32_t cap)
+{
+    (void)snprintf(out, (size_t)cap,
+                   "  [key] 用法：`keys`（打印完整报告）或 `keys <0-%u>`（对那一路采样一次）\n",
+                   (unsigned)GW_KEY_ADC_SCAN_LAST);
+}
+
+int gw_keys_cmd(int argc, const char *const *argv, char *out, uint32_t cap)
+{
+    unsigned ch = 0u;
+    int base = 0;
+    int rest;
+    int rc;
+
+    if (out == NULL || cap < 64u) {
+        return -1;
+    }
+    out[0] = '\0';
+
+    /* 跳过命令名（XARGS 口径）。同时容忍「调用方只给参数」的形态——
+     * 将来换注册方式不会又静默坏一次。 */
+    if (argc > 0 && argv != NULL && argv[0] != NULL && strcmp(argv[0], "keys") == 0) {
+        base = 1;
+    }
+    rest = (int)argc - base;
+    if (rest < 0) {
+        rest = 0;
+    }
+
+    if (rest == 0) {
+        if (s_keys_ops == NULL || s_keys_ops->report == NULL) {
+            keys_usage(out, cap);
+            return -1;
+        }
+        rc = s_keys_ops->report(out, cap);
+        return (rc >= 0) ? 0 : -1;
+    }
+    if (rest > 1) {
+        keys_usage(out, cap);
+        return -1;
+    }
+    if (keys_parse_channel(argv[base], &ch) != 0) {
+        keys_usage(out, cap);
+        return -1;
+    }
+    if (s_keys_ops == NULL || s_keys_ops->probe == NULL) {
+        keys_usage(out, cap);
+        return -1;
+    }
+    rc = s_keys_ops->probe(ch, out, cap);
+    return (rc >= 0) ? 0 : -1;
 }

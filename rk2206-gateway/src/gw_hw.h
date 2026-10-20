@@ -36,6 +36,27 @@ int gw_hw_key_report(char *out, uint32_t cap);
  * 现场能直接 `keys 4` 逐个试，不必改 GW_KEY_ADC_CHANNEL 重编固件。 */
 int gw_hw_key_probe(unsigned channel, char *out, uint32_t cap);
 
+/* ------------------------------------------------------------------ *
+ * `keys` 命令的分派（t139）
+ *
+ * 为什么要有 ops 注入：真正碰 ADC 的两个动作（打完整报告、单通道采样）
+ * 在板上由 gw_hw.c 自己实现，主机上没有 ADC 符号；把这两个动作做成可注入，
+ * 分派逻辑（argc/argv 口径）就能在主机上被测到——t139 这个 bug 正是因为
+ * 分派逻辑写在只有板上才编的 shell handler 里，主机测不到才漏出去的。
+ * ------------------------------------------------------------------ */
+typedef struct {
+    int (*report)(char *out, uint32_t cap);
+    int (*probe)(unsigned channel, char *out, uint32_t cap);
+} gw_keys_ops_t;
+
+void gw_keys_set_ops(const gw_keys_ops_t *ops);
+
+/* 参数分派。调用方把 shell 给的 argc/argv **原样**传进来即可：
+ * LiteOS-M 的 `osCmdReg(..., XARGS, ...)` 会把命令名放在 argv[0]，
+ * 本函数自己跳过它（也容忍调用方只给参数）。
+ * 返回：0 成功；-1 参数非法或执行失败（此时 out 里是用法/错误说明）。 */
+int gw_keys_cmd(int argc, const char *const *argv, char *out, uint32_t cap);
+
 /* 把 `keys` 挂到 SDK 自带 shell（实现在 gw_kvcfg_shell.c：板上只有它 include shell.h）。 */
 void gw_keys_shell_register(void);
 

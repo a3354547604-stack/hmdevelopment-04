@@ -151,6 +151,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
    若怀疑按键不在 ch5，就逐个 `keys 0`…`keys 7` 试，看哪一路在按下时会跳。
 3. 把四个值回传给我（PM），我填进 `rk2206-gateway/配网实现说明.md` 的「板载按键标定」表。
 
+> **参数口径（t139 修正，看仔细）**：**裸 `keys` = 完整报告，`keys <n>` = 对第 n 路采样一次**。
+> 判断「有没有参数」要看 `argc < 2`——LiteOS-M 的 `osCmdReg(..., XARGS, ...)` 会把**命令名**放进
+> `argv[0]`（裸 `keys` 的 argc 是 1）。t138 写成 `argc >= 1u`，实机表现是「敲 `keys` 只打印用法、
+> 完整报告根本出不来」。**这是修 argc 口径，不是新增功能**：命令与输出内容都没变，只是让它真能跑。
+> 若你手上的固件仍只打印一行用法，说明烧的是 t138 当次的镜像，需要换 t139 之后的镜像。
+
 **当前口径（不要当成已实测）**
 
 - 文档值（出处：小凌派课件 b1 ADC 按键示例）：空闲 ≈2.3 V、K1 0.01 V、K2 0.55 V、K3 1.00 V、K4 1.65 V；
@@ -405,6 +411,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
   sdk_rev 35339be8fb6b59871eed793fdce0472352398d94
   ```
 
+- **t139 当次构建（修正 `keys` 的 argc 口径）**，口径同「体积 + 提交号」：
+
+  ```
+  文件 rk2206-gateway/out/gateway-Firmware.img   2097152 字节
+  liteos.elf                                     946644 字节（t138 是 946440）
+  sha256 f435b1b4c1c5fe4a5457b60c04d1ac8c1bef43cfc37f248e79c412491aede61c（当次构建）
+  md5    05c0104f39b31ee424a51fd515fb915b（当次构建）
+  sdk_rev 35339be8fb6b59871eed793fdce0472352398d94
+  ```
+
+  这一版与 t138 的**唯一行为差异**：裸 `keys` 打印完整报告（t138 只打印一行用法），`keys <n>` 正常采样。
+  镜像体积不变（2097152 恒定），`liteos.elf` 只多 204 字节 —— 所以**判断"是不是这版"别靠哈希**，
+  烧完敲一次裸 `keys`：出完整报告 = t139 之后，只出一行用法 = t138 当次。
+
   判断"是不是带板载键的这版"，除 `liteos.elf` 体积外，镜像里应能 grep 到
   `[gw] 板载键基线：`、`板载键诊断`（`keys` 注册时打印的那句）与 `[key] ch%u raw=`（`keys <通道>` 的输出）。
 
@@ -445,12 +465,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 | 云端凭据落盘失败 | `[PROV] 云凭据落盘失败：%s` | `src/gw_prov.c:978` |
 | 每个 HTTP 请求 | `[HTTP] %s %s -> %d (%u B)` | `src/gw_http.c:268` |
 | HTTP 连接来源 | `[HTTP] 连接来自 %s:%u` | `src/gw_http.c:287` |
-| **板载键初始化**（t138） | `[gw] 板载键：ADC ch5（USER_KEY_ADC），开机静默 2000 ms 采基线` | `src/gw_hw.c:90` |
-| **板载键基线**（t138） | `[gw] 板载键基线：ch5 中位 %u mV（%u 点，跨度 %u mV）→ 按下阈值 偏离 ≥%u mV / 持续 ≥%u ms` | `src/gw_hw.c:102` |
-| **板载键长按**（t138） | `[gw] 板载键 %s（%u mV）按住 %u ms，进入长按判定` | `src/gw_hw.c:152` |
-| 板载键不可用 | `[gw] ⚠ 板载键不可用（ADC 初始化失败）：配网只能用外接键或串口「wifi set」` | `src/gw_hw.c:85` |
+| **板载键初始化**（t138） | `[gw] 板载键：ADC ch5（USER_KEY_ADC），开机静默 2000 ms 采基线` | `src/gw_hw.c:96` |
+| **板载键基线**（t138） | `[gw] 板载键基线：ch5 中位 %u mV（%u 点，跨度 %u mV）→ 按下阈值 偏离 ≥%u mV / 持续 ≥%u ms` | `src/gw_hw.c:108` |
+| **板载键长按**（t138） | `[gw] 板载键 %s（%u mV）按住 %u ms，进入长按判定` | `src/gw_hw.c:158` |
+| 板载键不可用 | `[gw] ⚠ 板载键不可用（ADC 初始化失败）：配网只能用外接键或串口「wifi set」` | `src/gw_hw.c:91` |
 | 板载键基线异常 | `[gw] ⚠ 基线接近 0 mV：通道没接 / 被短接 / 引脚没切到 ADC（板载键已停判）` | `src/gw_key.c:225` |
-| `keys` 注册 | `[gw] 板载键诊断：命令「keys」（注册成功）—— 打印 ADC 各通道 raw/mV 与按下判定依据` | `src/gw_kvcfg_shell.c:153` |
+| `keys` 注册 | `[gw] 板载键诊断：命令「keys」（注册成功）—— 打印 ADC 各通道 raw/mV 与按下判定依据` | `src/gw_kvcfg_shell.c:157` |
 
 `0x20`/`0x22` 的**帧 SEQ 与 id 同值**，所以日志里 `id=1` 与 `[gw_main] 发 0x22` 的等待号能对上；
 `0x22` 是同步等待（add 最多 3 s，重建时 300 ms），现场**只有绑定那一下会顿**，属预期。
@@ -458,7 +478,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 ## 10. 没有硬件时能自证到哪一步（我这个仓库里的）
 
 - 逻辑与接口：`bash rk2206-gateway/test/run-prov-sim.sh` → `用例 通过 129 / 失败 0`（含真 TCP 回环、五个接口的 curl 形态、窗口/扫描/绑定/回滚/重建，以及 t137 的自动开窗与云端凭据）。
-- 板载键判定（t138）：`bash tools/gw-host-test.sh` → `用例 通过 411 / 失败 0`（基线 372），其中 `test_key_events()` 覆盖
+- 板载键判定（t138）+ `keys` 分派（t139）：`bash tools/gw-host-test.sh` → `用例 通过 431 / 失败 0`（t138 是 411、基线 372），其中 `test_key_events()` 覆盖
   基线中位数抗毛刺、30 ms 抖动不触发、2.9 s 不算长按、3.0 s 算长按、松手沿只报一次、基线缓慢漂移不误触、基线恒 0/满量程即停判。
 - 编译：`bash tools/gw-compile-check.sh` → `RESULT ok=23 err=0`（t137 是 20，新增 `gw_key.c`/`gw_hw.c`/`gw_hw_adc.c`）。
 - 页面：`python3 rk2206-gateway/web/gen-h5-header.py --check`（真源与 `src/gw_h5.h` 一致）+ `node --check`（JS 语法）。

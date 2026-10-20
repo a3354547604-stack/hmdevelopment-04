@@ -118,49 +118,30 @@ void gw_wifi_shell_register(void)
 
 /* ------------------------------------------------------------------ keys */
 
-/* 板载 ADC 按键诊断（t138）。为什么不做参数解析：这条命令的全部价值是
- * 「烧完板子让用户挨个键按一遍，把读数抄回来标定」，越简单越好——
- * 没有参数就没有解析错误，也不用在主机上测它。
- * 输出交给 gw_hw_key_report()：通道、基线、当前 raw/mV、按下判定的依据、
- * 分档表与全部可用通道扫描都在里面。 */
+/* 板载 ADC 按键诊断（t138）。这条命令的价值是「烧完板子让用户挨个键按一遍，
+ * 把读数抄回来标定」，所以要能在现场反复敲。
+ *
+ * t139 修正口径：这里**不再自己解析 argv**。LiteOS-M 的 `osCmdReg(..., XARGS, ...)`
+ * 会把命令名放进 argv[0]（SDK `sdk_liteos/shell/src/shell_hwinfo.c:70`
+ * `if (argc == 1)` 表示「没有参数」；实机证据：裸 `keys` 的 argc==1、
+ * argv[0]=="keys"），t138 用 `if (argc >= 1u)` 判「有没有参数」→ 裸 `keys`
+ * 永远被判成「参数是 keys」→ 完整报告永远打不出来。
+ * 现在把 argc/argv 原样交给 gw_keys_cmd()（纯分派，主机可测三条路径），
+ * 本函数只负责把输出打到串口。
+ */
 static UINT32 gw_keys_shell_cmd(UINT32 argc, const CHAR **argv)
 {
     char out[GW_KEY_REPORT_MAX];
-    UINT32 i;
+    int rc = gw_keys_cmd((int)argc, (const char *const *)argv, out, (uint32_t)sizeof(out));
 
-    /* `keys <通道>`：对指定通道做一次采样（现场标定用，不用重编固件）；
-     * 不带参数打印完整报告（通道、基线、当前读数、判定依据、通道扫描）。 */
-    if (argc >= 1u) {
-        unsigned ch = 0u;
-        const char *p = (const char *)argv[0];
-        int bad = 0;
-
-        if (p == NULL || *p == '\0') {
-            bad = 1;
-        }
-        for (i = 0u; !bad && p[i] != '\0'; i++) {
-            if (p[i] < '0' || p[i] > '9') {
-                bad = 1;
-            } else {
-                ch = ch * 10u + (unsigned)(p[i] - '0');
-                if (ch > 99u) {
-                    bad = 1;
-                }
-            }
-        }
-        if (bad) {
-            printf("  [key] 用法：`keys` 或 `keys <0-%u>`（通道号必须是十进制数字）\n",
-                   GW_KEY_ADC_SCAN_LAST);
-            return (UINT32)-1;
-        }
-        (void)gw_hw_key_probe(ch, out, (uint32_t)sizeof(out));
-        printf("%s", out);
-        return 0u;
-    }
-    (void)gw_hw_key_report(out, (uint32_t)sizeof(out));
     printf("%s", out);
-    return 0u;
+    return (rc == 0) ? 0u : (UINT32)-1;
 }
+
+static const gw_keys_ops_t k_keys_ops = {
+    gw_hw_key_report,
+    gw_hw_key_probe,
+};
 
 void gw_keys_shell_register(void)
 {
@@ -171,6 +152,7 @@ void gw_keys_shell_register(void)
         return;
     }
     s_registered = 1u;
+    gw_keys_set_ops(&k_keys_ops);
     rc = osCmdReg(CMD_TYPE_STD, "keys", XARGS, (CMD_CBK_FUNC)gw_keys_shell_cmd);
     printf("[%s] 板载键诊断：命令 `keys`（%s）—— 打印 ADC 各通道 raw/mV 与按下判定依据\n",
            GW_LOG_TAG, (rc == 0u) ? "注册成功" : "注册失败（shell 未初始化？）");

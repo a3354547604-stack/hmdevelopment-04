@@ -24,6 +24,7 @@
 #include "gw_plat.h"
 #include "gw_kvcfg.h"
 #include "gw_key.h"
+#include "gw_hw.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -2059,6 +2060,119 @@ static void test_key_events(void)
     t_ok(strcmp(gw_key_band_name(&band, 1970u), "between") == 0, "1970 mV 在分档表里是 between");
 }
 
+/* --------------------------------------------------------------- t139
+ * `keys` 命令的 argc/argv 口径。
+ *
+ * 这个 bug 只有在实机上敲才撞得到（分派逻辑原来写在只有板上才编的 shell
+ * handler 里，主机测不到），所以 t139 把它抽成纯函数后，三条路径在这里锁死：
+ * 裸 `keys` 必须打完整报告，**绝不能再打用法**。
+ * --------------------------------------------------------------- */
+static int s_keys_report_calls;
+static int s_keys_probe_calls;
+static unsigned s_keys_probe_ch;
+static int s_keys_probe_rc;
+
+static int fake_keys_report(char *out, uint32_t cap)
+{
+    int n = snprintf(out, (size_t)cap,
+                     "  [key] 完整报告：基线 2300 mV / 当前 2300 mV（假实现）\n");
+
+    s_keys_report_calls++;
+    return (n < 0) ? -1 : n;
+}
+
+static int fake_keys_probe(unsigned channel, char *out, uint32_t cap)
+{
+    int n;
+
+    s_keys_probe_calls++;
+    s_keys_probe_ch = channel;
+    n = snprintf(out, (size_t)cap, "  [key] ch%u raw=0 mv=0 分档=idle（假实现）\n", channel);
+    if (n < 0) {
+        return -1;
+    }
+    return s_keys_probe_rc;
+}
+
+static void test_keys_cmd(void)
+{
+    static const gw_keys_ops_t ops = { fake_keys_report, fake_keys_probe };
+    char out[512];
+    const char *argv1[1];
+    const char *argv2[2];
+    const char *argv3[3];
+
+    t_start("t139 `keys` 命令：裸 keys 打完整报告 / keys <n> 采样 / 非法拒绝");
+
+    gw_keys_set_ops(&ops);
+
+    /* 1) 裸 `keys`：XARGS 下 argc==1、argv[0]=="keys" —— t138 正是死在这里 */
+    argv1[0] = "keys";
+    s_keys_report_calls = 0;
+    s_keys_probe_calls = 0;
+    t_ok(gw_keys_cmd(1, argv1, out, sizeof(out)) == 0, "裸 keys 返回 0");
+    t_ok(s_keys_report_calls == 1, "裸 keys 调完整报告 1 次");
+    t_ok(s_keys_probe_calls == 0, "裸 keys 不采样");
+    t_ok(strstr(out, "完整报告") != NULL, "裸 keys 输出里有报告正文");
+    t_ok(strstr(out, "用法") == NULL, "裸 keys 输出里没有用法（t139 回归点）");
+
+    /* 2) `keys 5`：对通道 5 采样一次 */
+    argv2[0] = "keys";
+    argv2[1] = "5";
+    s_keys_report_calls = 0;
+    s_keys_probe_calls = 0;
+    s_keys_probe_ch = 99u;
+    t_ok(gw_keys_cmd(2, argv2, out, sizeof(out)) == 0, "keys 5 返回 0");
+    t_ok(s_keys_probe_calls == 1 && s_keys_probe_ch == 5u, "keys 5 采样通道 5");
+    t_ok(strstr(out, "ch5") != NULL, "keys 5 回显通道号");
+    t_ok(s_keys_report_calls == 0, "keys 5 不打完整报告");
+
+    /* 3) 只给参数、不给命令名：换注册方式时也不能坏 */
+    argv1[0] = "7";
+    s_keys_probe_calls = 0;
+    s_keys_probe_ch = 99u;
+    t_ok(gw_keys_cmd(1, argv1, out, sizeof(out)) == 0 && s_keys_probe_ch == 7u,
+         "argv 不含命令名时也能吃到通道号 7");
+
+    /* 4) 非法参数：打用法、返回非 0、不采样 */
+    argv2[1] = "abc";
+    s_keys_probe_calls = 0;
+    t_ok(gw_keys_cmd(2, argv2, out, sizeof(out)) != 0, "keys abc 返回非 0");
+    t_ok(s_keys_probe_calls == 0, "keys abc 不采样");
+    t_ok(strstr(out, "用法") != NULL, "keys abc 打用法");
+
+    argv2[1] = "99";
+    s_keys_probe_calls = 0;
+    t_ok(gw_keys_cmd(2, argv2, out, sizeof(out)) != 0, "keys 99（超范围）返回非 0");
+    t_ok(s_keys_probe_calls == 0, "keys 99 不采样");
+
+    argv2[1] = "-1";
+    t_ok(gw_keys_cmd(2, argv2, out, sizeof(out)) != 0, "keys -1 返回非 0");
+
+    /* 5) 多给参数：拒绝，不猜 */
+    argv3[0] = "keys";
+    argv3[1] = "5";
+    argv3[2] = "6";
+    s_keys_probe_calls = 0;
+    t_ok(gw_keys_cmd(3, argv3, out, sizeof(out)) != 0 && s_keys_probe_calls == 0,
+         "keys 5 6（多个参数）拒绝且不采样");
+
+    /* 6) 采样本身失败（ADC 未初始化）要如实返回失败码 */
+    argv2[1] = "5";
+    s_keys_probe_rc = -1;
+    t_ok(gw_keys_cmd(2, argv2, out, sizeof(out)) != 0, "采样失败返回非 0");
+    s_keys_probe_rc = 0;
+
+    /* 7) 没注入 ops（板上注册顺序被改坏）也要给用法而不是崩 */
+    gw_keys_set_ops(NULL);
+    t_ok(gw_keys_cmd(1, argv1, out, sizeof(out)) != 0 && strstr(out, "用法") != NULL,
+         "无 ops 时打用法、不崩");
+    gw_keys_set_ops(&ops);
+
+    /* 8) 输出缓冲太小：明确失败，不越界写 */
+    t_ok(gw_keys_cmd(1, argv1, out, 8u) != 0, "输出缓冲太小 → 返回 -1");
+}
+
 int main(void)
 {
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
@@ -2069,6 +2183,7 @@ int main(void)
     test_kvcfg();                    /* t34 凭证 KV：布局 + 落盘 + 串口命令 + 负向 */
     test_wifi_cmd();                 /* t136 串口 wifi：边界校验 + 口令不回显 + 失败可判读 */
     test_key_events();               /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
+    test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */
     test_parser();
     test_crypto_auth();
     test_time();
