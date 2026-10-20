@@ -23,6 +23,9 @@ static const struct {
 } k_routes[] = {
     { "/api/provision/status", "GET",  1u },
     { "/api/provision/wifi",   "POST", 2u },
+    /* t151：同一个处理器的别名。厂商侧维护用（出厂/售后写云端凭据），
+     * 与 /api/provision/wifi 完全等价——只是名字上把"配置"和"用户配网"分开。 */
+    { "/api/config",           "POST", 2u },
     { "/api/pair/scan",        "POST", 3u },
     { "/api/pair/nodes",       "GET",  4u },
     { "/api/pair/bind",        "POST", 5u },

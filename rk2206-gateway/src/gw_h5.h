@@ -54,15 +54,16 @@
 ".tag.off{background:#f0f0f0;color:#888}\n" \
 ".b{font-size:13px;color:#555;margin:2px 0 8px}\n" \
 ".tip{font-size:12px;color:#888;line-height:1.6}\n" \
+".ok{font-size:13px;color:#1a7f37;background:#eaf7ee;border-radius:8px;padding:8px;margin:6px 0}\n" \
 "</style>\n" \
 "</head>\n" \
 "<body>\n" \
-"<h1>ElderCare 网关配网</h1>\n" \
+"<h1 id='title'>ElderCare 网关配网</h1>\n" \
 "<div class='card'>\n" \
 "<div class='row'><span class='k'>配网模式</span><span class='v' id='mode'>-</span></div>\n" \
 "<div class='row'><span class='k'>窗口剩余</span><span class='v' id='remain'>-</span></div>\n" \
-"<div class='row'><span class='k'>家庭 Wi-Fi</span><span class='v' id='sta'>-</span></div>\n" \
-"<div class='row'><span class='k'>华为云 IoTDA</span><span class='v' id='cloud'>-</span></div>\n" \
+"<div class='row'><span class='k'>家里 Wi-Fi</span><span class='v' id='sta'>-</span></div>\n" \
+"<div class='row'><span class='k'>云端服务</span><span class='v' id='svc'>-</span></div>\n" \
 "<div class='row'><span class='k'>汇聚在线</span><span class='v' id='hub'>-</span></div>\n" \
 "<div class='row'><span class='k'>已绑定节点</span><span class='v' id='bc'>-</span></div>\n" \
 "<div class='row'><span class='k'>剩余槽位</span><span class='v' id='sf'>-</span></div>\n" \
@@ -70,37 +71,49 @@
 "<div id='msg'></div>\n" \
 "</div>\n" \
 "<div class='card'>\n" \
-"<div class='b'><b>第一步：连接家庭 Wi-Fi</b>（只需 2.4G 网络）</div>\n" \
+"<div class='b'><b>第 1 步：连接家里的 Wi-Fi</b>（只需 2.4G 网络）</div>\n" \
 "<select id='ssidList'><option value=''>（扫描列表加载中…）</option></select>\n" \
 "<div class='tip'>若列表里没有你的 Wi-Fi，请在下方手动输入（列表是网关开窗前扫到的那一批 2.4G 热点：<span id='scanAt'>-</span>）。</div>\n" \
 "<input id='ssid' placeholder='Wi-Fi 名称（可在上方列表选，也可手输）' autocomplete='off' autocapitalize='off'>\n" \
 "<input id='pwd' type='password' placeholder='Wi-Fi 口令（8 位以上）' autocomplete='off'>\n" \
 "<label style='font-size:13px;color:#666'><input type='checkbox' id='hid' style='width:auto;margin-right:4px'>隐藏网络</label>\n" \
-"<div class='tip'>已经配过家庭 Wi-Fi 时，这两格可以留空（只改云端凭据）。</div>\n" \
+"<div class='ok' id='cloudNote' style='display:none'>已由厂商配置，无需填写</div>\n" \
+"<div class='tip'>已经配过家里 Wi-Fi 的，这两格可以留空，直接点下面的「开始使用」。</div>\n" \
 "</div>\n" \
 "<div class='card'>\n" \
-"<div class='b'><b>第二步：华为云 IoTDA</b>（三个值都从控制台抄，见施工单）</div>\n" \
-"<div class='row'><span class='k'>当前云端凭据</span><span class='v' id='csrc'>-</span></div>\n" \
+"<div class='b'><b>第 2 步：开始使用</b></div>\n" \
+"<button id='btnwifi'>开始使用</button>\n" \
+"<div class='tip'>点「开始使用」后，网关会自己连上家里的 Wi-Fi、再连上厂商提供的云端服务，全程不需要您填任何账号或密钥。约 90 秒后本热点会自动关闭，手机掉线属正常现象。</div>\n" \
+"</div>\n" \
+"<!-- 厂商维护面板开始：隐藏入口，连点标题 5 次才会显示。用户流程不涉及这里的任何字段。 -->\n" \
+"<div class='card' id='maint' style='display:none'>\n" \
+"<div class='b'><b>厂商维护（出厂 / 售后使用，用户无需操作）</b></div>\n" \
+"<div class='row'><span class='k'>当前云端凭据</span><span class='v' id='m_csrc'>-</span></div>\n" \
 "<input id='iot_host' placeholder='接入地址：xxxxxx.iot-mqtts.cn-north-4.myhuaweicloud.com' autocomplete='off' autocapitalize='off'>\n" \
 "<input id='iot_dev' placeholder='设备 ID' autocomplete='off' autocapitalize='off'>\n" \
 "<input id='iot_sec' type='password' placeholder='设备密钥（只写不读，保存后永不回显）' autocomplete='off'>\n" \
-"<div class='tip' id='ctip'>三个值都留空 = 不改云端凭据。设备在控制台里被删掉后重新注册，设备 ID 与密钥都会变，必须重填一次。</div>\n" \
-"<button id='btnwifi'>提交并连接</button>\n" \
+"<div class='tip' id='ctip'>三个值都留空 = 不改动。串口 `gwkv set host=… device=… secret=…` 优先级更高：出厂用串口写入后，本页只在显式点「保存云端凭据」时才覆盖。</div>\n" \
+"<button id='btncloud'>保存云端凭据</button>\n" \
 "</div>\n" \
+"<!-- 厂商维护面板结束 -->\n" \
 "<div class='card'>\n" \
-"<div class='b'><b>第三步：扫描并绑定节点</b></div>\n" \
-"<button class='sec' id='btnscan'>开始扫描（约 18 秒）</button>\n" \
+"<div class='b'><b>添加传感器</b>（装机时用，可跳过）</div>\n" \
+"<button class='sec' id='btnscan'>搜索传感器（约 18 秒）</button>\n" \
 "<table><thead><tr><th>SN</th><th>MAC</th><th>信号</th><th>状态</th><th>&nbsp;</th></tr></thead><tbody id='nodes'></tbody></table>\n" \
 "</div>\n" \
 "<div class='card'>\n" \
-"<div class='b'><b>第四步：已绑定节点</b>（白名单，最多 8 个）</div>\n" \
+"<div class='b'><b>已绑定的传感器</b>（最多 8 个）</div>\n" \
 "<table><thead><tr><th>SN</th><th>MAC</th><th>别名</th><th>&nbsp;</th></tr></thead><tbody id='bound'></tbody></table>\n" \
-"<button class='del' id='btnclear'>清空白名单</button>\n" \
+"<button class='del' id='btnclear'>清空全部</button>\n" \
 "</div>\n" \
 "<p class='tip'>本页只访问网关本地接口，不连公网。手机连上本热点后若提示「无法访问互联网」，属正常现象，忽略即可。<br>页面打不开时：请在串口日志里找 <b>http://</b> 那一行，用日志里给的实际地址访问（本机默认 80 端口）。</p>\n" \
 "<script>\n" \
 "var ERR={1600:'不在配网模式：请长按网关配对键 3 秒后再试',1601:'配网窗口已超时，请重新长按配对键',1602:'Wi-Fi 连接失败：确认是 2.4G 网络且口令正确',1603:'网关正忙：请等当前任务结束再试',1604:'请先扫描，再从扫描结果里选择节点',1605:'汇聚设备离线：请检查汇聚供电与串口线',1606:'白名单已满（最多 8 个节点）',400:'填写内容不合法'};\n" \
-"var REASON={bad_ssid:'Wi-Fi 名称不能为空，且不超过 32 个字符',bad_password:'Wi-Fi 口令要 8 到 63 位',open_not_supported:'不支持开放网络（没有口令的热点）',not_found:'2.4G 扫描没找到这个热点：名字打错、它是 5G 网络，或是隐藏网络（请勾选「隐藏网络」）',bad_timeout:'超时时间要 10 到 60 秒',save_failed:'写网关 Flash 失败，请重试或看串口日志',internal:'网关内部错误，请重试',bad_host:'接入地址不能为空（可写成 域名:端口）',bad_host_len:'接入地址太长（不超过 63 个字符）',bad_host_char:'接入地址里有非法字符（空格、引号、中文标点都不行）',bad_device:'设备 ID 不能为空',bad_device_len:'设备 ID 太长（不超过 63 个字符）',bad_device_char:'设备 ID 里有非法字符',bad_secret:'设备密钥不能为空',bad_secret_len:'设备密钥太长（不超过 63 个字符）',bad_secret_char:'设备密钥里有非法字符',bad_port:'端口要 1 到 65535，且和接入地址里写的端口一致',cloud_failed:'云端凭据没保存成功'};\n" \
+"var REASON={bad_ssid:'Wi-Fi 名称不能为空，且不超过 32 个字符',bad_password:'Wi-Fi 口令要 8 到 63 位',open_not_supported:'不支持开放网络（没有口令的热点）',not_found:'2.4G 扫描没找到这个热点：名字打错、它是 5G 网络，或是隐藏网络（请勾选「隐藏网络」）',bad_timeout:'超时时间要 10 到 60 秒',save_failed:'写网关 Flash 失败，请重试或看串口日志',internal:'网关内部错误，请重试'};\n" \
+"/* 厂商维护面板开始：下面这些字段与错误文案只在隐藏面板里出现，用户流程用不到 */\n" \
+"var MREASON={bad_host:'接入地址不能为空（可写成 域名:端口）',bad_host_len:'接入地址太长（不超过 63 个字符）',bad_host_char:'接入地址里有非法字符（空格、引号、中文标点都不行）',bad_device:'设备 ID 不能为空',bad_device_len:'设备 ID 太长（不超过 63 个字符）',bad_device_char:'设备 ID 里有非法字符',bad_secret:'设备密钥不能为空',bad_secret_len:'设备密钥太长（不超过 63 个字符）',bad_secret_char:'设备密钥里有非法字符',bad_port:'端口要 1 到 65535，且和接入地址里写的端口一致',cloud_failed:'云端凭据没保存成功'};\n" \
+"Object.keys(MREASON).forEach(function(k){REASON[k]=MREASON[k]});\n" \
+"/* 厂商维护面板结束 */\n" \
 "var wifiSaved=false;\n" \
 "function q(i){return document.getElementById(i)}\n" \
 "function say(t,bad){var m=q('msg');m.textContent=t||'';m.style.color=bad?'#c33':'#2b7de9'}\n" \
@@ -133,8 +146,10 @@
 " q('hub').textContent=d.hub_online?'在线':'离线';\n" \
 " var i=d.iotda||{};\n" \
 " wifiSaved=!!(d.sta_ssid||d.wifi_saved);\n" \
-" q('cloud').textContent=i.configured?'已配置（不回显）':'未配置（用固件里的默认值）';\n" \
-" q('csrc').textContent=i.host?('接入地址 '+i.host+':'+i.port+' / 设备 '+i.device_id):'-';\n" \
+" /* 面向用户只说「云端服务」；具体凭据细节交给维护面板自己画 */\n" \
+" q('svc').textContent=i.configured?'已配置':'使用出厂配置';\n" \
+" q('cloudNote').style.display=i.configured?'block':'none';\n" \
+" paintMaint(i);\n" \
 " q('bc').textContent=String(d.bound_count)+' / 8';q('sf').textContent=String(d.slots_free);\n" \
 " q('busy').textContent=d.busy==='scan'?'扫描中':(d.busy==='connect'?'连接 Wi-Fi':'空闲');\n" \
 " if(d.sta_ssid){q('ssid').value=d.sta_ssid}\n" \
@@ -182,38 +197,55 @@
 "function scan(){\n" \
 " var b=q('btnscan');b.disabled=true;\n" \
 " api('POST','/api/pair/scan',{duration_s:15}).then(function(d){\n" \
-"  say('已开始扫描，约 '+d.estimate_s+' 秒出结果');setTimeout(loadNodes,1500);setTimeout(function(){b.disabled=false},3000)\n" \
+"  say('已开始搜索，约 '+d.estimate_s+' 秒出结果');setTimeout(loadNodes,1500);setTimeout(function(){b.disabled=false},3000)\n" \
 " }).catch(function(e){b.disabled=false;show(e)})\n" \
 "}\n" \
-"function wifi(){\n" \
+"/* 用户流程：只提交家里 Wi-Fi，绝不带任何云端字段 */\n" \
+"function start(){\n" \
 " var s=q('ssid').value;var p=q('pwd').value;\n" \
-" var h=q('iot_host').value.trim();var d0=q('iot_dev').value.trim();var k=q('iot_sec').value;\n" \
-" var anyCloud=!!(h||d0||k);\n" \
 " var body={hidden:q('hid').checked,timeout_s:30};\n" \
 " if(s){\n" \
 "  if(p.length<8){say('Wi-Fi 口令至少 8 位',1);return}\n" \
 "  body.ssid=s;body.password=p;\n" \
-" }else if(!wifiSaved){say('请填 Wi-Fi 名称：这台网关还没有配过家庭 Wi-Fi',1);return}\n" \
-" if(anyCloud){\n" \
-"  if(!h){say('请填接入地址（控制台「总览 → 接入信息」里那条域名）',1);return}\n" \
-"  if(!d0){say('请填设备 ID',1);return}\n" \
-"  if(!k){say('请填设备密钥（控制台设备详情里可重置，重置后旧密钥立即失效）',1);return}\n" \
-"  body.host=h;body.device_id=d0;body.secret=k;\n" \
-" }\n" \
+" }else if(!wifiSaved){say('请填 Wi-Fi 名称：这台网关还没有配过家里 Wi-Fi',1);return}\n" \
 " var b=q('btnwifi');b.disabled=true;\n" \
 " api('POST','/api/provision/wifi',body).then(function(d){\n" \
-"  q('pwd').value='';q('iot_sec').value='';\n" \
-"  var t=d.connecting?('已提交：'+(d.precheck&&d.precheck.ap_found?'预检找到热点':'未做预检')+'，约 '+(d.settle_s||90)+' 秒后本热点关闭（手机掉线是正常的）'):'云凭据已保存；网关会按「联网 → 取时 → 连 IoTDA」顺序推进，串口逐行打印结果';\n" \
+"  q('pwd').value='';\n" \
+"  var t=d.connecting?('已提交，网关正在连家里的 Wi-Fi：约 '+(d.settle_s||90)+' 秒后本热点关闭（手机掉线是正常的），之后自动连云端服务'):'已保存';\n" \
 "  if(!d.connecting){b.disabled=false}\n" \
 "  say(t);\n" \
 "  setTimeout(refresh,2000)\n" \
 " }).catch(function(e){b.disabled=false;show(e)})\n" \
 "}\n" \
+"/* 厂商维护面板开始：仅出厂/售后使用 */\n" \
+"function paintMaint(i){\n" \
+" q('m_csrc').textContent=i.host?('接入地址 '+i.host+':'+i.port+' / 设备 '+i.device_id):'-';\n" \
+"}\n" \
+"function saveCloud(){\n" \
+" var h=q('iot_host').value.trim();var d0=q('iot_dev').value.trim();var k=q('iot_sec').value;\n" \
+" if(!h&&!d0&&!k){say('三个值都为空：没有改动');return}\n" \
+" if(!h){say(MREASON.bad_host,1);return}\n" \
+" if(!d0){say(MREASON.bad_device,1);return}\n" \
+" if(!k){say(MREASON.bad_secret,1);return}\n" \
+" var b=q('btncloud');b.disabled=true;\n" \
+" api('POST','/api/config',{host:h,device_id:d0,secret:k}).then(function(){\n" \
+"  q('iot_sec').value='';b.disabled=false;say('云端凭据已保存（密钥不回显）');setTimeout(refresh,1500)\n" \
+" }).catch(function(e){b.disabled=false;show(e)})\n" \
+"}\n" \
+"var mt=0,mtTimer=null;\n" \
+"function titleTap(){\n" \
+" mt++;\n" \
+" if(mtTimer){clearTimeout(mtTimer)}\n" \
+" mtTimer=setTimeout(function(){mt=0},1500);\n" \
+" if(mt>=5){mt=0;q('maint').style.display='block';say('厂商维护面板已打开（用户无需使用）')}\n" \
+"}\n" \
+"/* 厂商维护面板结束 */\n" \
 "function clearAll(){\n" \
 " if(!confirm('确定清空全部已绑定节点？')){return}\n" \
 " api('POST','/api/pair/bind',{op:'clear',confirm:'CLEAR'}).then(function(){say('白名单已清空');loadNodes()}).catch(show)\n" \
 "}\n" \
-"q('btnwifi').onclick=wifi;q('btnscan').onclick=scan;q('btnclear').onclick=clearAll;\n" \
+"q('btnwifi').onclick=start;q('btncloud').onclick=saveCloud;q('title').onclick=titleTap;\n" \
+"q('btnscan').onclick=scan;q('btnclear').onclick=clearAll;\n" \
 "refresh();loadNodes();scanList();setInterval(refresh,2000);\n" \
 "</script>\n" \
 "</body>\n" \

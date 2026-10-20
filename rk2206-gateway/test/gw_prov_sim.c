@@ -429,6 +429,46 @@ static void advance(uint32_t ms)
 }
 
 /* 一次"curl"：走真路由函数 */
+/* t151：页面里的"厂商维护面板"区域 = 第一次出现「厂商维护面板开始」到最后一次
+ * 出现「厂商维护面板结束」之间的全部内容（HTML 面板 + JS 常量块）。
+ * 用途：把"用户可见部分不许出现云端凭据字段"做成可执行的断言，而不是靠人肉 grep。 */
+static const char *const K_PANEL_BEGIN = "厂商维护面板开始";
+static const char *const K_PANEL_END   = "厂商维护面板结束";
+
+static int in_any_panel(const char *page, const char *p)
+{
+    const char *b = page;
+
+    while ((b = strstr(b, K_PANEL_BEGIN)) != NULL) {
+        const char *e = strstr(b, K_PANEL_END);
+        if (e == NULL) {
+            return 0;
+        }
+        if (p >= b && p <= e) {
+            return 1;
+        }
+        b = e + strlen(K_PANEL_END);
+    }
+    return 0;
+}
+
+static int only_in_panel(const char *page, const char *needle)
+{
+    const char *p;
+    int found = 0;
+
+    if (page == NULL || needle == NULL) {
+        return 0;
+    }
+    for (p = page; (p = strstr(p, needle)) != NULL; p += strlen(needle)) {
+        if (!in_any_panel(page, p)) {
+            return 0;              /* 有一处落在任何面板区间之外就不算"只在面板里" */
+        }
+        found = 1;
+    }
+    return found;
+}
+
 static int call(const char *method, const char *path, const char *body,
                 char *out, uint32_t cap, const char **ctype, const char **literal,
                 uint32_t *literal_len, int quiet)
@@ -858,8 +898,8 @@ static void t_cloud_creds(void)
     check(gw_prov_enter(&g_prov, s_mono) == 0, "重新进入配网窗口");
 
     st = call("GET", "/", NULL, out, sizeof(out), &ctype, &lit, &lit_len, 1);
-    check(st == 200 && lit != NULL && has(lit, "id='iot_host'") && has(lit, "id='iot_dev'") &&
-          has(lit, "id='iot_sec'"), "配置页有三个云端输入框（地址/设备 ID/密钥）");
+    check(st == 200 && lit != NULL && only_in_panel(lit, "iot_host") && only_in_panel(lit, "iot_dev") &&
+          only_in_panel(lit, "iot_sec"), "三个云端输入框只剩在厂商维护面板里（t151）");
     check(lit != NULL && has(lit, "已配置"), "配置页有“已配置（不回显）”的回显位");
     check(lit != NULL && strchr(lit, '"') == NULL, "改完的页面仍然没有双引号");
 
@@ -986,6 +1026,63 @@ static void t_wifi_scan_cache(void)
     sim_scan_reset();
 }
 
+/* t151：面向用户只剩两步；云端凭据收进「连点标题 5 次」的厂商维护面板 */
+static void t_vendor_page(void)
+{
+    char out[6144];
+    const char *lit = NULL;
+    uint32_t lit_len = 0;
+    int st;
+
+    printf("\n[?] t151：用户只配 Wi-Fi，云端凭据属厂商侧\n");
+    st = call("GET", "/", NULL, out, sizeof(out), NULL, &lit, &lit_len, 1);
+    check(st == 200 && lit != NULL, "GET / 返回页面");
+    if (lit == NULL) {
+        return;
+    }
+    check(has(lit, "第 1 步") && has(lit, "第 2 步"), "首页流程只剩「第 1 步 / 第 2 步」");
+    check(!has(lit, "第 3 步") && !has(lit, "第 4 步") && !has(lit, "第三步") && !has(lit, "第四步"),
+          "没有第 3/4 步：节点操作改成不带步号的独立小节");
+    check(has(lit, ">开始使用<"), "第 2 步的按钮是「开始使用」");
+    check(!has(lit, "提交并连接"), "旧的「提交并连接」按钮已不存在");
+
+    check(has(lit, "已由厂商配置，无需填写"), "有「已由厂商配置，无需填写」提示位");
+    check(has(lit, "cloudNote") && has(lit, "i.configured"),
+          "该提示按 iotda.configured 显隐（Flash 里有云凭据才显示）");
+
+    check(only_in_panel(lit, "iot_host") && only_in_panel(lit, "iot_dev") && only_in_panel(lit, "iot_sec"),
+          "三个云端输入框只出现在维护面板里");
+    check(only_in_panel(lit, "接入地址") && only_in_panel(lit, "设备 ID") && only_in_panel(lit, "设备密钥"),
+          "「接入地址 / 设备 ID / 设备密钥」字样也只出现在维护面板里");
+    check(!only_in_panel(lit, "开始使用"), "对照组：面板外的字样被判为「不在面板里」（断言不是白过）");
+    check(has(lit, "id='maint'") && has(lit, "titleTap") && has(lit, "mt>=5"),
+          "隐藏入口：连点标题 5 次才显示维护面板");
+    check(has(lit, "/api/config"), "维护面板保存走 POST /api/config");
+
+    st = call("POST", "/", NULL, out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 405, "POST / 仍然 405");
+
+    /* ① 厂商面板：只发三件套也能写（/api/config 是 /api/provision/wifi 的别名）。
+     *    先跑这条：Wi-Fi 提交会让网关进入 busy=connect，之后到 settle 结束前一律 409。 */
+    s_cloud_save_calls = 0;
+    check(gw_prov_enter(&g_prov, s_mono) == 0, "重新进入配网窗口");
+    st = call("POST", "/api/config",
+              "{\"host\":\"iot.example.com\",\"device_id\":\"D1\",\"secret\":\"s3cret123\"}",
+              out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 200 && s_cloud_save_calls == 1, "POST /api/config 能只写云端凭据（别名路由）");
+
+    /* ② 用户流程：只发 Wi-Fi，不碰云端凭据 */
+    s_cloud_save_calls = 0;
+    s_scan_rc = 1;
+    st = call("POST", "/api/provision/wifi", "{\"ssid\":\"HOME-2.4G\",\"password\":\"home12345\"}",
+              out, sizeof(out), NULL, NULL, NULL, 1);
+    check(st == 200, "用户只填 Wi-Fi → 200");
+    check(s_cloud_save_calls == 0, "用户流程一个云端字段都不写（出厂/串口写的值不会被覆盖）");
+
+    s_scan_rc = 0;
+    gw_prov_exit(&g_prov, s_mono);
+}
+
 static void t_auto_boot(void)
 {
     uint32_t i;
@@ -1038,6 +1135,7 @@ int main(void)
     t_cloud_commands();
     t_cloud_creds();
     t_wifi_scan_cache();
+    t_vendor_page();
     t_auto_boot();
 
     printf("\n=== 通过 %d / 失败 %d ====\n", s_pass, s_fail);   /* 四个等号：与 gw_selftest.c / tools/gw-host-test.sh 的判定串一致 */
