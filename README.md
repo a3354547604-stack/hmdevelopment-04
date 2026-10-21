@@ -59,45 +59,17 @@
 **能算"跑通"的口径**：不依赖硬件的自测（编译检查、契约检查、mock、单元测试）已经全绿；
 **只有上板/上云实测过的能力才写"已验证"**，其余一律标"待实测"（清单见 `docs/技术笔记/` 与各施工单）。
 
-## 如何跑起来
+## 怎么跑起来（只给入口，细节在对应文档）
 
-### 服务器
+| 部分 | 一步 | 详细步骤 |
+|---|---|---|
+| 服务器 + 演示数据 | `cd server && docker compose up -d --build`，再 `bash tools/demo-check.sh`（全绿 = D1–D7 判据通过） | `server/README.md`、`docs/执行/演示环境搭建执行单.md` |
+| WS63 固件（节点/汇聚） | `bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh m1 m2 m4 hub` | `docs/执行/上板联调施工单.md` |
+| 烧录 / 抓串口 | `tools/ws63flash-port.exe '<fwpkg>' app <COMxx> '<log>'`（**参数不全会烧错板**）；抓串口用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/serial-capture.ps1 -Port <COMxx> -Seconds 60 -Out '<log>' -Reset` | 同上施工单 |
+| 鸿蒙 App / 安卓 App | `bash harmony-app/tools/build-hap.sh`、`bash harmony-app/tools/run-selfcheck.sh`；安卓为原生 Kotlin（与鸿蒙端同功能），构建随交付材料 | `harmony-app/deliverables/` |
 
-```bash
-cd server && docker compose up -d --build
-docker compose ps                                     # db / api 都 healthy
-curl -s http://127.0.0.1:3000/api/health
-docker compose exec api python -m app.seed --demo      # 灌演示数据
-bash tools/demo-check.sh                               # 全绿 = D1–D7 判据通过
-```
+接线以 `docs/技术/引脚与接线表.md` 为准；镜像在 `ws63-firmware/out/`（约 1.4 MB/包）与 `rk2206-gateway/out/gateway-Firmware.img`（2 MB）。
 
-### WS63 固件（节点 / 汇聚）
-
-```bash
-# 编译：工具链在 Docker 镜像 ws63wsl:latest 里，四目标一次出包
-bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh m1 m2 m4 hub
-
-# 烧录：工具只认 Windows 绝对路径；参数不全会按默认值直接开烧（会烧错板），必须带全
-./tools/ws63flash-port.exe '<仓库根>\ws63-firmware\out\NODE_M1.fwpkg' app COM15 '<日志路径>'
-
-# 抓串口（本机无 pwsh，一律 powershell.exe -File）
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/serial-capture.ps1 -Port COM15 -Seconds 60 -Out '<日志>' -Reset
-```
-
-镜像与接线：节点/汇聚产物在 `ws63-firmware/out/`（约 1.4 MB/包），网关镜像 `rk2206-gateway/out/gateway-Firmware.img`（2 MB）。
-接线以 `docs/技术/引脚与接线表.md` 为准；网关↔汇聚三线见该表 §2。
-
-### 鸿蒙 App
-
-```bash
-source ~/harmony-toolchain/env.sh && cd harmony-app
-bash tools/build-hap.sh          # 含构建门禁自证，产出 HAP
-bash tools/run-selfcheck.sh      # 无设备自检：真实网络层 + Mock 传输层
-```
-
-### 安卓 App
-
-**原生 Kotlin**，与鸿蒙端功能一致；构建与安装步骤随交付材料给出（同一套后端接口，服务器地址已写死在 App 内，用户不填）。
 
 ## 说明与免责
 
