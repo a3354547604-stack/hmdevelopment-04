@@ -148,6 +148,7 @@ bash tools/demo-check.sh                            # 逐条核对 D1–D7；全
 | 18 | GET | `/api/health` | §6.20 | 免鉴权；DB 不可用 → 503 且 `db:"down"` |
 | — | GET | `/api/time` | v1.2 | 免鉴权；网关联网后先取 UTC 再连 IoTDA |
 | — | POST | `/api/iotda/webhook?token=` | §5 | 内部接口：IoTDA 规则引擎/转发目标调用 |
+| — | POST | `/api/device/activate` | 补充（r7） | **厂商侧出厂建档**，不走用户 JWT，只认 `X-Product-Key`；`PRODUCT_KEY` 留空则整体 404。详见 §5.24 |
 
 ## 5. curl 示例（实测输出）
 
@@ -846,6 +847,80 @@ $ curl -s -X POST 'http://127.0.0.1:3000/api/iotda/webhook?token=wrong-token' -H
 
 `HTTP 401`
 
+#### 24 厂商侧出厂注册（`POST /api/device/activate`，t152，非用户 API）
+
+> 为什么需要它：`POST /api/devices/bind` 要求 `devices` 行**先存在**，而只有 `seed` 会造行；
+> 公网 `APP_ENV=prod` 跑不了 `seed --demo`，于是网关经 IoTDA 转发上来的数据会一路 `device_not_found`、
+> App 也绑不上。这条接口就是给产线/发货前建空白设备行用的。
+
+- **鉴权**：请求头 `X-Product-Key`，与服务器环境变量 `PRODUCT_KEY` 常量时间比较。
+  `PRODUCT_KEY` 留空 ⇒ **整个接口 404**（与不存在的路由不可区分，不暴露接口存在性）。
+- **不是用户凭证**：不走 JWT、不下发 App；泄露最多能建空白行（`owner_id=0`、无绑定码、无 `iotda_device_id`），
+  读不到也改不了任何已有设备。`docker-compose.yml` / `.prod.yml` 都以 `${PRODUCT_KEY:-}` 透传，**刻意不做成必填**
+  （已有部署不该因为多一条厂线接口而起不来）；要开出厂建档就在 `.env` 里填它。
+- **SN 规则**同契约 §6.5：`^[A-Za-z0-9_-]{3,32}$`（**注意：`"M0"` 只有 2 字符，会被拒 400/1201**）。
+- **幂等**：同 SN 再发返回同一 `device_id` 且 `created=false`，且**不覆盖**已有 `name`。
+  成功统一 HTTP 200，用 `created` 区分新建/已存在（上线重放时状态码不会 201↔200 抖动）。
+
+```bash
+# 首次建档（新 SN）→ created=true
+$ curl -s -X POST http://127.0.0.1:3000/api/device/activate \
+    -H 'X-Product-Key: test-key' -H 'Content-Type: application/json' \
+    -d '{"sn":"M0-T152-DEMO","name":"产线样例"}'
+```
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "device_id": 3,
+    "sn": "M0-T152-DEMO",
+    "created": true
+  },
+  "ts": 1792551814715
+}
+```
+
+```bash
+# 同一 SN 再发（幂等）→ 同一 device_id、created=false
+$ curl -s -X POST http://127.0.0.1:3000/api/device/activate \
+    -H 'X-Product-Key: test-key' -H 'Content-Type: application/json' \
+    -d '{"sn":"M0-T152-DEMO","name":"另一个名字"}'
+```
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "device_id": 3,
+    "sn": "M0-T152-DEMO",
+    "created": false
+  },
+  "ts": 1792551814722
+}
+```
+
+```bash
+# key 错 / 没带 → 401 + 1501；SN 非法 → 400 + 1201
+$ curl -s -X POST http://127.0.0.1:3000/api/device/activate \
+    -H 'X-Product-Key: wrong' -H 'Content-Type: application/json' -d '{"sn":"M0-X9"}'
+{"code":1501,"message":"上游 IoTDA 不可用","data":{"field":"X-Product-Key"},"ts":1792551805581}
+
+$ curl -s -X POST http://127.0.0.1:3000/api/device/activate \
+    -H 'X-Product-Key: test-key' -H 'Content-Type: application/json' -d '{"sn":"M0"}'
+{"code":1201,"message":"绑定码错误","data":{"field":"sn","expected":"^[A-Za-z0-9_-]{3,32}$"},"ts":1792551805588}
+```
+
+- **限流**：同一 IP 每秒 5 次（`PRODUCT_KEY_RATE_LIMIT` / `PRODUCT_KEY_RATE_WINDOW_S`），超出 429/1105；
+  与登录限流**分桶**（混用会让产线刷设备把用户登录打成 429）。
+- **口径说明**：`1501` 在 §9.2 的语义是「上游 IoTDA 不可用」，这里复用它表示「厂商凭证校验失败」并显式覆盖
+  HTTP 状态为 401（契约 §9.2 没有厂商侧专用码，属已登记差异，见 §9 第 10 条）；`1201` 原义「绑定码错误」，
+  这里借其「设备侧标识无效」语义表达 SN 不合法（同样是已登记差异）。
+- 落地位置：`app/routers/vendor.py`、`app/config.py`（`product_key` 三项）、`app/security.py::activate_limiter`、
+  `tests/test_85_vendor_activate.py`（17 例）。
+
 ## 6. IoTDA 平台侧配置（契约 §5）
 
 1. **数据转发 → 规则**：触发资源勾选 `device.property`（属性上报）、`device.event`（事件）、`device.message`（消息）；
@@ -883,9 +958,10 @@ docker compose run --rm --no-deps -e DB_HOST=db api python -m pytest
 cd server && python -m pytest
 ```
 
-- 共 **102 例**：表结构/唯一键（`test_00`）、健康与校时（`test_10`）、注册登录与限流（`test_20`）、
+- 共 **133 例**：表结构/唯一键（`test_00`）、健康与校时（`test_10`）、注册登录与限流（`test_20`）、
   设备/绑定/阈值/下发/演示（`test_30`）、告警列表/详情/处置/重推（`test_40`）、报表（`test_50`）、
-  webhook 三条链路与幂等（`test_60`）、mock 虚拟网关与调度器（`test_70`）
+  webhook 三条链路与幂等（`test_60`）、mock 虚拟网关与调度器（`test_70`）、演示数据包（`test_80`）、
+  厂商侧出厂注册（`test_85`，17 例）
 - **测试库隔离**：pytest 会 `TRUNCATE` 业务表，因此 conftest 强制把 `DB_NAME` 指向 `<DB_NAME>_test`
   （库与授权由 `db/init/15-test-db.sh` 首次初始化时建好）。跑测试不会再清掉演示数据；
   若用的是**已存在**的数据卷，执行一次：
@@ -916,6 +992,7 @@ cd server && python -m pytest
 | 11 | §6.9 `items` 为 **21 项**，`gas_l1_to_l2_s` 不在其中 | PM D-01 裁定：该键是 §8.2 算法参数（P0 固定 60 s），不进 `items`、PUT 即 `1003` 未知键；要开放运行时配置须走契约变更。列为 `settings_keys.ALGORITHM_PARAMS` 备查 |
 | 12 | §6.11 `accepted`/`rejected` 为**字符串数组**（元素=键名） | PM D-05 裁定（契约 939 行示例 + 942 行注）；被拒原因另放可选 `reasons`（键名→原因），无拒绝项则省略该键。App 侧 `Types.ets` 已按 `string[]` 实现，服务器对齐 |
 | 13 | §6.13 `status` 未知取值 → `1001`；§6.14 `dispositions[].ts` | 均按契约字面收紧（原先分别是 1002 与 `at`，见 t18 复核 F-02/F-03）；App 详情页按 `ts` 取处置时间 |
+| 14 | 厂商侧 `POST /api/device/activate`（**非用户 API**，契约 §14 r7 登记） | §9.2 没有厂商侧专用码：key 错复用 `1501` 并显式覆盖 HTTP 401（`1501` 原义「上游 IoTDA 不可用」）；SN 非法复用 `1201`（原义「绑定码错误」），靠 `data.field/data.expected` 指明是 SN。两处都是**已登记的口径差异**，不新增码表项（避免为一条厂线接口动 §9.2 全局码表） |
 
 ## 10. 安全与交付要求
 

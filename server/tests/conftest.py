@@ -19,13 +19,17 @@ os.environ.setdefault("SCHEDULER_ENABLED", "0")   # 测试里手动调 tick_once
 os.environ.setdefault("IOTDA_DISPATCH_MODE", "mock")
 os.environ.setdefault("PUSH_MODE", "mock")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
+# 厂商侧出厂注册（t152）：测试库固定一个产品密钥；「未配置 → 404」的用例改用 monkeypatch 关闭。
+# 用**强制赋值**而不是 setdefault：宿主机/CI 可能已导出 PRODUCT_KEY（例如按 README 联调时），
+# 那样 setdefault 不会覆盖，测试就会拿错密钥而假红（t152 实测踩过）。
+os.environ["PRODUCT_KEY"] = "test-product-key"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import db, middleware, state  # noqa: E402
 from app.main import app  # noqa: E402
-from app.security import hash_password, login_limiter  # noqa: E402
+from app.security import activate_limiter, hash_password, login_limiter  # noqa: E402
 from app.seed import BUSINESS_TABLES  # noqa: E402
 from app.services.scheduler import recompute_activity  # noqa: E402
 from app.timeutil import cst_day_bounds_ms, ms_to_cst_date, ms_to_dt, now_ms  # noqa: E402
@@ -54,6 +58,7 @@ def clean_state(database):
     state.reset()
     middleware.reset()
     login_limiter.reset()   # 限流器是进程内状态，不清会让后续测试莫名 429
+    activate_limiter.reset()  # 出厂注册限流是另一个桶（t152），同样要清
     yield
 
 

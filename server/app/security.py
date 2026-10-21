@@ -88,3 +88,5 @@ class LoginRateLimiter:
 
 
 login_limiter = LoginRateLimiter(settings.login_rate_limit, settings.login_rate_window_s)
+# 厂商侧出厂注册（t152）单独一个桶：它和登录是两种攻击面，混用会让厂商改产线时把用户登录打成 429
+activate_limiter = LoginRateLimiter(settings.product_key_rate_limit, settings.product_key_rate_window_s)

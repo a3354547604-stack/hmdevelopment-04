@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import db, middleware
 from .config import settings
 from .errors import ApiError, ok
-from .routers import alerts, auth, devices, push, reports, webhook
+from .routers import alerts, auth, devices, push, reports, vendor, webhook
 from .services.scheduler import scheduler
 from .timeutil import now_ms
 
@@ -142,6 +142,7 @@ async def _unhandled_handler(_: Request, exc: Exception) -> JSONResponse:
 
 app.include_router(auth.router)
 app.include_router(devices.router)
+app.include_router(vendor.router)   # t152：厂商侧出厂注册（非用户 API，X-Product-Key 鉴权）
 app.include_router(alerts.router)
 app.include_router(reports.router)
 app.include_router(push.router)

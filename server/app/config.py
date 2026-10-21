@@ -70,6 +70,11 @@ class Settings:
     jwt_algorithm: str = "HS256"
     jwt_expire_days: int = 7
     webhook_token: str = DEV_WEBHOOK_TOKEN
+    # 厂商侧出厂注册密钥（§6 补充接口 POST /api/device/activate，见 README「设备出厂注册」）：
+    # 留空 = 接口整体 404（不暴露存在性）；它不是用户凭证，绝不发给 App，也不进 JWT。
+    product_key: str = ""
+    product_key_rate_limit: int = 5        # 出厂注册：同一 IP 每秒最多 5 次
+    product_key_rate_window_s: int = 1
 
     # 业务常量（契约 §8）
     bind_code_ttl_min: int = 10          # §6.6 绑定码有效期 10 分钟
@@ -117,6 +122,9 @@ class Settings:
             jwt_secret=_str("JWT_SECRET", DEV_JWT_SECRET),
             jwt_expire_days=_int("JWT_EXPIRE_DAYS", 7),
             webhook_token=_str("WEBHOOK_TOKEN", DEV_WEBHOOK_TOKEN),
+            product_key=_str("PRODUCT_KEY"),
+            product_key_rate_limit=_int("PRODUCT_KEY_RATE_LIMIT", 5),
+            product_key_rate_window_s=_int("PRODUCT_KEY_RATE_WINDOW_S", 1),
             gateway_offline_timeout_s=_int("GATEWAY_OFFLINE_TIMEOUT_S", 180),
             clock_source=_str("CLOCK_SOURCE", "server").lower(),
             iotda_dispatch_mode=_str("IOTDA_DISPATCH_MODE", "mock").lower(),

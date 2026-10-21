@@ -75,6 +75,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?生产必须设置随机 JWT_SECRET}
       JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
       WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:?生产必须设置随机 WEBHOOK_TOKEN}
+      # 厂商侧出厂注册（t152）：可选。**留空 = 接口整体 404**（不暴露存在性）；
+      # 这里刻意**不做成必填**——已有的生产部署不该因为多一条厂线接口而起不来。
+      PRODUCT_KEY: ${PRODUCT_KEY:-}
       IOTDA_DISPATCH_MODE: ${IOTDA_DISPATCH_MODE:-mock}
       IOTDA_ENDPOINT: ${IOTDA_ENDPOINT:-}
       IOTDA_PROJECT_ID: ${IOTDA_PROJECT_ID:-}

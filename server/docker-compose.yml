@@ -53,6 +53,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
       JWT_EXPIRE_DAYS: ${JWT_EXPIRE_DAYS:-7}
       WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:-dev-webhook-token-change-me}
+      # 厂商侧出厂注册（t152）：留空 = 接口关闭（404）；它不是用户凭证，不需要给 App
+      PRODUCT_KEY: ${PRODUCT_KEY:-}
       IOTDA_DISPATCH_MODE: ${IOTDA_DISPATCH_MODE:-mock}
       IOTDA_ENDPOINT: ${IOTDA_ENDPOINT:-}
       IOTDA_PROJECT_ID: ${IOTDA_PROJECT_ID:-}
