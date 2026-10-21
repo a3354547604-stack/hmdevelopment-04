@@ -22,7 +22,7 @@ bash tools/run-selfcheck.sh
 python3 tools/make-previews.py && python3 tools/check-previews.py
 ```
 
-预期结果：`BUILD SUCCESSFUL`、自检 **28/28 PASS**（t22 加 §4.3 十四属性/mac/服务器 message 三项、t42 加演示事件两项）、预览图 **6/6 PASS**。
+预期结果：`BUILD SUCCESSFUL`、自检 **50/50 PASS**（现值 50 项，t153；历史链条 26 → 28 → 30 → 34（t65）→ 43（t145）→ 47（t150）→ 50）、预览图 **6/6 PASS**。
 三项都会写/读 `deliverables/` 下的产物。
 
 **为什么 build 脚本要先做"门禁自证"**：hvigor 只编译从入口可达的文件——
