@@ -1,0 +1,441 @@
+LD6002C 实物接线 —— 实时收包判通证据
+采集时间: 2026-10-16 16:34 ~ 16:37 (CST)
+硬件: E528H-WS63 (COM14, 115200 8N1) + HLK-LD6002C 已接上
+固件: build=Oct 16 2026 13:55:16 (sensor_hub, 未重烧, 板子一直在跑)
+命令: powershell -File C:\Users\Administrator\ws63-tools\ser.ps1 -Action listen -Seconds <N>
+
+判定结论:
+  * UART 五根线(3V3/GND/BOOT1->GND/TX0->IO07/RX0->IO08)全部判通
+  * rx_total 单调增长, bad=0, drop=0 —— 113,927 帧无一位校验错
+  * 0x0E02(跌倒状态) ~24 帧/s 持续上报, is_fall=0(正常), 无跌倒事件
+  * fall_evt=0 state=0 tx2=0 tx2_edges=0 —— 跌倒触发与 TX2 通道仍待验证
+
+################################################################
+# 抓包 1: 20 秒被动监听 (16:34)
+################################################################
+LISTEN COM14 @ 115200 for 20s
+APP|[SYS INFO] mem: used:137236, free:219072; log: drop/all[0/0], at_recv 0.
+---- round 2384 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    4 mV
+  ADC ch5 =    1 mV
+---- round 2385 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    9 mV
+  ADC ch5 =    2 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2386 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   13 mV
+[RADAR] types 0E02=93859 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=15643
+[RADAR] alive rx_total=1095057 drop=0 ok=109503 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+---- round 2387 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    4 mV
+  ADC ch5 =    0 mV
+---- round 2388 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    1 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+APP|[SYS INFO] mem: used:137228, free:219080; log: drop/all[0/0], at_recv 0.
+---- round 2389 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    7 mV
+  ADC ch5 =   32 mV
+---- round 2390 ----
+  ADC ch2 =    0 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    4 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2391 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   13 mV
+---- round 2392 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+[RADAR] types 0E02=94097 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=15682
+[RADAR] alive rx_total=1097827 drop=0 ok=109780 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+---- round 2393 ----
+  ADC ch2 =    3 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+
+CLOSED
+
+################################################################
+# 抓包 2: 120 秒 (16:35~16:37, 期间未做跌倒动作)
+################################################################
+LISTEN COM14 @ 115200 for 120s
+---- round 2427 ----
+  ADC ch2 =    0 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =   19 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2428 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    1 mV
+[RADAR] types 0E02=95518 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=15919
+[RADAR] alive rx_total=1114407 drop=0 ok=111438 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+APP|[SYS INFO] mem: used:137240, free:219068; log: drop/all[0/0], at_recv 0.
+---- round 2429 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    1 mV
+---- round 2430 ----
+  ADC ch2 =   15 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2431 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    1 mV
+---- round 2432 ----
+  ADC ch2 =    0 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2433 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    3 mV
+APP|[SYS INFO] mem: used:137240, free:219068; log: drop/all[0/0], at_recv 0.
+---- round 2434 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    0 mV
+[RADAR] types 0E02=95755 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=15959
+[RADAR] alive rx_total=1117177 drop=0 ok=111715 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+---- round 2435 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   10 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2436 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =   16 mV
+---- round 2437 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    1 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2438 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   43 mV
+APP|[SYS INFO] mem: used:137236, free:219072; log: drop/all[0/0], at_recv 0.
+---- round 2439 ----
+  ADC ch2 =    9 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+---- round 2440 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =   27 mV
+[RADAR] types 0E02=95992 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=15998
+[RADAR] alive rx_total=1119937 drop=0 ok=111991 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2441 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    6 mV
+  ADC ch5 =   32 mV
+---- round 2442 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    3 mV
+  ADC ch5 =   16 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2443 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    1 mV
+APP|[SYS INFO] mem: used:137372, free:218936; log: drop/all[0/0], at_recv 0.
+---- round 2444 ----
+  ADC ch2 =    0 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    3 mV
+  ADC ch5 =    9 mV
+---- round 2445 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   42 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2446 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    0 mV
+[RADAR] types 0E02=96229 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=16038
+[RADAR] alive rx_total=1122707 drop=0 ok=112268 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+---- round 2447 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2448 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    8 mV
+  ADC ch5 =   44 mV
+APP|[SYS INFO] mem: used:137240, free:219068; log: drop/all[0/0], at_recv 0.
+---- round 2449 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    9 mV
+  ADC ch5 =   33 mV
+---- round 2450 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    1 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2451 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+---- round 2452 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+[RADAR] types 0E02=96466 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=16077
+[RADAR] alive rx_total=1125467 drop=0 ok=112544 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2453 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   31 mV
+APP|[SYS INFO] mem: used:137236, free:219072; log: drop/all[0/0], at_recv 0.
+---- round 2454 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =   11 mV
+  ADC ch5 =   30 mV
+---- round 2455 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    3 mV
+  ADC ch5 =    4 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2456 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    9 mV
+  ADC ch5 =   22 mV
+---- round 2457 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    9 mV
+  ADC ch5 =   13 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2458 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    1 mV
+[RADAR] types 0E02=96703 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=16117
+[RADAR] alive rx_total=1128237 drop=0 ok=112821 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+APP|[SYS INFO] mem: used:137236, free:219072; log: drop/all[0/0], at_recv 0.
+---- round 2459 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    5 mV
+  ADC ch5 =    0 mV
+---- round 2460 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   45 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2461 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    4 mV
+  ADC ch5 =    0 mV
+---- round 2462 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =   15 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2463 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    8 mV
+  ADC ch5 =   35 mV
+APP|[SYS INFO] mem: used:137384, free:218924; log: drop/all[0/0], at_recv 0.
+---- round 2464 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    9 mV
+  ADC ch5 =   37 mV
+[RADAR] types 0E02=96940 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=16156
+[RADAR] alive rx_total=1130997 drop=0 ok=113097 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+---- round 2465 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    3 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2466 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =   39 mV
+---- round 2467 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2468 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    3 mV
+  ADC ch5 =   24 mV
+APP|[SYS INFO] mem: used:137240, free:219068; log: drop/all[0/0], at_recv 0.
+---- round 2469 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+---- round 2470 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    3 mV
+  ADC ch5 =   10 mV
+[RADAR] types 0E02=97177 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=16196
+[RADAR] alive rx_total=1133777 drop=0 ok=113374 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2471 ----
+  ADC ch2 =    0 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    5 mV
+  ADC ch5 =    0 mV
+---- round 2472 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    8 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2473 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   17 mV
+APP|[SYS INFO] mem: used:137236, free:219072; log: drop/all[0/0], at_recv 0.
+---- round 2474 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   45 mV
+---- round 2475 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    3 mV
+  ADC ch5 =   38 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+[RADAR] types 0E02=97414 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=16235
+[RADAR] alive rx_total=1136527 drop=0 ok=113650 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+---- round 2476 ----
+  ADC ch2 =    2 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    8 mV
+  ADC ch5 =   15 mV
+---- round 2477 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2478 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   41 mV
+APP|[SYS INFO] mem: used:137236, free:219072; log: drop/all[0/0], at_recv 0.
+---- round 2479 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =   10 mV
+  ADC ch5 =    0 mV
+---- round 2480 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    0 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2481 ----
+  ADC ch2 =    0 mV
+  ADC ch3 =    2 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    1 mV
+[RADAR] types 0E02=97651 0E01=0 0E04=0 0E06=1 0E08=0 0E0A=0 0E0C=0 0E0E=0 other=16275
+[RADAR] alive rx_total=1139297 drop=0 ok=113927 bad=0 tx=1 fall_evt=0 state=0 tx2=0 tx2_edges=0
+---- round 2482 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   42 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2483 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    0 mV
+  ADC ch5 =   26 mV
+APP|[SYS INFO] mem: used:137236, free:219072; log: drop/all[0/0], at_recv 0.
+---- round 2484 ----
+  ADC ch2 =    0 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =    1 mV
+---- round 2485 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =   11 mV
+[SLE-HUB] alive. conn_hdl=0x0 server_id=0x1
+---- round 2486 ----
+  ADC ch2 =    1 mV
+  ADC ch3 =    1 mV
+  ADC ch4 =    1 mV
+  ADC ch5 =   42 mV
+
+CLOSED
