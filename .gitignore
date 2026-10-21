@@ -61,3 +61,6 @@ docs/赛事资料/training.md
 # §5.6 一直写「该目录不入库」，但此前没有任何规则强制它（t102 点名、t103 补上）。
 # 成品视频仍走 docs/参赛材料/dist/——既有第 2 行 `dist/` 规则照旧覆盖，未受影响。
 harmony-app/deliverables/现场素材/
+
+# 烧录工具运行目录（用户从旧机拷入的 exe/日志，不入库；源码见 tools/ws63flash-port.cs）
+ws63-firmware/flasher/
