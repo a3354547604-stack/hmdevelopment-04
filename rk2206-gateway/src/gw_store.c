@@ -29,6 +29,7 @@
 #include <string.h>
 
 #include "gw_config.h"
+#include "gw_plat.h"
 #include "gw_store.h"
 
 #include "lz_hardware.h"
@@ -134,8 +135,10 @@ int gw_store_init(void)
     if (s_inited != 0u) {
         return 0;
     }
-    /* VendorGet/VendorSet 内部依赖 Flash 就绪（SDK 的 set_wifi_config() 也是先 FlashInit） */
-    if (FlashInit() != 0u) {
+    /* VendorGet/VendorSet 内部依赖 Flash 就绪（SDK 的 set_wifi_config() 也是先 FlashInit）。
+     * 用 gw_plat_flash_init()：它先读探测、只在控制器确实没起来时才 FlashInit，
+     * 避免把「SDK 已初始化过」（再次 FlashInit 必返 FAILURE）误判成 Flash 不可用。 */
+    if (gw_plat_flash_init() != 0) {
         return -1;
     }
     s_inited = 1u;

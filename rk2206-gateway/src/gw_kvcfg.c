@@ -363,6 +363,10 @@ int gw_kvcfg_store(const gw_kvcfg_t *c, char *err, uint32_t cap)
     int rc;
     int n;
 
+    /* Flash 控制器在 SDK 启动阶段已初始化；这里先探测再按需 init，
+     * 避免二次 FlashInit() 返回 FAILURE 被误判成「Flash 不可用」。 */
+    (void)gw_plat_flash_init();
+
     rc = gw_kvcfg_validate(c, err, cap);
     if (rc != GW_KVCFG_OK) {
         return rc;
@@ -405,6 +409,8 @@ int gw_kvcfg_load(gw_kvcfg_t *c, char *err, uint32_t cap)
     const gw_kvcfg_flash_ops_t *f = ops();
     uint8_t blk[GW_KVCFG_BLOCK_SIZE];
     int rc;
+
+    (void)gw_plat_flash_init();
 
     if (c == NULL) {
         set_err(err, cap, "内部错误：输出为空");

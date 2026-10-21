@@ -1975,11 +1975,12 @@ static void test_wifi_cmd(void)
     t_ok(rc == -1 && strstr(out, "Wi-Fi 驱动返回错误") != NULL, "reason=internal → 指向驱动层（GetLinkedInfo/ConnectTo）");
     s_wf_connect_rc = 1;
 
-    /* ⑥ 写 Flash 失败：必须说"没保存"，否则用户会以为已经生效 */
+    /* ⑥ 写 Flash 失败：必须当场说清「没落盘、重启会丢」，且仍然继续连接（不拦现场） */
     s_wf_save_fail = 1;
     rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
-    t_ok(rc == -1 && strstr(out, "凭证没有保存") != NULL && strstr(out, GW_WF_PSK) == NULL,
-         "cred_save 失败 → 明说「没有保存」且仍不回显口令");
+    t_ok(rc == 0 && strstr(out, "没能写进 Flash") != NULL && strstr(out, "重启后会失效") != NULL &&
+         strstr(out, GW_WF_PSK) == NULL,
+         "cred_save 失败 → 明说「没落盘、重启会丢」且仍继续连接、不回显口令");
     s_wf_save_fail = 0;
 
     /* ⑦ show：已配置 + STA 已连 + 进度；口令不得出现 */

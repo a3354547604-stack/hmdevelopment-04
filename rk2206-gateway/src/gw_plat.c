@@ -163,6 +163,17 @@ int gw_plat_pairkey_level(void)
 /* ------------------------------- Flash ------------------------------- */
 int gw_plat_flash_init(void)
 {
+    uint8_t probe[4];
+
+    /* 先探测、再初始化。SDK 在启动阶段就把 flash 控制器初始化了，此时再调 FlashInit()
+     * 会走 adapter/include/lz_hardware/base.h:38-41 的「controller has already been
+     * initialized」分支并返回 FAILURE —— 把「已就绪」误判成「不可用」。
+     * 实机症状（2026-10-21 用户现场）：`wifi set` 报「写 Flash 失败：凭证没有保存」，
+     * 开机 `gwkv` 也读不到 KV 区（E_FLASH），而 flash 本身是好的。
+     * 判据：能读出 4 字节就说明控制器已就绪，不必重初始化。 */
+    if (FlashRead(0u, sizeof(probe), probe) == LZ_HARDWARE_SUCCESS) {
+        return 0;
+    }
     return (FlashInit() == LZ_HARDWARE_SUCCESS) ? 0 : -1;
 }
 

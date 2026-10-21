@@ -243,16 +243,18 @@ static int cmd_set(int argc, char **argv, char *out, uint32_t cap)
         return -1;
     }
 
-    /* ---- 落盘：与长按配网键同一份存储 ---- */
+    /* ---- 落盘：与长按配网键同一份存储 ----
+     * 落盘失败**不拦连接**：现场最常见的是 Flash 写入被 SDK 状态挡住（见
+     * gw_plat_flash_init 的探测注释），这时凭证在本次上电内仍然有效，先把网连上
+     * 才能继续调试；但必须当场说清「重启会丢」，否则用户会以为配好了。 */
     if (s_ops->cred_save(ssid_buf, psk_buf) != 0) {
-        memset(psk_buf, 0, sizeof(psk_buf));
         app(out, cap,
-            "  [wifi] ⚠ 写 Flash 失败：凭证没有保存（gw_store_cred_save 返回非 0）\n"
-            "  [wifi] 先看 `gwkv show`：KV 区不可用时这里也会失败\n");
-        return -1;
+            "  [wifi] ⚠ 凭证没能写进 Flash（**重启后会失效**），本次仍先尝试连接…\n"
+            "  [wifi] 若连接成功，说明只是持久化失败：重启后用同样命令再设一次\n");
+    } else {
+        app(out, cap, "  [wifi] 已保存 ssid=%s（口令 %u 字节，不回显），正在连接…\n",
+            ssid_buf, (unsigned)psk_len);
     }
-    app(out, cap, "  [wifi] 已保存 ssid=%s（口令 %u 字节，不回显），正在连接…\n",
-        ssid_buf, (unsigned)psk_len);
 
     /* ---- 立即联网：同步等结果，等着的人就是敲命令的人，报错要当场看到 ---- */
     reason[0] = '\0';
