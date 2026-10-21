@@ -1,8 +1,10 @@
-"""t152 厂商侧设备出厂注册：`POST /api/device/activate`。
+"""厂商侧设备出厂注册：`POST /api/device/activate`（t152；SN 规则 t157 修正）。
 
 覆盖卡面要求的 6 类用例：正常创建、幂等、无 key、错 key、非法 SN、限流；
-另加两条守护：未配置 `PRODUCT_KEY` 时按 404 关闭、建档后 webhook 能按 SN 找到设备
-（这正是本接口存在的理由，缺了它这次改动只是「多一个能写库的口子」）。
+另加四条守护：未配置 `PRODUCT_KEY` 时按 404 关闭、建档后 webhook 能按 SN 找到设备
+（这正是本接口存在的理由，缺了它这次改动只是「多一个能写库的口子」）、
+**2 字符的网关真实出厂 SN `M0` 必须通过**、以及**用户侧绑定接口对 `M0` 仍按 §6.5 拒绝**
+（厂线 2–32 与用户侧 3–32 是两条规则，t152 混用导致网关首次上云 400/1201）。
 """
 from __future__ import annotations
 
@@ -100,12 +102,48 @@ def test_activate_disabled_when_product_key_unset(client, monkeypatch):
 
 # --------------------------------------------------------------------------- 参数
 
-@pytest.mark.parametrize("sn", ["", "ab", "a" * 33, "SN WITH SPACE", "SN/斜杠", "SN.DOT"])
+@pytest.mark.parametrize("sn", ["", "a", "a" * 33, "SN WITH SPACE", "SN/斜杠", "SN.DOT"])
 def test_activate_rejects_invalid_sn(client, sn):
     resp = _post(client, {"sn": sn})
     assert resp.status_code == 400, resp.text
     assert resp.json()["code"] == 1201
     assert db.fetch_scalar("SELECT COUNT(*) FROM devices WHERE sn = :sn", {"sn": sn}) in (0, None)
+
+
+def test_activate_accepts_two_char_gateway_sn(client):
+    """网关真实出厂 SN 就是 2 字符 `M0`（`rk2206-gateway/src/gw_config.h:14`）。
+
+    t152 曾复用用户侧 `{3,32}` 规则 ⇒ 网关第一次上云必然 400/1201、`devices` 行建不出来，
+    webhook 继续 `device_not_found`，这条接口等于白做。本条是那个回归的守卫。
+    """
+    resp = _post(client, {"sn": "M0"})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["sn"] == "M0" and data["created"] is True
+    row = db.fetch_one("SELECT sn, name, owner_id, bind_code, iotda_device_id FROM devices WHERE id = :id",
+                       {"id": data["device_id"]})
+    assert row["sn"] == "M0"
+    assert row["name"] == "M0"            # name 缺省取 SN
+    assert int(row["owner_id"]) == 0      # 出厂行未绑定
+    assert row["bind_code"] is None and row["iotda_device_id"] is None
+
+    again = _post(client, {"sn": "M0"})
+    assert again.status_code == 200 and again.json()["data"]["created"] is False
+    assert again.json()["data"]["device_id"] == data["device_id"]
+    assert _count_devices("M0") == 1
+
+
+def test_bind_still_rejects_two_char_sn(client, user):
+    """反例的另一半：用户侧绑定接口的 SN 规则**没有**被放宽（仍 3–32）。
+
+    出厂 SN（`M0`）与用户手里的绑定码是两套东西：厂线建档认 2 字符，用户绑定仍按 §6.5 拒 2 字符。
+    """
+    resp = client.post("/api/devices/bind",
+                       headers={"Authorization": f"Bearer {user['token']}"},
+                       json={"sn": "M0", "bind_code": "135790"})
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["code"] == 1001
+    assert resp.json()["data"]["field"] == "sn"
 
 
 def test_activate_rejects_missing_sn(client):

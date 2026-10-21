@@ -30,8 +30,12 @@ from ..security import activate_limiter
 log = logging.getLogger("app.vendor")
 router = APIRouter(prefix="/api/device", tags=["vendor"])
 
-# 与 §6.5 的 SN 规则同源：同一串字符既来自 App 绑定码流程，也来自出厂建档，两处不能各说各话
-SN_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
+# 厂线 SN 规则：2–32。**用户侧**（`devices.py:28` 的 `SN_RE`）仍是 `{3,32}`——两处不是同一条规则：
+# 网关真实出厂 SN 是短编号 `M0`（`rk2206-gateway/src/gw_config.h:14` `#define GW_SN "M0"`），
+# 2 字符必须能过，否则网关第一次上云就 400/1201、`devices` 行永远建不出来（t157 修的就是这条）；
+# 而用户侧绑的是**已出厂的设备**、靠 6 位绑定码，没有放宽的理由。
+SN_RE = re.compile(r"^[A-Za-z0-9_-]{2,32}$")
+SN_RULE_HINT = "^[A-Za-z0-9_-]{2,32}$"  # 回给调用方的 expected 串，必须与 SN_RE 同步
 NAME_MAX = 64  # devices.name VARCHAR(64)
 
 
@@ -73,7 +77,7 @@ def activate_device(payload: ActivateIn, request: Request,
 
     sn = (payload.sn or "").strip()
     if not SN_RE.match(sn):
-        raise ApiError(1201, http_status=400, field="sn", expected="^[A-Za-z0-9_-]{3,32}$")
+        raise ApiError(1201, http_status=400, field="sn", expected=SN_RULE_HINT)
 
     name = (payload.name or "").strip() or sn
     if len(name) > NAME_MAX:
