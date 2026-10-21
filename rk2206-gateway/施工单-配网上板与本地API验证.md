@@ -102,7 +102,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 说明：第 1 行的 `1A2B` 随你的板子 SN 变；`psk=` 后面是 **SoftAP 自己的口令**（契约 §12.2 允许在串口给出，
 方便你在手机上看得到；**家庭 Wi-Fi 口令永远不打印**）。第 2 行的 IP 是**现场实际地址，以它为准**（见 §8 的 CAL-12），
 它可能比 enter 行早或晚出现（HTTP 任务与 tick 任务是并行的）。
-同时板上 LED 双闪 2 次（不响）。
+同时板上 LED 有状态指示（**没有声音**：r5 定案本原型无本地声光/语音；成败只看手机页面与下面这行日志）。
 
 ## 3.1 板载键 K1–K4：不用接线也能进配网（t138，3 步）
 
@@ -179,7 +179,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
 ## 3.4 手机配网（t142：一条命令开窗，3 步）
 
-> 适用：新板 / 刚 `wifi clear` 过 / 想重新填 Wi-Fi 与华为云凭据。
+> 适用：新板 / 刚 `wifi clear` 过 / 想重新填**家里 Wi-Fi**。
+> **云端凭据不在这一步**（属厂商侧：串口 `gwkv set` 优先，售后才用 §4.5 的维护面板）。
 > 与 3.1（长按板载键）等价，只是把「按 3 s」换成「敲一条命令」——
 > 按键链路坏了的时候用这条。
 
@@ -231,13 +232,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 - 看到什么：页面提示提交成功；串口依次出现
   ```
   [PROV] 收到 Wi-Fi ssid=…（口令不回显），开始连接，timeout=…
-  [PROV] 收到 IoTDA 云凭据 host=…:1883 device=…（密钥 N 字节，不回显）
   [PROV] Wi-Fi 已连接 ssid=…，90s 后关闭 SoftAP
   [PROV] SoftAP 已关闭，网关进入 STA 模式（mode=sta）
   [gw] 取时成功(HTTP) epoch=…
   [gw] IoTDA 已连接 clientId=…_0_1_…
   ```
   手机热点会断开（正常，SoftAP 关了）。
+
+  > **用户流程里不该出现 `[PROV] 收到 IoTDA 云凭据 …` 这一行**——它只会在厂商侧维护面板保存时打印。
+  > 出现了说明有人从维护面板写过云端三件套（会覆盖出厂值），排查时按 §4.5 的两条路径对一遍。
 - 失败怎么办：见 §4.5 的失败对照表（`bad_password` / `not_found` / `bad_host` 等）。
 
 **收尾**：敲 `prov status` 确认「配网窗口：关」；想再进配网就 `prov on` 或长按板载键 3 s。
