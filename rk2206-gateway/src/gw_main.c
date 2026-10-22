@@ -38,6 +38,10 @@
 #include "lz_hardware.h"
 #include "config_network.h"
 #include "cJSON.h"
+/* t168：`wifi net` 要读 lwip 的网卡实例与 DNS 服务器，三项都在这些头里 */
+#include "lwip/dns.h"
+#include "lwip/netif.h"
+#include "lwip/netifapi.h"
 
 #include <string.h>
 #include <stdio.h>      /* snprintf：只在命令参数解析这一处用，热路径一律手写十进制 */
@@ -854,21 +858,40 @@ static void gw_flush_cache(uint32_t now)
 static int gw_try_timesync(void)
 {
     uint64_t epoch = 0;
+    gw_ts_diag_t diag;
+    int http_rc = -1;
+
+    memset(&diag, 0, sizeof(diag));
+    diag.stage = "arg";
 
     /* 顺序固定：先自建服务器（服务器与我们同一时间源，误差最小），失败再 NTP */
     /* 时间服务器地址可被凭证 KV 改写（t34）；显式留空 = 只用 NTP */
-    if (s_creds.time_host[0] != '\0' &&
-        gw_timesync_http(s_creds.time_host, s_creds.time_port, GW_TIME_PATH, 5000, &epoch) == 0) {
-        gw_time_set_epoch(epoch, LOS_TickCountGet());
-        printf("[%s] 取时成功(HTTP) epoch=%llu\n", GW_LOG_TAG, (unsigned long long)epoch);
-        return 0;
+    if (s_creds.time_host[0] != '\0') {
+        http_rc = gw_timesync_http_ex(s_creds.time_host, s_creds.time_port, GW_TIME_PATH, 5000,
+                                      &epoch, &diag);
+        if (http_rc == 0) {
+            gw_time_set_epoch(epoch, LOS_TickCountGet());
+            printf("[%s] 取时成功(HTTP) epoch=%llu 耗时=%u ms\n", GW_LOG_TAG,
+                   (unsigned long long)epoch, (unsigned)diag.ms);
+            return 0;
+        }
     }
     if (gw_timesync_ntp(GW_NTP_HOST, 123, 5000, &epoch) == 0) {
         gw_time_set_epoch(epoch, LOS_TickCountGet());
         printf("[%s] 取时成功(NTP) epoch=%llu\n", GW_LOG_TAG, (unsigned long long)epoch);
         return 0;
     }
-    printf("[%s] 取时失败：服务器与 NTP 都不可达，暂不连 IoTDA\n", GW_LOG_TAG);
+    /* t168 FIX-4：这行必须能分层——阶段（connect/send/recv/no-200/parse）+ errno + 耗时。
+     * 阶段=connect 且耗时 ~0 ms ⇒ 路由问题（默认网卡没装 / 网关没下发），不是服务器的问题；
+     * 阶段=no-200 或 parse ⇒ 是服务器/字段名的问题。现场照这一行就能判断该找谁。 */
+    if (s_creds.time_host[0] == '\0') {
+        printf("[%s] 取时失败：凭证里没有时间服务器（`gwkv show` 可看），NTP 也未启用\n", GW_LOG_TAG);
+    } else {
+        printf("[%s] 取时失败：HTTP(阶段=%s errno=%d 耗时=%u ms 收到=%d B) / NTP(跳过：域名不是 IPv4)\n",
+               GW_LOG_TAG, (diag.stage != NULL) ? diag.stage : "?", diag.err,
+               (unsigned)diag.ms, diag.rx_bytes);
+    }
+    printf("[%s] 暂不连 IoTDA；串口 `wifi net` 一条命令可判定是不是路由问题\n", GW_LOG_TAG);
     return -1;
 }
 
@@ -1377,6 +1400,19 @@ static void net_wifi_boot(void)
         ip[0] = '\0';
         (void)gw_net_sta_ip(ip, (uint32_t)sizeof(ip));
         printf("[%s] 联网成功：IP=%s（接着取时 → 连 IoTDA）\n", GW_LOG_TAG, ip);
+        /* t168 FIX-6a + FIX-7：连上后立刻把「默认网卡」这件事固化进启动日志。
+         * 上一轮排查最大的成本是——有 IP 却没有默认网卡，日志里看不出来。 */
+        if (gw_net_install_default_iface() == 0) {
+            struct netif *nif = netifapi_netif_find_by_name("wlan0");
+            if (nif != NULL) {
+                printf("[%s] 路由自检：default=%c%c gw=%s\n", GW_LOG_TAG,
+                       (netif_default != NULL) ? netif_default->name[0] : '-',
+                       (netif_default != NULL) ? netif_default->name[1] : '-',
+                       ip4addr_ntoa(&nif->gw));
+            }
+        } else {
+            printf("[%s] ⚠ 默认网卡安装失败（找不到 wlan0）：取时/连云大概率仍会失败\n", GW_LOG_TAG);
+        }
     } else {
         printf("[%s] ⚠ 联网失败：%s（串口 `wifi show` 复查，`wifi set` 重配）\n",
                GW_LOG_TAG, gw_net_reason_text(reason));
@@ -1806,6 +1842,73 @@ static int wifi_op_radio_on(void)
     return gw_net_radio_on();
 }
 
+/* `wifi net`（t168 FIX-5）：把「为什么取时不通」拆成可判读的 6 行。
+ *
+ * 为什么探测的目标是时间服务器和 IoTDA 各一条：它们是这条链上**仅有的两个**外网对端，
+ * 一个通一个不通就能立刻分出「服务器挂了」还是「路由/热点没转发」。
+ * 探测用 gw_timesync_probe（与真实取时同一条 sock_connect 代码），所以 probe ok
+ * 而取时仍失败时，问题一定在应用层（HTTP 报错/字段名），不在网络。 */
+static int wifi_op_net_info(gw_wifi_netinfo_t *info)
+{
+    struct netif *nif;
+    char ip[24];
+    ip4_addr_t *dns;
+
+    if (info == NULL) {
+        return -1;
+    }
+    memset(info, 0, sizeof(*info));
+
+    /* 1) 驱动侧：有没有连着路由器（有 IP 不代表路由通，上一轮就是这种情况） */
+    ip[0] = '\0';
+    if (gw_net_sta_ip(ip, (uint32_t)sizeof(ip)) == 0) {
+        info->linked = 1;
+        (void)snprintf(info->driver_ip, sizeof(info->driver_ip), "%s", ip);
+        (void)gw_net_sta_ssid(info->ssid, (uint32_t)sizeof(info->ssid));
+    }
+
+    /* 2) lwip 侧：默认网卡才是本轮根因的判据 */
+    (void)gw_net_install_default_iface();     /* 幂等；这里调一次保证显示的是安装后的状态 */
+    nif = netifapi_netif_find_by_name("wlan0");
+    if (nif != NULL) {
+        info->netif_found = 1;
+        (void)snprintf(info->ifname, sizeof(info->ifname), "%c%c", nif->name[0], nif->name[1]);
+        (void)snprintf(info->ip, sizeof(info->ip), "%s", ip4addr_ntoa(&nif->ip_addr));
+        (void)snprintf(info->mask, sizeof(info->mask), "%s", ip4addr_ntoa(&nif->netmask));
+        (void)snprintf(info->gw, sizeof(info->gw), "%s", ip4addr_ntoa(&nif->gw));
+        info->flags = (unsigned)nif->flags;
+        info->is_up = netif_is_up(nif);
+        info->is_link_up = netif_is_link_up(nif);
+        info->is_default = (netif_default == nif) ? 1 : 0;
+    } else if (info->linked == 0) {
+        return -1;              /* 射频没起、也没连上：没什么可看的 */
+    }
+    dns = dns_getserver(0);
+    (void)snprintf(info->dns, sizeof(info->dns), "%s",
+                   (dns != NULL && dns->addr != 0u) ? ip4addr_ntoa(dns) : "0.0.0.0");
+
+    /* 3) 两次真实 TCP 探测（各 2 s，最坏 4 s，串口命令可以等） */
+    if (s_creds.time_host[0] != '\0' && info->probe_n < GW_WIFI_PROBE_MAX) {
+        gw_wifi_probe_t *p = &info->probe[info->probe_n];
+        (void)snprintf(p->host, sizeof(p->host), "%s", s_creds.time_host);
+        p->port = s_creds.time_port;
+        (void)gw_timesync_probe(p->host, p->port, 2000, &p->err, &p->ms);
+        info->probe_n++;
+    }
+    if (info->probe_n < GW_WIFI_PROBE_MAX) {
+        gw_wifi_probe_t *p = &info->probe[info->probe_n];
+        (void)snprintf(p->host, sizeof(p->host), "%s", s_creds.mqtt_host);
+        p->port = s_creds.mqtt_port;
+        (void)gw_timesync_probe(p->host, p->port, 2000, &p->err, &p->ms);
+        info->probe_n++;
+    }
+
+    /* 4) 取时状态：gw_time_epoch 未校时时返回 0，这里用当前毫秒换算出可打印的秒 */
+    info->synced = (gw_time_is_synced() != 0) ? 1 : 0;
+    info->epoch = (unsigned long long)gw_time_epoch(gw_now_ms());
+    return 0;
+}
+
 static const gw_wifi_ops_t s_wifi_ops = {
     .cred_load = gw_store_cred_load,
     .cred_save = gw_store_cred_save,
@@ -1817,6 +1920,7 @@ static const gw_wifi_ops_t s_wifi_ops = {
     .radio_on  = wifi_op_radio_on,
     .progress  = wifi_op_progress,
     .cred_clear = wifi_op_cred_clear,
+    .net_info  = wifi_op_net_info,
 };
 
 static UINT32 task_create(TSK_ENTRY_FUNC fn, void *arg, UINT32 stack, UINT16 prio, const char *name)
@@ -1933,8 +2037,13 @@ static void gw_main_entry(void)
 {
     /* 这行里的 GW_IMAGE_TAG 是构建脚本的断言锚点：tools/gw-build.sh 会在
      * images/Firmware.img 里 grep 它，证明"编出来的固件真的含网关代码"。
-     * 不要改成变量拼接，否则字符串会散成多段而 grep 不到。 */
-    printf("\n[%s] ---- RK2206 网关 M0 启动 %s (契约 v1.2) ----\n", GW_LOG_TAG, GW_IMAGE_TAG);
+     * 不要把它拆成变量拼接，否则字符串会散成多段而 grep 不到。
+     *
+     * t168 FIX-6b：再带上 __DATE__ __TIME__。原因是上一轮排查被"板上到底是哪次构建"
+     * 卡住——GW_IMAGE_TAG 是常量（gw_config.h:136），不随提交变化，日志里看不出来。
+     * 编译期常量字符串会被原样放进 .rodata，所以固件里也能直接 strings 出来。 */
+    printf("\n[%s] ---- RK2206 网关 M0 启动 %s (%s %s) (契约 v1.2) ----\n",
+           GW_LOG_TAG, GW_IMAGE_TAG, __DATE__, __TIME__);
 
     /* 1) 硬件层：失败要看得见（现场"以为在工作"是最贵的故障） */
     if (gw_plat_uart0_init() != 0) {

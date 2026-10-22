@@ -28,6 +28,42 @@
  * 这里自带一份是为了让本模块不依赖配网状态机的头文件（它俩本就该能各自编译）。 */
 #define GW_WIFI_PSK_CAP         64u
 
+/* ---- `wifi net` 的数据（t168 FIX-5） ----
+ * 为什么把结构体放在纯逻辑这一侧：板级只负责"把真值填进来"，排版与三种判据的
+ * 措辞都在 gw_wifi_shell.c 里，因此「is_default=NO 该说什么」「EHOSTUNREACH 该说什么」
+ * 能在主机自测里逐字断言，不用挪路由器试。
+ * 这也是本次根因（从未安装默认网卡）之后现场唯一需要敲的一条命令。 */
+#define GW_WIFI_IP_CAP          20u
+#define GW_WIFI_NAME_CAP        33u
+#define GW_WIFI_PROBE_MAX       2
+
+typedef struct {
+    char host[48];
+    uint16_t port;
+    int err;                /* 0 = 成功；否则 errno（用 gw_timesync_errno_text 转符号名） */
+    uint32_t ms;
+} gw_wifi_probe_t;
+
+typedef struct {
+    int linked;                                 /* 驱动侧 GetLinkedInfo 是否在线 */
+    char ssid[GW_WIFI_NAME_CAP];
+    char driver_ip[GW_WIFI_IP_CAP];
+    int netif_found;                            /* lwip 里找到 wlan0 */
+    char ifname[8];
+    char ip[GW_WIFI_IP_CAP];
+    char mask[GW_WIFI_IP_CAP];
+    char gw[GW_WIFI_IP_CAP];
+    char dns[GW_WIFI_IP_CAP];
+    unsigned flags;                             /* netif->flags 原值（打印成 0x0f 便于对照源码） */
+    int is_up;
+    int is_link_up;
+    int is_default;                             /* 本次根因的判据：netif_default == wlan0 */
+    int probe_n;
+    gw_wifi_probe_t probe[GW_WIFI_PROBE_MAX];
+    int synced;                                 /* 取时是否已完成 */
+    unsigned long long epoch;
+} gw_wifi_netinfo_t;
+
 /* 板级回调：全部返回 0 成功 / -1 失败（connect 例外，见注释）。
  * 与 gw_kvcfg_flash_ops_t 同一思路：真机上装真函数，主机单测装假函数。 */
 typedef struct {
@@ -52,6 +88,9 @@ typedef struct {
      * 产品上这条命令的意义是"把这块板子变回出厂状态"，t137 的验收第 1 条
      * （无凭据 → 自动进配网）就靠它复现，否则烧过的板子永远测不到那条路径。 */
     int (*cred_clear)(void);
+    /* `wifi net`（t168 FIX-5）：把「驱动态 + lwip 网卡态 + 两次 TCP 探测 + 取时态」
+     * 一次填满。返回 0 = 填好；-1 = 拿不到任何信息（射频没起）。 */
+    int (*net_info)(gw_wifi_netinfo_t *info);
 } gw_wifi_ops_t;
 
 /* 装/换回调表（板级在注册 shell 命令前调用一次；NULL = 清空，之后命令只会报内部错误） */

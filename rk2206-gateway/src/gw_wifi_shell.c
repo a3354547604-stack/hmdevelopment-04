@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "gw_config.h"
+#include "gw_timesync.h"      /* gw_timesync_errno_text：`wifi net` 把 errno 印成符号名 */
 #include "gw_wifi_shell.h"
 
 /* 命令行缓冲：最长的合法输入是 `wifi set ssid=<32 B> psk=<63 B>` ≈ 110 字节 */
@@ -82,6 +83,7 @@ static void usage(char *out, uint32_t cap)
         "    wifi scan                              列 2.4 GHz 热点（SSID / RSSI / 信道）\n"
         "    wifi scan --raw                        原样列驱动给的每一条（含 freq=0），现场判读用\n"
         "    wifi on / wifi off                     开 / 关射频（驱动卡住时先 off 再 on 复位）\n"
+        "    wifi net                               看默认网卡/网关并做一次 TCP 连通探测（t168）\n"
         "    wifi clear                             清掉已保存的家庭 Wi-Fi（重启后自动进配网）\n"
         "  说明：口令里不要带空格；口令只写不读，写进去就再也打不出来（这是有意的）。\n"
         "        与长按配网键 3 s 的流程共用同一份 Flash 凭据，先写的被后写的覆盖。\n");
@@ -396,6 +398,89 @@ static int cmd_clear(char *out, uint32_t cap)
     return 0;
 }
 
+/* ------------------------------------------------------- `wifi net`（t168） */
+
+/* flags 的三个位做成可读词：up / link 是 ip4_route 判默认网卡的两个前置条件，
+ * 缺哪个一眼看出来比看十六进制快。 */
+static void net_flag_words(const gw_wifi_netinfo_t *n, char *out, uint32_t cap)
+{
+    if (n->is_up && n->is_link_up) {
+        (void)snprintf(out, cap, "up|link");
+    } else if (n->is_up) {
+        (void)snprintf(out, cap, "up（缺 link）");
+    } else {
+        (void)snprintf(out, cap, "down");
+    }
+}
+
+/* `wifi net`：一条命令回答「为什么取时失败」。
+ * 判据顺序就是 ip4_route() 的判断顺序：先看有没有默认网卡，再看它 up/link，
+ * 再看地址/网关，最后才去碰网络（TCP 探测）。所以输出**从上往下读**就是排查顺序。 */
+static int cmd_net(char *out, uint32_t cap)
+{
+    gw_wifi_netinfo_t n;
+    char fl[24];
+    int i;
+
+    if (s_ops == NULL || s_ops->net_info == NULL) {
+        app(out, cap, "  [wifi] 本版本的板级实现不支持 `wifi net`\n");
+        return -1;
+    }
+    memset(&n, 0, sizeof(n));
+    if (s_ops->net_info(&n) != 0) {
+        app(out, cap,
+            "  [wifi] 拿不到网卡信息：射频没起来（先 `wifi on`，或用 `wifi set ssid=… psk=…` 联网）\n");
+        return -1;
+    }
+    net_flag_words(&n, fl, (uint32_t)sizeof(fl));
+
+    /* 第 1 行：驱动怎么说（有 IP 不代表路由通） */
+    if (n.linked) {
+        app(out, cap, "  [net] driver ip=%s ssid=%s\n",
+            (n.driver_ip[0] != '\0') ? n.driver_ip : "0.0.0.0",
+            (n.ssid[0] != '\0') ? n.ssid : "-");
+    } else {
+        app(out, cap, "  [net] driver 未联网（GetLinkedInfo 没有连接）\n");
+    }
+
+    /* 第 2-3 行：lwip 侧——这两行才是本次根因的判据 */
+    if (n.netif_found) {
+        app(out, cap, "  [net] netif %s ip=%s mask=%s gw=%s dns=%s\n",
+            n.ifname, n.ip, n.mask, n.gw, n.dns);
+        app(out, cap, "  [net] netif %s flags=%s(0x%02x) is_default=%s\n",
+            n.ifname, fl, n.flags & 0xFFu, (n.is_default != 0) ? "YES" : "NO");
+    } else {
+        app(out, cap, "  [net] netif 没找到 wlan0（射频没起 / 还没连上路由器）\n");
+    }
+
+    /* 第 4-5 行：真的发包（connect 能过，说明默认路由已生效） */
+    for (i = 0; i < n.probe_n && i < GW_WIFI_PROBE_MAX; i++) {
+        if (n.probe[i].err == 0) {
+            app(out, cap, "  [net] probe %s:%u connect ok, %u ms\n",
+                n.probe[i].host, (unsigned)n.probe[i].port, (unsigned)n.probe[i].ms);
+        } else {
+            const char *e = gw_timesync_errno_text(n.probe[i].err);
+            app(out, cap, "  [net] probe %s:%u 失败 %s, %u ms\n",
+                n.probe[i].host, (unsigned)n.probe[i].port, e, (unsigned)n.probe[i].ms);
+        }
+    }
+
+    /* 第 6 行：取时状态 + 一句判据（三种分支各一句，现场照这句做） */
+    if (n.synced != 0) {
+        app(out, cap, "  [net] time_sync=synced epoch=%llu\n", n.epoch);
+    } else if (n.netif_found && n.is_default == 0) {
+        app(out, cap,
+            "  [net] time_sync=pending reason=no_route（没有默认网卡：这是取时失败的头号原因）\n");
+    } else if (!n.is_up || !n.is_link_up) {
+        app(out, cap,
+            "  [net] time_sync=pending reason=link_down（网卡没 up/link，先 `wifi off` → 等 2 秒 → `wifi on`）\n");
+    } else {
+        app(out, cap,
+            "  [net] time_sync=pending reason=见上面 probe 的 errno（路由已装但仍连不上目标）\n");
+    }
+    return 0;
+}
+
 int gw_wifi_cmd(const char *line, char *out, uint32_t cap)
 {
     char buf[GW_WIFI_LINE_MAX];
@@ -449,6 +534,9 @@ int gw_wifi_cmd(const char *line, char *out, uint32_t cap)
     if (strcmp(argv[base], "rawscan") == 0) {
         /* 别名：手敲比 `scan --raw` 短，现场排在排查清单第一行 */
         return cmd_scan(1, out, cap);
+    }
+    if (strcmp(argv[base], "net") == 0) {
+        return cmd_net(out, cap);
     }
     if (strcmp(argv[base], "off") == 0) {
         return cmd_radio(0, out, cap);

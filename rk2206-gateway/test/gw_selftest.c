@@ -27,8 +27,10 @@
 #include "gw_hw_adc.h"
 #include "gw_hw.h"
 #include "gw_scan.h"      /* t166：扫描重试口径与排版（纯逻辑） */
+#include "gw_timesync.h"  /* t168：pick_epoch 键名白名单 + errno 符号名（纯函数，主机可测） */
 #include "cJSON.h"
 
+#include <errno.h>      /* t168：EHOSTUNREACH 等符号名在主机与板端同值 */
 #include <stdio.h>
 #include <string.h>
 
@@ -1882,6 +1884,20 @@ static int wf_progress(char *out, uint32_t cap)
     return 0;
 }
 
+/* t168：`wifi net` 的假板级实现——直接给一份可控的网卡画像，
+ * 三种判据（is_default=YES / NO / probe 失败）都靠改 s_wf_net 制造。 */
+static gw_wifi_netinfo_t s_wf_net;
+static int               s_wf_net_rc;
+
+static int wf_net_info(gw_wifi_netinfo_t *info)
+{
+    if (s_wf_net_rc != 0) {
+        return s_wf_net_rc;
+    }
+    *info = s_wf_net;
+    return 0;
+}
+
 /* t137：`wifi clear` 的假实现（真机上就是 gw_store_cred_clear） */
 static int wf_cred_clear(void)
 {
@@ -1908,6 +1924,7 @@ static const gw_wifi_ops_t wf_ops = {
     .radio_on  = wf_radio_on,
     .progress  = wf_progress,
     .cred_clear = wf_cred_clear,
+    .net_info  = wf_net_info,
 };
 
 #define GW_WF_PSK   "hunter2secret"     /* 明文口令：全程不得出现在任何输出里 */
@@ -2561,6 +2578,124 @@ static void test_tick_hb(void)
     t_ok(gw_pairkey_step(NULL, 1u, 0u, GW_PAIRKEY_LONG_MS) == 0, "st 为空时安全返回 0");
 }
 
+/* -------------------- t168：`wifi net` 的三种判据 --------------------
+ *
+ * 为什么这三段必须在主机上跑：它们是现场「一条命令定案」的全部依据。
+ * 用户不会区分 is_default=NO 和 probe EHOSTUNREACH 的含义，界面上写错一句话，
+ * 就等于把一次烧录白烧——所以每句话都逐字断言。
+ * 三段对应根因报告 §3.3 的三条分支。
+ */
+static void test_net_cmd(void)
+{
+    char out[GW_WIFI_CMD_OUT_MAX];
+    int rc;
+
+    t_start("t168 wifi net：默认网卡已装 / 未装 / probe 失败 三种判据");
+
+    gw_wifi_set_ops(&wf_ops);
+    s_wf_net_rc = 0;
+    memset(&s_wf_net, 0, sizeof(s_wf_net));
+
+    /* ① 修好之后：is_default=YES + 两条 probe 都通 + 已取时 */
+    s_wf_net.linked = 1;
+    (void)snprintf(s_wf_net.ssid, sizeof(s_wf_net.ssid), "HomeWiFi");
+    (void)snprintf(s_wf_net.driver_ip, sizeof(s_wf_net.driver_ip), "192.168.137.171");
+    s_wf_net.netif_found = 1;
+    (void)snprintf(s_wf_net.ifname, sizeof(s_wf_net.ifname), "wl");
+    (void)snprintf(s_wf_net.ip, sizeof(s_wf_net.ip), "192.168.137.171");
+    (void)snprintf(s_wf_net.mask, sizeof(s_wf_net.mask), "255.255.255.0");
+    (void)snprintf(s_wf_net.gw, sizeof(s_wf_net.gw), "192.168.137.1");
+    (void)snprintf(s_wf_net.dns, sizeof(s_wf_net.dns), "192.168.137.1");
+    s_wf_net.flags = 0x0fu;
+    s_wf_net.is_up = 1;
+    s_wf_net.is_link_up = 1;
+    s_wf_net.is_default = 1;
+    s_wf_net.probe_n = 2;
+    (void)snprintf(s_wf_net.probe[0].host, sizeof(s_wf_net.probe[0].host), "123.206.99.28");
+    s_wf_net.probe[0].port = 80u;
+    s_wf_net.probe[0].err = 0;
+    s_wf_net.probe[0].ms = 12u;
+    (void)snprintf(s_wf_net.probe[1].host, sizeof(s_wf_net.probe[1].host), "124.70.218.131");
+    s_wf_net.probe[1].port = 1883u;
+    s_wf_net.probe[1].err = 0;
+    s_wf_net.probe[1].ms = 31u;
+    s_wf_net.synced = 1;
+    s_wf_net.epoch = 1792672341ull;
+
+    rc = gw_wifi_cmd("wifi net", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "driver ip=192.168.137.171 ssid=HomeWiFi") != NULL,
+         "第 1 行：驱动侧有 IP 有 SSID");
+    t_ok(strstr(out, "netif wl ip=192.168.137.171 mask=255.255.255.0 gw=192.168.137.1") != NULL,
+         "第 2 行：lwip 侧地址/掩码/网关");
+    t_ok(strstr(out, "flags=up|link(0x0f) is_default=YES") != NULL,
+         "第 3 行：flags 含 up|link 且 is_default=YES —— 根因已修的判据");
+    t_ok(strstr(out, "probe 123.206.99.28:80 connect ok, 12 ms") != NULL,
+         "第 4 行：时间服务器 TCP 通（12 ms）");
+    t_ok(strstr(out, "probe 124.70.218.131:1883 connect ok, 31 ms") != NULL,
+         "第 5 行：IoTDA TCP 通（31 ms）");
+    t_ok(strstr(out, "time_sync=synced epoch=1792672341") != NULL, "第 6 行：已取时并给出 epoch");
+
+    /* ② 根因未修（或没烧进去）：is_default=NO */
+    s_wf_net.is_default = 0;
+    s_wf_net.synced = 0;
+    s_wf_net.epoch = 0;
+    rc = gw_wifi_cmd("wifi net", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "is_default=NO") != NULL, "未装默认网卡时明确打 NO");
+    t_ok(strstr(out, "time_sync=pending reason=no_route") != NULL &&
+             strstr(out, "没有默认网卡") != NULL,
+         "并直接点名原因：no_route（这是取时失败的头号原因）");
+
+    /* ③ 默认网卡装了，但目标不可达（热点没转发 / 网关没下发） */
+    s_wf_net.is_default = 1;
+    s_wf_net.probe[0].err = EHOSTUNREACH;
+    s_wf_net.probe[0].ms = 0u;
+    rc = gw_wifi_cmd("wifi net", out, sizeof(out));
+    t_ok(strstr(out, "probe 123.206.99.28:80 失败 EHOSTUNREACH, 0 ms") != NULL,
+         "probe 失败打 errno 的符号名（不是 113）");
+    t_ok(strstr(out, "见上面 probe 的 errno") != NULL,
+         "此时不再说 no_route，而是指向 probe（判据不串味）");
+
+    /* ④ 射频根本没起：命令要能自己说清楚，而不是打一堆 0 */
+    s_wf_net_rc = -1;
+    rc = gw_wifi_cmd("wifi net", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "射频没起来") != NULL, "拿不到网卡 → 提示先 wifi on / wifi set");
+    s_wf_net_rc = 0;
+}
+
+/* -------------------- t168：取时键名与 errno 文案 -------------------- */
+static void test_timesync_diag(void)
+{
+    uint64_t ep = 0;
+
+    t_start("t168 取时：utc_epoch 键名白名单 + errno 符号名");
+
+    /* 服务器 /api/time 的真实响应形状（2026-10-22 本机实测，见根因报告 §2.7）。
+     * 之前键表里没有 "utc_epoch"，所以**网络通了也必然取时失败**——这是 B-2。 */
+    {
+        const char *body =
+            "{\"code\":0,\"message\":\"ok\",\"data\":{\"utc_epoch\":1792672341,"
+            "\"epoch\":1792672341,\"utc_epoch_ms\":1792672341862,"
+            "\"iso8601\":\"2026-10-22T12:32:21Z\",\"tz\":\"UTC\"}}";
+        t_ok(gw_timesync_pick_epoch(body, &ep) == 0 && ep == 1792672341ull,
+             "utc_epoch 是第一优先级键 → 能取到 1792672341");
+    }
+    ep = 0;
+    t_ok(gw_timesync_pick_epoch("{\"data\":{\"utc_epoch_ms\":1792672341862}}", &ep) == -1,
+         "只有毫秒字段 → 拒掉（不把毫秒当秒，区间 1577836800..4102444800 兜底）");
+    ep = 0;
+    t_ok(gw_timesync_pick_epoch("{\"server_time\":1792672341}", &ep) == 0 && ep == 1792672341ull,
+         "老的 server_time 仍认（不破坏旧服务器）");
+    ep = 0;
+    t_ok(gw_timesync_pick_epoch("{\"code\":0}", &ep) == -1, "没有时间字段 → 失败（不猜）");
+
+    t_ok(strcmp(gw_timesync_errno_text(0), "ok") == 0, "errno 0 → ok");
+    t_ok(strcmp(gw_timesync_errno_text(EHOSTUNREACH), "EHOSTUNREACH") == 0,
+         "EHOSTUNREACH 打成符号名（现场判「没有默认路由」的那一行）");
+    t_ok(strcmp(gw_timesync_errno_text(ETIMEDOUT), "ETIMEDOUT") == 0, "ETIMEDOUT 打成符号名");
+    t_ok(strncmp(gw_timesync_errno_text(9999), "errno=", 6) == 0,
+         "未知 errno 给 errno=N（不是裸数字、也不是 unknown）");
+}
+
 int main(void)
 {
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
@@ -2571,6 +2706,8 @@ int main(void)
     test_kvcfg();                    /* t34 凭证 KV：布局 + 落盘 + 串口命令 + 负向 */
     test_wifi_cmd();                 /* t136 串口 wifi：边界校验 + 口令不回显 + 失败可判读 */
     test_scan_policy();              /* t166 扫描重试口径（1 s × 15）+ freq=0 的 raw 排版 */
+    test_net_cmd();                  /* t168 `wifi net`：默认网卡三判据（is_default/probe/无射频） */
+    test_timesync_diag();            /* t168 取时：utc_epoch 键名 + errno 符号名 */
     test_key_events();            /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
     test_tick_hb();               /* t141 心跳节拍 + 长按状态机（纯逻辑） */
     test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */

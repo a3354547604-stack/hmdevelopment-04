@@ -59,4 +59,12 @@ int gw_net_radio_on(void);
 /* reason 码 → 一句中文（`wifi set` 与 net_task 共用，避免两处措辞分叉） */
 const char *gw_net_reason_text(const char *reason);
 
+/* t168 FIX-1：把 wlan0 装成 lwip 的默认网卡（set_up + set_link_up + set_default）。
+ *
+ * 为什么必须调：没有 netif_default 时 ip4_route() 对外网目的地址返回 NULL，
+ * connect() 在发包前就 EHOSTUNREACH——这就是之前「永远取时失败」的根因。
+ * 幂等、可重复调；第一次装成功会打一行 `[NET] 默认网卡=wl flags=… up=1 link=1`。
+ * 返回 0 = 已装/已就绪；-1 = 找不到 wlan0（射频还没起来）。 */
+int gw_net_install_default_iface(void);
+
 #endif /* GW_NET_H */

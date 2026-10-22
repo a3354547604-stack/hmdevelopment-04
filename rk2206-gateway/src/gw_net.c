@@ -777,6 +777,49 @@ int gw_net_sta_start(const char *ssid, const char *psk)
     return 0;
 }
 
+/* t168 FIX-1：给 lwip 安装默认网卡——**本次「永远取时失败」的唯一根因**。
+ *
+ * 为什么必须有它：lwip 的 ip4_route() 对「不同网段」的目的地址先按本网段前缀遍历，
+ * 都不命中时**必须**有 netif_default 兜底，否则直接返回 NULL；于是 connect() 在
+ * 发出任何一个包之前就失败（errno=EHOSTUNREACH，耗时 ~0 ms），日志上只剩
+ * 「服务器与 NTP 都不可达」。板子 DHCP 拿得到地址（wlan0 有 IP），但没人把 wlan0
+ * 设成 default——RK2206 的 wifi 适配层不会替我们做这件事（对照组：
+ * vendor/.../b7_wifi_tcp/wifi_tcp_example.c 与 config_network.c:734 都显式调了
+ * SetLocalWifiGw()，而那条路径我们没走）。
+ *
+ * 为什么三件一起做：ip4_route 的默认网卡分支还要求 netif_is_up() 且 netif_is_link_up()。
+ * set_up 由 libhardware.a:rk_wifi_set_mode() 顺带做过，但 link_up 在全镜像里
+ * **只有定义、没有调用者**（驱动是否自己置位在预编译库里证不了），所以这里补上。
+ * 三个 netifapi_* 都是"投递到 tcpip 线程执行"的线程安全版本（netifapi.h:91/99/103）。
+ *
+ * 幂等：s_default_if 记住已装过的实例，之后的调用只补 up/link（不打日志，避免
+ * sta_ip 那条路径每次查询都刷屏）。 */
+static struct netif *s_default_if;
+
+int gw_net_install_default_iface(void)
+{
+    struct netif *n = netifapi_netif_find_by_name("wlan0");
+
+    if (n == NULL) {
+        return -1;
+    }
+    if (n != s_default_if) {
+        (void)netifapi_netif_set_up(n);
+        (void)netifapi_netif_set_link_up(n);
+        (void)netifapi_netif_set_default(n);
+        s_default_if = n;
+        printf("[NET] 默认网卡=%c%c flags=0x%02x up=%d link=%d\n",
+               n->name[0], n->name[1], (unsigned)n->flags,
+               (int)netif_is_up(n), (int)netif_is_link_up(n));
+        return 0;
+    }
+    if (!netif_is_up(n) || !netif_is_link_up(n)) {
+        (void)netifapi_netif_set_up(n);
+        (void)netifapi_netif_set_link_up(n);
+    }
+    return 0;
+}
+
 int gw_net_sta_poll(char *reason, uint32_t cap)
 {
     WifiLinkedInfo info;
@@ -804,6 +847,9 @@ int gw_net_sta_poll(char *reason, uint32_t cap)
     }
     if (info.connState == WIFI_CONNECTED) {
         s_sta_pending = 0u;
+        /* 连上就立刻装默认网卡：此刻还没拿 IP 也没关系——ip4_route 自己会判
+         * default 的地址是否为空，先装后取地址是安全的（报告 FIX-1 的调用点 1）。 */
+        (void)gw_net_install_default_iface();
         return 1;
     }
     s_sta_polls++;
@@ -834,7 +880,13 @@ int gw_net_sta_ip(char *out, uint32_t cap)
     }
     addr.addr = (uint32_t)info.ipAddress;
     (void)snprintf(out, cap, "%s", ip4addr_ntoa(&addr));
-    return (out[0] != '\0' && strcmp(out, "0.0.0.0") != 0) ? 0 : -1;
+    if (out[0] == '\0' || strcmp(out, "0.0.0.0") == 0) {
+        return -1;
+    }
+    /* 调用点 2（报告 FIX-1）：走到这里说明 DHCP 已经把地址配上了，
+     * 配网页/长按配网键那条路也会经过本函数，在这里再装一次保证不漏。 */
+    (void)gw_net_install_default_iface();
+    return 0;
 }
 
 int gw_net_sta_ssid(char *out, uint32_t cap)
