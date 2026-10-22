@@ -41,6 +41,11 @@ typedef struct {
     int (*sta_info)(char *ssid, uint32_t ssid_cap, char *ip, uint32_t ip_cap);
     /* 2.4 G 扫描：把「序号) SSID rssi=… ch=…」一行一条写进 out，返回条数；-1 = 扫不了 */
     int (*scan)(char *out, uint32_t cap);
+    /* 原始扫描（不过滤、含 freq == 0）：`wifi scan --raw` 用；没装则退回 scan（t166） */
+    int (*scan_raw)(char *out, uint32_t cap);
+    /* 射频关/开：`wifi off` = SetWifiModeOff()，`wifi on` = EnableWifi()（0 = 成功） */
+    int (*radio_off)(void);
+    int (*radio_on)(void);
     /* 「取时 → 连云」进度一行（`wifi set` 收尾用）：0 = 成功写好 */
     int (*progress)(char *out, uint32_t cap);
     /* 清空家庭 Wi-Fi 凭据（`wifi clear`）：0 = 已清；-1 = 失败。

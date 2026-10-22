@@ -40,15 +40,22 @@ int gw_net_scan_ap(const char *ssid, int *rssi, int *ch);
 int gw_net_scan_cache(uint32_t *scanned_at_ms, uint32_t *count);
 int gw_net_scan_cache_get(uint32_t idx, char *ssid, uint32_t cap, int *rssi, int *ch);
 
-/* ---- 串口 `wifi` 命令与开机联网共用（t136） ----
- * 阻塞式连接：内部就是 sta_start + 每 GW_WIFI_CONNECT_POLL_MS 调一次 sta_poll，
- * 直到连上 / 失败 / 超时。为什么允许阻塞：调用方只有两个——开机时的 net_task
- * （本来就是"联网 → 取时 → 连云"的顺序流程）和串口命令（人在等结果）。
- * 返回：1 = 已连上；-1 = 失败（reason 写 "auth"/"timeout"/"internal"/"busy"） */
+/* ---- 串口 `wifi` 命令与开机联网共用（t136/t166） ----
+ * 带时限的连接：真正的 ConnectTo + 轮询在专用任务 gwConn 里跑（SDK 的
+ * wifi_send_cmd 等固件事件没有超时，卡住时会把调用者一起钉死），
+ * 本函数只等到 timeout_ms 左右就返回，绝不无限阻塞。
+ * 返回：1 = 已连上；-1 = 失败（reason 写 "auth"/"timeout"/"internal"/"busy"/"stuck"） */
 int gw_net_sta_connect_wait(const char *ssid, const char *psk,
                             uint32_t timeout_ms, char *reason, uint32_t cap);
-/* 2.4 G 扫描并排版成可打印的多行文本（一行一个热点），返回条数；-1 = 扫不了 */
+/* 2.4 G 扫描并排版成可打印的多行文本（一行一个热点），返回条数；-1 = 扫不了。
+ * 内部按厂商口径重试（1 s × 15），并把原始前 3 条打进 [NET] 日志。 */
 int gw_net_scan_list(char *out, uint32_t cap);
+/* 不过滤的原始扫描（含 freq == 0 的条目），给 `wifi scan --raw` 现场判读用 */
+int gw_net_scan_raw(char *out, uint32_t cap);
+/* 射频开关：`wifi off` = SetWifiModeOff()（SDK 卡进 recovery 后唯一的自救动作），
+ * `wifi on` = EnableWifi()（故意不调 SetWifiModeOn，避免用厂家 SSID 绕过我们的凭据） */
+int gw_net_radio_off(void);
+int gw_net_radio_on(void);
 /* reason 码 → 一句中文（`wifi set` 与 net_task 共用，避免两处措辞分叉） */
 const char *gw_net_reason_text(const char *reason);
 

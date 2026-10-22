@@ -32,6 +32,7 @@ static_library("gateway_app") {
         "gw_prov_route.c",  # HTTP 路由：5 个接口 + 内嵌 H5 页面（§12.11）
         "gw_http.c",        # 最小 HTTP/1.1 服务端（单任务串行，socket 走 lwip/主机桩）
         "gw_net.c",         # 板级 Wi-Fi：SoftAP / STA / 2.4 G 预检（wifi_lite）
+        "gw_scan.c",        # 扫描重试口径 + 排版（纯逻辑，主机可测，t166）
         "gw_store.c",       # 配网持久化：Wi-Fi 凭证 + 绑定白名单（Vendor Flash）
         "gw_kvcfg.c",       # 设备凭证 KV：编解码 + 写入/读回校验 + 串口命令本体（纯逻辑）
         "gw_wifi_shell.c",  # 串口 `wifi show/set/scan` 命令本体（纯逻辑，回调表注入）

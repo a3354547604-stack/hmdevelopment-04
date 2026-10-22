@@ -406,6 +406,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
    状态卡里只有「云端服务：已配置 / 使用出厂配置」，**没有**接入地址、设备 ID、密钥任何字样。
 
+## 4.6 扫不到 Wi-Fi / `wifi set` 卡在 recovery（t166，3 步）
+
+> 只在「`wifi scan` 一条都没有」或「`wifi set` 不返回、串口一直刷 recovery」时看。
+
+1. 串口敲 **`wifi scan --raw`**（不过滤、把驱动给的每一条都打出来）。期望看到
+   `[NET] 扫描：Scan=0 num=N 首条 ... （取了 k 次）` + 至多 3 行 `[NET] 原始 n) ssid=... freq=... rssi=...`。
+   - `N>0` 但没有 `freq=0` 的行 → 扫描正常，问题在别处（回到 §6 判据表）；
+   - 有 `freq=0` 的行 → **驱动没填频率**，把这几行拍照回传（不是路由器问题）；
+   - `num=0` 且 `k=15` → 射频确实扫不到任何热点。
+2. 敲 **`wifi off`** → 等 2 秒 → **`wifi on`** → 再 `wifi scan`。
+   期望：`[NET] 射频已关（SetWifiModeOff rc=0）` / `[NET] 射频已开（EnableWifi；扫描/连接随即可用）`。
+3. 仍为空或 `wifi set` 仍刷 `recovery process` → **复位板子**（那是 SDK 预编译库里的死循环，
+   本条命令已经不会再把串口卡住，但射频救不回来）。把 `wifi scan --raw` 的输出发我。
+
 ## 5. 退出与收尾（2 步）
 
 1. **退出**：再长按 3 秒。串口期望（`mode`/`bound` 随现场变，SoftAP 随之消失）：

@@ -19,6 +19,8 @@
 
 #include "gw_config.h"
 #include "gw_net.h"
+#include "gw_scan.h"          /* 扫描重试口径与排版（t166：厂商 SetWifiScan 同序） */
+#include "config_network.h"  /* SetWifiModeOff：`wifi off` 复位射频用（SDK 板级） */
 
 #include "lwip/ip_addr.h"
 #include "lwip/netif.h"
@@ -93,55 +95,262 @@ const char *gw_net_reason_text(const char *reason)
     if (strcmp(reason, "not_found") == 0) {
         return "2.4 GHz 扫描里没有这个 SSID";
     }
+    if (strcmp(reason, "stuck") == 0) {
+        return "连接没在时限内出结果：Wi-Fi 驱动卡在 SDK 的 recovery 里（先执行 wifi off 复位射频再试）";
+    }
     return reason;
+}
+
+/*
+ * 连接必须放在自己的任务里跑（t166）。
+ *
+ * 原因：SDK 的 wifi_send_cmd() 在等固件事件时没有超时；一旦固件不回，
+ * 它会调 wifi_recovery_process() 然后**重新发同一条命令**，形成死循环
+ * （现场看到的就是 `[wifi_api_internal:D]recovery process ...` 刷屏、命令不返回）。
+ * 这个循环在 SDK 里，我们改不了；能做的是不让它把 shell 任务一起钉死：
+ * 真正的 ConnectTo + 轮询在 gwConn 任务里执行，调用方只等一个带时限的完成标志，
+ * 超时就把「stuck」交给操作的人（提示先 `wifi off` 复位射频），shell 立刻可用。
+ */
+#define GW_CONN_IDLE     0
+#define GW_CONN_RUNNING  1
+#define GW_CONN_OK       2
+#define GW_CONN_FAIL    (-1)
+#define GW_CONN_STUCK   (-2)     /* 调用方已放弃，worker 还没回来 */
+
+#define GW_CONN_TASK_STACK  4096u
+#define GW_CONN_TASK_PRIO   30u
+
+static volatile int s_conn_state = GW_CONN_IDLE;
+static volatile uint8_t s_conn_req = 0u;
+static char     s_conn_ssid[GW_PROV_SSID_MAX + 1];
+static char     s_conn_psk[64];
+static char     s_conn_reason[16];
+static uint32_t s_conn_timeout_ms;
+static UINT32   s_conn_task = 0u;
+
+static void net_conn_finish(int state, const char *reason)
+{
+    if (reason != NULL && reason[0] != '\0') {
+        (void)snprintf(s_conn_reason, sizeof(s_conn_reason), "%s", reason);
+    } else {
+        s_conn_reason[0] = '\0';
+    }
+    s_conn_state = state;
+}
+
+/* worker 里跑的就是原来的同步流程：发起 + 轮询到出结果 */
+static void net_conn_run(void)
+{
+    uint32_t waited = 0u;
+    char reason[16];
+    int r;
+
+    reason[0] = '\0';
+    if (gw_net_sta_start(s_conn_ssid, s_conn_psk) != 0) {
+        net_conn_finish(GW_CONN_FAIL, "internal");
+        return;
+    }
+    for (;;) {
+        LOS_Msleep(GW_WIFI_CONNECT_POLL_MS);
+        waited += GW_WIFI_CONNECT_POLL_MS;
+        r = gw_net_sta_poll(reason, (uint32_t)sizeof(reason));
+        if (r == 1) {
+            net_conn_finish(GW_CONN_OK, NULL);
+            return;
+        }
+        if (r < 0) {
+            net_conn_finish(GW_CONN_FAIL, (reason[0] != '\0') ? reason : "internal");
+            return;
+        }
+        if (waited >= s_conn_timeout_ms) {
+            s_sta_pending = 0u;
+            net_conn_finish(GW_CONN_FAIL, "timeout");
+            return;
+        }
+    }
+}
+
+static void net_conn_worker(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        if (s_conn_req == 0u) {
+            LOS_Msleep(100u);
+            continue;
+        }
+        s_conn_req = 0u;
+        net_conn_run();
+    }
+}
+
+static int net_conn_task_ensure(void)
+{
+    TSK_INIT_PARAM_S p;
+    UINT32 tid = 0u;
+
+    if (s_conn_task != 0u) {
+        return 0;
+    }
+    memset(&p, 0, sizeof(p));
+    p.pfnTaskEntry = (TSK_ENTRY_FUNC)net_conn_worker;
+    p.usTaskPrio = GW_CONN_TASK_PRIO;
+    p.uwStackSize = GW_CONN_TASK_STACK;
+    p.pcName = (CHAR *)"gwConn";
+    p.uwArg = 0u;
+    if (LOS_TaskCreate(&tid, &p) != LOS_OK) {
+        printf("[NET] ⚠ 起连接任务失败（改重启后再试）\n");
+        return -1;
+    }
+    s_conn_task = tid;
+    return 0;
 }
 
 int gw_net_sta_connect_wait(const char *ssid, const char *psk,
                             uint32_t timeout_ms, char *reason, uint32_t cap)
 {
     uint32_t waited = 0u;
-    int r;
+    uint32_t deadline;
 
     if (reason != NULL && cap > 0u) {
         reason[0] = '\0';
     }
-    /* 已有连接在跑（例如配网窗口里 gw_prov 刚发起的那次）就不再叠一条：
-     * wifi_lite 的 AddDeviceConfig/ConnectTo 不是可重入的，同时发起会互相打断。 */
-    if (s_sta_pending != 0u) {
-        net_set_reason(reason, cap, "busy");
-        return -1;
-    }
-    if (gw_net_sta_start(ssid, psk) != 0) {
+    if (ssid == NULL || psk == NULL || ssid[0] == '\0' || psk[0] == '\0') {
         net_set_reason(reason, cap, "internal");
         return -1;
     }
-    for (;;) {
+    /* 上一次还卡在 SDK 里（stuck）或正在连：不再叠一发，SDK 的发起接口不可重入 */
+    if (s_conn_state == GW_CONN_RUNNING || s_conn_state == GW_CONN_STUCK) {
+        net_set_reason(reason, cap, (s_conn_state == GW_CONN_STUCK) ? "stuck" : "busy");
+        return -1;
+    }
+    if (net_conn_task_ensure() != 0) {
+        net_set_reason(reason, cap, "internal");
+        return -1;
+    }
+    (void)snprintf(s_conn_ssid, sizeof(s_conn_ssid), "%s", ssid);
+    (void)snprintf(s_conn_psk, sizeof(s_conn_psk), "%s", psk);
+    s_conn_timeout_ms = timeout_ms;
+    s_conn_reason[0] = '\0';
+    s_conn_state = GW_CONN_RUNNING;
+    s_conn_req = 1u;
+
+    /* 比 worker 自己的时限多留给 2 次轮询：正常情况下 worker 会先写结论，
+     * 这里多等的这点时间是为了不把"刚好在边界上成功"误判成卡死。 */
+    deadline = timeout_ms + GW_WIFI_CONNECT_POLL_MS * 2u;
+    while (s_conn_state == GW_CONN_RUNNING) {
         LOS_Msleep(GW_WIFI_CONNECT_POLL_MS);
         waited += GW_WIFI_CONNECT_POLL_MS;
-        r = gw_net_sta_poll(reason, cap);
-        if (r == 1) {
-            return 1;
-        }
-        if (r < 0) {
-            return -1;
-        }
-        if (waited >= timeout_ms) {
-            s_sta_pending = 0u;     /* 别把状态留成"还在连"，否则下一次直接 busy */
-            net_set_reason(reason, cap, "timeout");
+        if (waited >= deadline) {
+            s_conn_state = GW_CONN_STUCK;
+            s_sta_pending = 0u;     /* 别让配网状态机以为"还在连" */
+            printf("[NET] 连接 %u ms 无结果：worker 卡在 SDK 里（recovery），命令先返回\n",
+                   (unsigned)waited);
+            net_set_reason(reason, cap, "stuck");
             return -1;
         }
     }
+    if (s_conn_state == GW_CONN_OK) {
+        return 1;
+    }
+    net_set_reason(reason, cap, (s_conn_reason[0] != '\0') ? s_conn_reason : "internal");
+    return -1;
+}
+
+/* ---------------------------------------------- 射频开关（t166：现场复位用） */
+/*
+ * 为什么要给现场一条 `wifi off`：一旦 SDK 卡进 recovery，唯一的自救动作是
+ * 把射频关掉再开（等价于厂商 SetWifiModeOff / SetWifiModeOn 的前半段）。
+ * SetWifiModeOff() 内部是 DisableWifi() + residentFlag(0)，正是我们要的。
+ * 注意：这里**不**调 SetWifiModeOn()——那会用编译期/Flash 里的厂家 SSID 去连，
+ * 把我们自己的凭据体系绕过去；`wifi on` 只做 EnableWifi。
+ */
+int gw_net_radio_off(void)
+{
+    WifiErrorCode rc = SetWifiModeOff();
+
+    s_wifi_on = 0u;
+    s_sta_pending = 0u;
+    s_sta_polls = 0u;
+    if (s_conn_state == GW_CONN_STUCK) {
+        s_conn_state = GW_CONN_IDLE;    /* 允许重开一次；worker 若还在里面，它的结论会被忽略 */
+        s_conn_reason[0] = '\0';
+    }
+    printf("[NET] 射频已关（SetWifiModeOff rc=%d）\n", (int)rc);
+    return 0;
+}
+
+int gw_net_radio_on(void)
+{
+    if (net_wifi_on() != 0) {
+        return -1;
+    }
+    printf("[NET] 射频已开（EnableWifi；扫描/连接随即可用）\n");
+    return 0;
 }
 
 /* --------------------------------------------------------- 扫描（列表） */
+/*
+ * 扫描是"发起 → 等 → 取表"的异步过程（厂商 SetWifiScan 的 retry=15 就是这个原因）。
+ * 这里有三个现场必须能分辨的结局：
+ *   ① Scan() 失败       → 单射频被 SoftAP 占着，或驱动没起来；
+ *   ② 15 次都取到 0 条  → 射频在扫，但一个热点都没有（只有 5 G？太远？）；
+ *   ③ 取到条目但 freq=0 → 驱动没填频率字段，2.4 G 过滤会把它们全丢掉，
+ *                          表象与 ② 一模一样——所以原始前 3 条必须原样打出来。
+ */
+static int net_scan_call(void)
+{
+    return (Scan() == WIFI_SUCCESS) ? 0 : -1;
+}
 
-int gw_net_scan_list(char *out, uint32_t cap)
+static int net_scan_fetch(gw_scan_ent_t *ents, uint32_t cap, uint32_t *num)
 {
     static WifiScanInfo list[GW_NET_SCAN_MAX];
-    unsigned int num = GW_NET_SCAN_MAX;
-    unsigned int i;
-    unsigned int n = 0u;
-    uint32_t used = 0u;
+    unsigned int n = GW_NET_SCAN_MAX;
+    uint32_t i;
+
+    memset(list, 0, sizeof(list));
+    if (GetScanInfoList(list, &n) != WIFI_SUCCESS) {
+        if (num != NULL) {
+            *num = 0u;
+        }
+        return -1;
+    }
+    if (n > GW_NET_SCAN_MAX) {
+        n = GW_NET_SCAN_MAX;
+    }
+    if (n > cap) {
+        n = cap;
+    }
+    for (i = 0u; i < n; i++) {
+        (void)snprintf(ents[i].ssid, sizeof(ents[i].ssid), "%s", (const char *)list[i].ssid);
+        ents[i].freq = (int)list[i].frequency;
+        ents[i].rssi = (int)list[i].rssi;
+    }
+    if (num != NULL) {
+        *num = (uint32_t)n;
+    }
+    return 0;
+}
+
+static void net_scan_sleep(uint32_t ms)
+{
+    LOS_Msleep(ms);
+}
+
+static const gw_scan_ops_t k_scan_ops = {
+    net_scan_call,
+    net_scan_fetch,
+    net_scan_sleep
+};
+
+static int net_scan_list_common(char *out, uint32_t cap, int raw)
+{
+    gw_scan_ent_t *ents;
+    gw_scan_trace_t tr;
+    uint32_t num = 0u;
+    uint32_t i;
+    int rc;
+    static gw_scan_ent_t s_ents[GW_NET_SCAN_MAX];   /* 32 条 × ~44 B：不放在栈上（shell 任务栈不大） */
 
     if (out == NULL || cap == 0u) {
         return -1;
@@ -150,34 +359,38 @@ int gw_net_scan_list(char *out, uint32_t cap)
     if (net_wifi_on() != 0) {
         return -1;
     }
-    memset(list, 0, sizeof(list));
-    if (Scan() != WIFI_SUCCESS) {
+    ents = s_ents;
+    memset(ents, 0, sizeof(s_ents));
+    memset(&tr, 0, sizeof(tr));
+    tr.scan_rc = -1;
+    rc = gw_scan_fetch(&k_scan_ops, ents, GW_NET_SCAN_MAX, &num, &tr);
+    if (rc < 0) {
         /* 单射频：SoftAP 起来以后驱动会拒绝扫描。这不是故障，只是"这会儿扫不了" */
-        printf("[NET] 扫描被驱动拒绝（SoftAP 已开启？）\n");
+        printf("[NET] 扫描：Scan 失败（SoftAP 已开启？单射频下 AP 与扫描不能同时开）\n");
         return -1;
     }
-    if (GetScanInfoList(list, &num) != WIFI_SUCCESS) {
-        return -1;
+    /* 一行判据：把"扫了几次、拿到几条、第一条长什么样"钉在日志里，
+     * 现场不用猜是"没扫到"还是"过滤掉了"。 */
+    printf("[NET] 扫描：Scan=0 num=%u 首条 ssid=%s freq=%d rssi=%d（取了 %u 次）\n",
+           num, (num > 0u) ? ents[0].ssid : "-",
+           (num > 0u) ? ents[0].freq : 0,
+           (num > 0u) ? ents[0].rssi : 0,
+           tr.attempts);
+    for (i = 0u; i < num && i < 3u; i++) {
+        printf("[NET] 原始 %u) ssid=%s freq=%d rssi=%d\n",
+               i + 1u, ents[i].ssid, ents[i].freq, ents[i].rssi);
     }
-    if (num > GW_NET_SCAN_MAX) {
-        num = GW_NET_SCAN_MAX;
-    }
-    for (i = 0u; i < num && n < GW_NET_LIST_MAX; i++) {
-        int ch = net_freq_to_ch(list[i].frequency);
-        int w;
+    return (int)gw_scan_format(ents, num, raw, out, cap);
+}
 
-        if (ch == 0) {
-            continue;               /* 只要 2.4 G：网关连 5 G 连不上，列出来只会误导 */
-        }
-        w = snprintf(out + used, cap - used, "    %u) %-32s rssi=%d dBm ch=%d\n",
-                     n + 1u, (const char *)list[i].ssid, (int)list[i].rssi, ch);
-        if (w <= 0 || (uint32_t)w >= (cap - used)) {
-            break;
-        }
-        used += (uint32_t)w;
-        n++;
-    }
-    return (int)n;
+int gw_net_scan_list(char *out, uint32_t cap)
+{
+    return net_scan_list_common(out, cap, 0);
+}
+
+int gw_net_scan_raw(char *out, uint32_t cap)
+{
+    return net_scan_list_common(out, cap, 1);
 }
 
 /* ------------------------------------------------- 开窗前的 Wi-Fi 列表缓存 */

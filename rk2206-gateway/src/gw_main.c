@@ -1793,12 +1793,28 @@ static int wifi_op_progress(char *out, uint32_t cap)
     return 0;
 }
 
+/* `wifi off/on`（t166）：直接把板级射频开关接上去。
+ * 为什么值得暴露到串口：SDK 的 wifi_send_cmd() 等固件事件没有超时，卡进 recovery 之后
+ * 唯一能让现场自己救回来的动作就是把射频关掉再开（= 厂商 SetWifiModeOff 那一步）。 */
+static int wifi_op_radio_off(void)
+{
+    return gw_net_radio_off();
+}
+
+static int wifi_op_radio_on(void)
+{
+    return gw_net_radio_on();
+}
+
 static const gw_wifi_ops_t s_wifi_ops = {
     .cred_load = gw_store_cred_load,
     .cred_save = gw_store_cred_save,
     .connect   = gw_net_sta_connect_wait,
     .sta_info  = wifi_op_sta_info,
     .scan      = gw_net_scan_list,
+    .scan_raw  = gw_net_scan_raw,
+    .radio_off = wifi_op_radio_off,
+    .radio_on  = wifi_op_radio_on,
     .progress  = wifi_op_progress,
     .cred_clear = wifi_op_cred_clear,
 };

@@ -80,6 +80,8 @@ static void usage(char *out, uint32_t cap)
         "    wifi show                              看已保存的 SSID 与 STA 状态（口令不回显）\n"
         "    wifi set ssid=<名称> psk=<口令>        存进 Flash 并立即联网（SSID 1–32 B，口令 8–63 B）\n"
         "    wifi scan                              列 2.4 GHz 热点（SSID / RSSI / 信道）\n"
+        "    wifi scan --raw                        原样列驱动给的每一条（含 freq=0），现场判读用\n"
+        "    wifi on / wifi off                     开 / 关射频（驱动卡住时先 off 再 on 复位）\n"
         "    wifi clear                             清掉已保存的家庭 Wi-Fi（重启后自动进配网）\n"
         "  说明：口令里不要带空格；口令只写不读，写进去就再也打不出来（这是有意的）。\n"
         "        与长按配网键 3 s 的流程共用同一份 Flash 凭据，先写的被后写的覆盖。\n");
@@ -110,6 +112,9 @@ static const char *wifi_reason_text(const char *reason, uint32_t timeout_ms)
     }
     if (strcmp(reason, "not_found") == 0) {
         return "2.4 GHz 扫描里没有这个 SSID（可能是 5 GHz / 隐藏网络 / 名字打错）";
+    }
+    if (strcmp(reason, "stuck") == 0) {
+        return "没在时限内出结果：Wi-Fi 驱动卡在 SDK 的 recovery 里（命令已返回，不是卡死）";
     }
     return reason;
 }
@@ -264,6 +269,13 @@ static int cmd_set(int argc, char **argv, char *out, uint32_t cap)
 
     if (rc != 1) {
         app(out, cap, "  [wifi] ✗ 连接失败：%s\n", wifi_reason_text(reason, GW_WIFI_CONNECT_TIMEOUT_MS));
+        if (strcmp(reason, "stuck") == 0) {
+            /* 这一支不是口令/SSID 问题，别让人去改路由器 */
+            app(out, cap,
+                "  [wifi] 现场自救：`wifi off` → 等 2 秒 → `wifi on` → 再 `wifi set`；"
+                "串口若还在刷 recovery，只能复位板子\n");
+            return -1;
+        }
         app(out, cap,
             "  [wifi] 排查顺序：① wifi scan 看 SSID 拼写与信号 ② 口令 8–63 位且区分大小写"
             " ③ 路由器是不是 5 GHz-only / 开了 MAC 白名单\n");
@@ -297,17 +309,20 @@ static int cmd_set(int argc, char **argv, char *out, uint32_t cap)
 
 /* ------------------------------------------------------------------ scan */
 
-static int cmd_scan(char *out, uint32_t cap)
+static int cmd_scan(int raw, char *out, uint32_t cap)
 {
     char list[GW_WIFI_LIST_MAX];
     int n;
+    int (*fn)(char *, uint32_t);
 
-    if (s_ops == NULL || s_ops->scan == NULL) {
+    fn = (raw != 0 && s_ops != NULL && s_ops->scan_raw != NULL) ? s_ops->scan_raw
+                                                               : ((s_ops != NULL) ? s_ops->scan : NULL);
+    if (fn == NULL) {
         app(out, cap, "  [wifi] ⚠ 板级回调未接（内部错误）：scan\n");
         return -1;
     }
     list[0] = '\0';
-    n = s_ops->scan(list, (uint32_t)sizeof(list));
+    n = fn(list, (uint32_t)sizeof(list));
     if (n < 0) {
         app(out, cap,
             "  [wifi] 扫描不可用（SoftAP 已开启时单射频驱动会拒绝扫描）\n"
@@ -315,12 +330,48 @@ static int cmd_scan(char *out, uint32_t cap)
         return -1;
     }
     if (n == 0) {
-        app(out, cap, "  [wifi] 扫到 0 个 2.4 GHz 热点：路由器是不是只开 5 GHz？或信号太远\n");
+        if (raw != 0) {
+            app(out, cap,
+                "  [wifi] 驱动一条都没给（原始表也是空的）：先 `wifi off` 再 `wifi on` 复位射频，"
+                "仍为空就重启板子\n");
+        } else {
+            app(out, cap,
+                "  [wifi] 扫到 0 个 2.4 GHz 热点：路由器是不是只开 5 GHz？或信号太远\n"
+                "  [wifi] 用 `wifi scan --raw` 看驱动原始表——若 raw 有条目但这里没有，"
+                "就是驱动没填 freq（把 raw 那几行拍照回传）\n");
+        }
         return 0;
     }
-    app(out, cap, "  [wifi] 扫到 %d 个 2.4 GHz 热点（只列 %u 个，按驱动顺序）：\n", n,
-        (unsigned)GW_NET_LIST_MAX);
+    if (raw != 0) {
+        app(out, cap, "  [wifi] 驱动原始表 %d 条（不过滤；freq=0 表示驱动没填）：\n", n);
+    } else {
+        app(out, cap, "  [wifi] 扫到 %d 个 2.4 GHz 热点（只列 %u 个，按驱动顺序）：\n", n,
+            (unsigned)GW_NET_LIST_MAX);
+    }
     app(out, cap, "%s", list);
+    return 0;
+}
+
+/* ------------------------------------------------------- 射频开关（t166） */
+
+static int cmd_radio(int on, char *out, uint32_t cap)
+{
+    if (s_ops == NULL || (on ? s_ops->radio_on : s_ops->radio_off) == NULL) {
+        app(out, cap, "  [wifi] 本版本的板级实现不支持射频开关\n");
+        return -1;
+    }
+    if ((on ? s_ops->radio_on() : s_ops->radio_off()) != 0) {
+        app(out, cap, "  [wifi] ✗ 射频%s失败（串口日志里有 SDK 的 [wifi_api_internal] 行可判定）\n",
+            on ? "开" : "关");
+        return -1;
+    }
+    if (on) {
+        app(out, cap,
+            "  [wifi] 射频已开：接着 `wifi scan`（预热几秒）或 `wifi set ssid=… psk=…` 重连\n");
+    } else {
+        app(out, cap,
+            "  [wifi] 射频已关：等 2 秒再 `wifi on`；若日志里 recovery 还在刷，说明驱动没救回来，复位板子\n");
+    }
     return 0;
 }
 
@@ -385,7 +436,25 @@ int gw_wifi_cmd(const char *line, char *out, uint32_t cap)
         return cmd_set(argc - base - 1, &argv[base + 1], out, cap);
     }
     if (strcmp(argv[base], "scan") == 0) {
-        return cmd_scan(out, cap);
+        int raw = 0;
+
+        if (base + 1 < argc &&
+            (strcmp(argv[base + 1], "--raw") == 0 || strcmp(argv[base + 1], "raw") == 0)) {
+            raw = 1;
+        } else if (base + 1 < argc) {
+            app(out, cap, "  [wifi] `scan` 只认 `--raw`（多出来的 `%s` 已忽略）\n", argv[base + 1]);
+        }
+        return cmd_scan(raw, out, cap);
+    }
+    if (strcmp(argv[base], "rawscan") == 0) {
+        /* 别名：手敲比 `scan --raw` 短，现场排在排查清单第一行 */
+        return cmd_scan(1, out, cap);
+    }
+    if (strcmp(argv[base], "off") == 0) {
+        return cmd_radio(0, out, cap);
+    }
+    if (strcmp(argv[base], "on") == 0) {
+        return cmd_radio(1, out, cap);
     }
     if (strcmp(argv[base], "clear") == 0) {
         return cmd_clear(out, cap);

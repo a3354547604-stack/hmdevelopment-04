@@ -26,6 +26,7 @@
 #include "gw_key.h"
 #include "gw_hw_adc.h"
 #include "gw_hw.h"
+#include "gw_scan.h"      /* t166：扫描重试口径与排版（纯逻辑） */
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -1768,6 +1769,10 @@ static int         s_wf_sta_ok;
 static int         s_wf_scan_n;
 static int         s_wf_save_calls;
 static int         s_wf_clear_calls;    /* t137：`wifi clear` 被调用几次 */
+static int         s_wf_raw_calls;      /* t166：`wifi scan --raw` 被调用几次 */
+static int         s_wf_radio_off_calls;
+static int         s_wf_radio_on_calls;
+static int         s_wf_radio_fail;
 static int         s_wf_clear_fail;
 static int         s_wf_connect_calls;
 static char        s_wf_last_psk[GW_WIFI_PSK_CAP];
@@ -1826,6 +1831,38 @@ static int wf_sta_info(char *ssid, uint32_t ssid_cap, char *ip, uint32_t ip_cap)
     return 1;
 }
 
+/* t166：`wifi scan --raw` 的假实现（真机上是不做 2.4 G 过滤的 gw_net_scan_raw）。
+ * 特意带上一条 freq=0 —— 那正是现场要判读的形态。 */
+static int wf_scan_raw(char *out, uint32_t cap)
+{
+    s_wf_raw_calls++;
+    if (s_wf_scan_n < 0) {
+        return -1;
+    }
+    if (s_wf_scan_n == 0) {
+        out[0] = '\0';
+        return 0;
+    }
+    (void)snprintf(out, cap,
+                   "    1) HomeWiFi                         rssi=-42 dBm freq=2412 ch=6\n"
+                   "    2) 5G-Only-Net                      rssi=-55 dBm freq=5180 ch=0\n"
+                   "    3) FreqMissing                      rssi=-70 dBm freq=0 ch=0\n");
+    return 3;
+}
+
+/* t166：射频开关的假实现 */
+static int wf_radio_off(void)
+{
+    s_wf_radio_off_calls++;
+    return s_wf_radio_fail ? -1 : 0;
+}
+
+static int wf_radio_on(void)
+{
+    s_wf_radio_on_calls++;
+    return s_wf_radio_fail ? -1 : 0;
+}
+
 static int wf_scan(char *out, uint32_t cap)
 {
     if (s_wf_scan_n < 0) {
@@ -1866,6 +1903,9 @@ static const gw_wifi_ops_t wf_ops = {
     .connect   = wf_connect,
     .sta_info  = wf_sta_info,
     .scan      = wf_scan,
+    .scan_raw  = wf_scan_raw,
+    .radio_off = wf_radio_off,
+    .radio_on  = wf_radio_on,
     .progress  = wf_progress,
     .cred_clear = wf_cred_clear,
 };
@@ -2036,7 +2076,177 @@ static void test_wifi_cmd(void)
     t_ok(rc == -1 && strstr(out, "清除失败") != NULL,
          "Flash 清除失败 → 明确报错（不能假装清掉了，否则用户复位后仍进不了配网）");
     s_wf_clear_fail = 0;
+
+    /* ⑪ t166：`wifi scan --raw` / `rawscan` —— 现场判读"驱动给了什么 freq" */
+    s_wf_scan_n = 1;
+    s_wf_raw_calls = 0;
+    rc = gw_wifi_cmd("wifi scan --raw", out, sizeof(out));
+    t_ok(rc == 0 && s_wf_raw_calls == 1 && strstr(out, "freq=0") != NULL &&
+         strstr(out, "不过滤") != NULL,
+         "scan --raw：走原始回调、把 freq=0 的条目也列出来（这是与 scan 的唯一区别）");
+    rc = gw_wifi_cmd("wifi rawscan", out, sizeof(out));
+    t_ok(rc == 0 && s_wf_raw_calls == 2 && strstr(out, "freq=0") != NULL,
+         "rawscan：别名等价于 scan --raw（现场少敲几个字）");
+    rc = gw_wifi_cmd("wifi scan --raw --raw", out, sizeof(out));
+    t_ok(rc == 0, "scan 后面多给的参数只提示、不报错（现场手滑不至于卡住）");
+    s_wf_scan_n = 0;
+    rc = gw_wifi_cmd("wifi scan --raw", out, sizeof(out));
+    t_ok(rc == 0 && strstr(out, "驱动一条都没给") != NULL && strstr(out, "wifi off") != NULL,
+         "raw 也是 0 条 → 明确指向射频复位（不是让人去改路由器）");
+
+    /* ⑫ t166：`wifi off` / `wifi on` */
+    s_wf_scan_n = 1;
+    s_wf_radio_off_calls = 0;
+    s_wf_radio_on_calls = 0;
+    s_wf_radio_fail = 0;
+    rc = gw_wifi_cmd("wifi off", out, sizeof(out));
+    t_ok(rc == 0 && s_wf_radio_off_calls == 1 && strstr(out, "射频已关") != NULL,
+         "wifi off：关射频并提示「等 2 秒再 on」");
+    rc = gw_wifi_cmd("wifi on", out, sizeof(out));
+    t_ok(rc == 0 && s_wf_radio_on_calls == 1 && strstr(out, "射频已开") != NULL,
+         "wifi on：开射频并提示下一步（scan / set）");
+    s_wf_radio_fail = 1;
+    rc = gw_wifi_cmd("wifi off", out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "失败") != NULL, "射频开关失败 → 明确报错，不静默");
+    s_wf_radio_fail = 0;
+
+    /* ⑬ t166：连接卡在 SDK recovery 时，`wifi set` 必须给出可照做的自救动作 */
+    s_wf_connect_rc = -1;
+    s_wf_connect_reason = "stuck";
+    rc = gw_wifi_cmd("wifi set ssid=HomeWiFi psk=" GW_WF_PSK, out, sizeof(out));
+    t_ok(rc == -1 && strstr(out, "recovery") != NULL && strstr(out, "wifi off") != NULL,
+         "stuck：报「驱动卡在 recovery」并给出 off→on→重试 的顺序（不是让人改路由器）");
+    t_ok(strstr(out, GW_WF_PSK) == NULL, "stuck 的输出里也绝不出现口令");
+    s_wf_connect_rc = 1;
+    s_wf_connect_reason = "auth";
+
     gw_wifi_set_ops(NULL);
+}
+
+/* ------------------------- t166 扫描重试口径与排版（纯逻辑） ------------------------- */
+/* 桩的语义按厂商 SetWifiScan()（config_network.c:567-610）：
+ *   Scan() 成功后，GetScanInfoList 为空就 sleep 1 s 再取，最多 15 次。
+ * 这三个用例把"到底取了几次"钉住——现场那台冷启动 0 条，就是因为我们只取了一次。 */
+typedef struct {
+    int      scan_rc;      /* Scan() 返回：0 成功 */
+    int      empty_first;  /* 前几次 fetch 返回空 */
+    uint32_t calls;        /* fetch 被调了几次 */
+    uint32_t sleeps;       /* sleep 被调了几次 */
+    uint32_t last_ms;
+} scan_stub_t;
+
+static scan_stub_t s_sc;
+
+static int sc_scan(void)
+{
+    return s_sc.scan_rc;
+}
+
+static int sc_fetch(gw_scan_ent_t *ents, uint32_t cap, uint32_t *num)
+{
+    s_sc.calls++;
+    if (s_sc.calls <= (uint32_t)s_sc.empty_first) {
+        if (num != NULL) {
+            *num = 0u;
+        }
+        return 0;
+    }
+    if (cap < 2u) {
+        if (num != NULL) {
+            *num = 0u;
+        }
+        return -1;
+    }
+    (void)snprintf(ents[0].ssid, sizeof(ents[0].ssid), "HomeWiFi");
+    ents[0].freq = 2412;
+    ents[0].rssi = -42;
+    (void)snprintf(ents[1].ssid, sizeof(ents[1].ssid), "FreqMissing");
+    ents[1].freq = 0;
+    ents[1].rssi = -70;
+    if (num != NULL) {
+        *num = 2u;
+    }
+    return 0;
+}
+
+static void sc_sleep(uint32_t ms)
+{
+    s_sc.sleeps++;
+    s_sc.last_ms = ms;
+}
+
+static const gw_scan_ops_t sc_ops = { sc_scan, sc_fetch, sc_sleep };
+
+static void test_scan_policy(void)
+{
+    gw_scan_ent_t ents[4];
+    gw_scan_trace_t tr;
+    char out[512];
+    uint32_t num = 0u;
+    uint32_t lines;
+    int rc;
+
+    t_start("t166 扫描：厂商口径重试（1 s × 15）+ freq=0 不过滤");
+
+    /* ① 第一次就拿到：不该白等 1 s */
+    memset(&s_sc, 0, sizeof(s_sc));
+    memset(ents, 0, sizeof(ents));
+    s_sc.empty_first = 0;
+    rc = gw_scan_fetch(&sc_ops, ents, 4u, &num, &tr);
+    t_ok(rc == 2 && num == 2u && tr.attempts == 1u && s_sc.sleeps == 0u,
+         "首次就取到 → 只取 1 次、不 sleep（扫描常几毫秒就绪）");
+
+    /* ② 空 3 次后拿到：取 4 次、sleep 3 次、每次 1000 ms —— 现场那台的真实形态 */
+    memset(&s_sc, 0, sizeof(s_sc));
+    s_sc.empty_first = 3;
+    rc = gw_scan_fetch(&sc_ops, ents, 4u, &num, &tr);
+    t_ok(rc == 2 && tr.attempts == 4u && s_sc.sleeps == 3u && s_sc.last_ms == GW_SCAN_RETRY_MS,
+         "空 3 次后拿到 → 共取 4 次、间隔 1 s（与厂商 SetWifiScan 同序）");
+
+    /* ③ 一直空：取满 15 次才放弃（旧代码只取 1 次，这就是冷启动 0 条的原因） */
+    memset(&s_sc, 0, sizeof(s_sc));
+    s_sc.empty_first = 1000;
+    rc = gw_scan_fetch(&sc_ops, ents, 4u, &num, &tr);
+    t_ok(rc == 0 && num == 0u && tr.attempts == GW_SCAN_RETRY_MAX && s_sc.calls == 15u &&
+         s_sc.sleeps == 14u,
+         "一直空 → 取满 15 次（14 次间隔）才报 0 条；attempts 可判读为 15");
+
+    /* ④ Scan() 本身失败（单射频被 SoftAP 占着）：不重试，直接失败 */
+    memset(&s_sc, 0, sizeof(s_sc));
+    s_sc.scan_rc = -1;
+    rc = gw_scan_fetch(&sc_ops, ents, 4u, &num, &tr);
+    t_ok(rc == -1 && s_sc.calls == 0u && tr.scan_rc == -1,
+         "Scan() 失败 → 立刻返回（不浪费 15 s；现场用 wifi off 复位射频）");
+
+    /* ⑤ 排版：默认只列 2.4 G；--raw 全列（freq=0 必须出现） */
+    memset(ents, 0, sizeof(ents));
+    (void)snprintf(ents[0].ssid, sizeof(ents[0].ssid), "HomeWiFi");
+    ents[0].freq = 2412;
+    ents[0].rssi = -42;
+    (void)snprintf(ents[1].ssid, sizeof(ents[1].ssid), "FreqMissing");
+    ents[1].freq = 0;
+    ents[1].rssi = -70;
+    (void)snprintf(ents[2].ssid, sizeof(ents[2].ssid), "FiveG");
+    ents[2].freq = 5180;
+    ents[2].rssi = -55;
+
+    lines = gw_scan_format(ents, 3u, 0, out, sizeof(out));
+    t_ok(lines == 1u && strstr(out, "HomeWiFi") != NULL &&
+         strstr(out, "FreqMissing") == NULL && strstr(out, "FiveG") == NULL,
+         "scan：只列 2.4 G（5 G 连不上，列出来只会误导）");
+    lines = gw_scan_format(ents, 3u, 1, out, sizeof(out));
+    t_ok(lines == 3u && strstr(out, "freq=0") != NULL && strstr(out, "freq=5180") != NULL,
+         "scan --raw：三条全列、freq 原样（freq=0 与 5 G 一眼可分）");
+
+    /* ⑥ 频率换算：2412→1、2484→14、5180/0→0 */
+    t_ok(gw_scan_freq_to_ch(2412) == 1 && gw_scan_freq_to_ch(2437) == 6 &&
+         gw_scan_freq_to_ch(2484) == 14 && gw_scan_freq_to_ch(5180) == 0 &&
+         gw_scan_freq_to_ch(0) == 0,
+         "频率→信道：2412=1 / 2437=6 / 2484=14 / 5 G 与 0 都是 0");
+
+    /* ⑦ 回调缺失 → 明确失败，不崩 */
+    rc = gw_scan_fetch(NULL, ents, 4u, &num, &tr);
+    t_ok(rc == -2, "回调表缺失 → -2（不崩、不静默返回 0 条）");
 }
 
 
@@ -2360,6 +2570,7 @@ int main(void)
     test_threshold_fail_paras();     /* t111 L-1 收口：失败响应 paras 必须是 {}、不谎报成功 */
     test_kvcfg();                    /* t34 凭证 KV：布局 + 落盘 + 串口命令 + 负向 */
     test_wifi_cmd();                 /* t136 串口 wifi：边界校验 + 口令不回显 + 失败可判读 */
+    test_scan_policy();              /* t166 扫描重试口径（1 s × 15）+ freq=0 的 raw 排版 */
     test_key_events();            /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
     test_tick_hb();               /* t141 心跳节拍 + 长按状态机（纯逻辑） */
     test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */
