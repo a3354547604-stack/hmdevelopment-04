@@ -305,7 +305,7 @@ P0 的 `devices.iotda_device_id` 还是 NULL，**实际走的就是这条回落�
 |---|---|---|
 | **ClientId** | `<device_id>_0_1_<UTC YYYYMMDDHH>` | `6a1b2c3d4e5f_0_1_2025100908` |
 | **UserName** | `<device_id>` | `6a1b2c3d4e5f` |
-| **Password** | HMACSHA256 的 64 位小写十六进制（方向见 §5.3） | `d11839835453575248c3daef2ef9a72659d94860538927efae2f9f71f7d4b3b1` |
+| **Password** | HMACSHA256 的 64 位小写十六进制（方向见 §5.3） | `01fd521b866bb80c2d7d662c3ccb971edd0a62a4f4f3ce04305806649808f29a` |
 
 - **ClientId 4 段的含义**（官方《连接鉴权》原文）：设备ID / 设备身份标识类型（**固定 `0`**）/ 密码签名类型
   （`0`=不校验时间戳，`1`=校验时间戳，**本项目取 `1`**）/ 时间戳（**UTC**，格式 `YYYYMMDDHH`）。

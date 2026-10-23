@@ -560,11 +560,11 @@ static void test_crypto_auth(void)
     {
         struct { uint64_t epoch; const char *client; const char *pass; } v[] = {
             { 1760000000ull, "6a1b2c3d4e5f_0_1_2025100908",
-              "d11839835453575248c3daef2ef9a72659d94860538927efae2f9f71f7d4b3b1" },
+              "01fd521b866bb80c2d7d662c3ccb971edd0a62a4f4f3ce04305806649808f29a" },
             { 1760003600ull, "6a1b2c3d4e5f_0_1_2025100909",
-              "f5a35b13a5b839d8e21e89e226c476d6b4a192957fef057c873b7e15ec676545" },
+              "b0714be78188e66e494bb24c37afb996217a7450dc4fa6dda53dc49f8115a99b" },
             { 1700000000ull, "6a1b2c3d4e5f_0_1_2023111422",
-              "c99446ef67bbc3055161bf1623ef0d5fc7c49db4a020048d216bd0ee3d81b741" },
+              "d0249a4ef72ceb7114a27dfd18b71c5e9f50e4607949f7959961a5043d14445e" },
         };
         uint32_t i;
 

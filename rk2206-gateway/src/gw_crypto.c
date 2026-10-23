@@ -178,7 +178,10 @@ void gw_iotda_password(const char *secret, const char *ts_ascii, char out[GW_SHA
 {
     uint8_t mac[GW_SHA256_LEN];
 
-    gw_hmac_sha256((const uint8_t *)secret, (uint32_t)strlen(secret),
-                   (const uint8_t *)ts_ascii, (uint32_t)strlen(ts_ascii), mac);
+    /* 平台实测口径（2026-10-23）：HMAC-SHA256 的 **key = 时间戳字符串**、
+     * **message = 设备密钥**。与"secret 作 key"的常见读法相反：顺序反了密码就对不上，
+     * 平台一律回 0x04。依据是控制台「MQTT连接参数」给出的 Password 逐字节比对。 */
+    gw_hmac_sha256((const uint8_t *)ts_ascii, (uint32_t)strlen(ts_ascii),
+                   (const uint8_t *)secret, (uint32_t)strlen(secret), mac);
     gw_hex_lower(mac, GW_SHA256_LEN, out);
 }
