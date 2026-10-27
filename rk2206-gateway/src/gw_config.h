@@ -22,10 +22,10 @@
  * 1. 引脚（引脚与接线表 v1.3 §0.3 / §2.1）
  *    网名（原理图）→ SDK 宏：A2=GPIO0_PA2、A5=GPIO0_PA5、B4=GPIO0_PB4 …（字母=端口，数字=序号）
  * ------------------------------------------------------------------ */
-#define GW_PIN_UART0_TX         GPIO0_PB7   /* E53_UART0_TX_M0 → 汇聚 H1 排针 24 (U1RX) */
-#define GW_PIN_UART0_RX         GPIO0_PB6   /* E53_UART0_RX_M0 → 汇聚 H1 排针 23 (U1TX) */
+#define GW_PIN_UART0_TX         GPIO0_PB6   /* E53 座 UART_TX 孔 ↔ B6（用户通断实测，2026-10-27）→ 汇聚 IO07 */
+#define GW_PIN_UART0_RX         GPIO0_PB7   /* E53 座 UART_RX 孔 ↔ B7（同上）→ 汇聚 IO08 */
 #define GW_PIN_433_DAT          GPIO0_PA2   /* E53_GPIO_A2  433 接收 DAT/干接点，低=触发 */
-#define GW_PIN_ALARM_IN         GPIO0_PA5   /* E53_GPIO_A5  声光模块 IN，高电平触发 */
+#define GW_PIN_ALARM_IN         GPIO0_PA5   /* E53_GPIO_A5 — r5 已删本地声光（用户裁定），此脚空闲；定义保留仅为兼容，全仓无驱动调用 */
 #define GW_PIN_PWM_BUZZER       GPIO0_PB4   /* E53_PWM0_M1_GPIO_B4  备用，默认关闭（GW_HAS_PWM_BUZZER） */
 #define GW_PIN_PAIR_KEY         GPIO0_PA3   /* EX_GPIO_A3   配网键：按下=低，长按 3 s */
 
@@ -84,7 +84,8 @@
 #define GW_MQTT_HOST            "117.78.16.25"  /* ⚠ 占位：控制台给的接入地址，施工单要求填真实值 */
 #define GW_MQTT_PORT            1883            /* §4.1 明文，TLS 非强制 */
 #define GW_MQTT_KEEPALIVE_S     120             /* §4.1 官方推荐，平台允许 30–1200 */
-#define GW_MQTT_QOS             1               /* §4.1 统一 QoS1；**平台不支持 QoS2** */
+#define GW_MQTT_QOS             1
+#define GW_MQTT_QOS_PROPS       0   /* 临时诊断：属性上报先用 QoS0，验证 PUBACK 等待路径 */               /* §4.1 统一 QoS1；**平台不支持 QoS2** */
 #define GW_MQTT_VERSION         4               /* §4.1 MQTT 3.1.1 */
 #define GW_MQTT_CMD_TIMEOUT_MS  2000            /* paho MQTTClientInit 的 cmd_timeout */
 #define GW_MQTT_CLIENT_ID_TYPE  0               /* §4.1 ClientId 第 2 段：固定 0 */
@@ -240,7 +241,10 @@
 /* ⚠ 占位：§12.3 要求 SoftAP 口令"值待用户确认（CAL-16）、仓库不写死真值"。
  * 施工单第 2 步按现场要求改这一行即可；AP 口令可以打印（契约允许贴纸/串口给出），
  * 家庭 Wi-Fi 口令则绝不允许打印/回显（§12.6）。 */
-#define GW_PROV_AP_PSK              "echub8888"
+/* 开放热点（用户 2026-10-24 要求去掉 AP 口令）：空串 = 不加密。
+ * 注意 SetHotspotConfig 对空口令的行为未在真机验证过——失败时日志会打
+ * 「SetHotspotConfig 失败」，那就退回 8 位口令（临时填 "echub8888" 重编）。 */
+#define GW_PROV_AP_PSK              ""
 #define GW_PROV_AP_CHANNEL          6u      /* §12.3 信道 1 或 6 */
 
 /* SoftAP 异步任务与等待窗口（t142）。

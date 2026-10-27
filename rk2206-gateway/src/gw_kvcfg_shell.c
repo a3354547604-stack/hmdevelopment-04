@@ -55,9 +55,40 @@ static UINT32 gw_kvcfg_shell_cmd(UINT32 argc, const CHAR **argv)
     return (rc == 0) ? 0u : (UINT32)-1;
 }
 
+int gw_main_uart_test_scan(void);   /* gw_main.c：发一帧 0x20 自测 UART（t-uart） */
+
+static UINT32 gw_uart_shell_cmd(UINT32 argc, const CHAR **argv)
+{
+    (void)argc; (void)argv;
+    (void)gw_main_uart_test_scan();
+    return 0u;
+}
+
+/* `uinfo`：把 UART0 初始化与最近一次写入的原始返回值打出来。
+ * 现场排查「uart 报失败」时先看这三行：init 非 0 = 初始化失败；
+ * last_wr == last_len = 数据确实写进了 FIFO（此时收不到就是接线问题）。 */
+extern volatile int g_gw_uart_init_rc;
+extern volatile int g_gw_uart_last_wr;
+extern volatile int g_gw_uart_last_len;
+
+static UINT32 gw_uinfo_shell_cmd(UINT32 argc, const CHAR **argv)
+{
+    (void)argc; (void)argv;
+    /* 引脚号不在这里打：本文件不 include lz_hardware.h，GPIO0_PBx 宏不可见；
+     * 引脚定义见 gw_config.h:25-26（TX=GPIO0_PB6 / RX=GPIO0_PB7；【实测】2026-10-27 通断）。 */
+    printf("[%s] UART0 id=%d baud=%d (TX=GPIO0_PB6/RX=GPIO0_PB7)\n", GW_LOG_TAG,
+           (int)GW_UART0_ID, (int)GW_UART0_BAUD);
+    printf("[%s] uart_init_rc=%d (0=成功)  last_write_rc=%d  last_write_len=%d\n", GW_LOG_TAG,
+           (int)g_gw_uart_init_rc, (int)g_gw_uart_last_wr, (int)g_gw_uart_last_len);
+    printf("[%s] 判读：last_write_rc==last_write_len → 已写入，收不到=接线；rc<=0 → 写失败\n", GW_LOG_TAG);
+    return 0u;
+}
+
 void gw_kvcfg_shell_register(void)
 {
     UINT32 rc = osCmdReg(CMD_TYPE_STD, "gwkv", XARGS, (CMD_CBK_FUNC)gw_kvcfg_shell_cmd);
+    (void)osCmdReg(CMD_TYPE_STD, "uart", XARGS, (CMD_CBK_FUNC)gw_uart_shell_cmd);
+    (void)osCmdReg(CMD_TYPE_STD, "uinfo", XARGS, (CMD_CBK_FUNC)gw_uinfo_shell_cmd);
 
     printf("[%s] 串口凭证工具：命令 `gwkv`（%s）—— 用法见 rk2206-gateway/施工单-凭证写入Flash-KV.md\n",
            GW_LOG_TAG, (rc == 0u) ? "注册成功" : "注册失败（shell 未初始化？）");
