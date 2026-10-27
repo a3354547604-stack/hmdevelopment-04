@@ -358,6 +358,11 @@ static void gw_build_nodes_online(char *out, uint32_t cap)
     uint32_t i;
     uint32_t n = 0;
 
+    if (cap < 4u) {
+        out[0] = '\0';
+        return;
+    }
+    out[n++] = '{';             /* §4.3：整对象 {"M1":false,...}，不是键值片段 */
     for (i = 0; i < sizeof(s_slots) / sizeof(s_slots[0]); i++) {
         int w = 0;
         char item[32];
@@ -380,6 +385,7 @@ static void gw_build_nodes_online(char *out, uint32_t cap)
         memcpy(out + n, item, (uint32_t)w);
         n += (uint32_t)w;
     }
+    out[n++] = '}';
     out[n] = '\0';
 }
 
@@ -776,7 +782,9 @@ static void gw_report_props(uint32_t now)
     }
     gw_iotda_topic_props(topic, sizeof(topic), s_cloud.device_id);
     if (gw_cloud_is_connected(&s_cloud)) {
-        (void)gw_cloud_publish(&s_cloud, topic, body, len);
+        int prc = gw_cloud_publish_qos(&s_cloud, topic, body, len, GW_MQTT_QOS_PROPS);
+        printf("[%s] 属性上报 rc=%d len=%u qos=%d paho=%d\n", GW_LOG_TAG, prc,
+               (unsigned)len, GW_MQTT_QOS_PROPS, s_cloud.client.isconnected);
     }
 }
 
@@ -903,7 +911,7 @@ static void uart_task(void *arg)
     gw_frame_t frame;
     gw_frame_err_t err;
     gw_parse_result_t r;
-    uint8_t nack[64];
+    static uint8_t nack[64];   /* t169：异步 uart 写，缓冲必须比函数活得久 */
     uint32_t nack_len;
     uint32_t now;
 
@@ -1058,7 +1066,7 @@ static uint64_t prov_op_epoch_ms(void)  { return gw_time_ms(gw_now_ms()); }
 static int prov_op_hub_scan(uint16_t id, uint16_t duration_s, uint8_t include_bound,
                             char *err, uint32_t cap)
 {
-    uint8_t frame[GW_FRAME_MAX];
+    static uint8_t frame[GW_FRAME_MAX];   /* t169：异步 uart 写，缓冲必须比函数活得久 */
     char payload[128];
     int l;
     uint32_t n;
@@ -1082,6 +1090,23 @@ static int prov_op_hub_scan(uint16_t id, uint16_t duration_s, uint8_t include_bo
     printf("[%s] [PROV] → 0x20 扫描 id=%u duration=%us include_bound=%u\n",
            GW_LOG_TAG, (unsigned)id, (unsigned)duration_s, (unsigned)include_bound);
     return 0;
+}
+
+/* 串口自测：发一帧 0x20，汇聚回 0x21 就证明 RK2206↔WS63 的 UART 双向通（t-uart） */
+int gw_main_uart_test_scan(void)
+{
+    static uint16_t s_test_id = 900;
+    char err[48];
+    int rc;
+
+    s_test_id++;
+    rc = prov_op_hub_scan(s_test_id, 5u, 0u, err, sizeof(err));
+    if (rc != 0) {
+        printf("[%s] [UART] 0x20 发送失败：%s\n", GW_LOG_TAG, err);
+    } else {
+        printf("[%s] [UART] 已发 0x20（seq=%u），等汇聚回 0x21…\n", GW_LOG_TAG, (unsigned)s_test_id);
+    }
+    return rc;
 }
 
 /* 0x23 到达时唤醒 prov_op_hub_bind 的等待（0x21/0x24 没有这个语义） */
@@ -1113,7 +1138,7 @@ static void prov_note_bind_ack(const char *json, uint32_t len)
 static int prov_op_hub_bind(const char *op, const char *sn, const char *mac,
                             uint32_t wait_ms, char *err, uint32_t cap)
 {
-    uint8_t frame[GW_FRAME_MAX];
+    static uint8_t frame[GW_FRAME_MAX];   /* t169：异步 uart 写，缓冲必须比函数活得久 */
     char payload[192];
     uint16_t seq;
     uint32_t n;
@@ -1522,6 +1547,12 @@ static void net_task(void *arg)
         }
 
         gw_cloud_yield(&s_cloud, GW_CLOUD_YIELD_MS);
+
+        /* 诊断：链路是否在 yield 里被 paho 判掉（症状=每 ~34 s 重连一次） */
+        if (!gw_cloud_is_connected(&s_cloud)) {
+            printf("[%s] 链路断开：paho=%d 我方=%d\n", GW_LOG_TAG,
+                   s_cloud.client.isconnected, s_cloud.connected);
+        }
 
         /* 缓存补发：连接正常时也周期性尝试（处理"发出去了但平台没收到"的极端情况） */
         gw_flush_cache(now);
