@@ -613,7 +613,8 @@ static void net_ap_run_start(void)
     cfg.band = 0;           /* 交给驱动按 2.4 G 处理（SDK 自己的 SetApModeOn 也不填） */
     cfg.securityType = 0;   /* 会被忽略；psk 非空即 WPA2 */
 
-    printf("[NET] AP: SetHotspotConfig ssid=%s ch=%d（口令不回显）\n", cfg.ssid, cfg.channelNum);
+    printf("[NET] AP: SetHotspotConfig ssid=%s ch=%d %s\n", cfg.ssid, cfg.channelNum,
+           (s_ap_psk[0] == '\0') ? "（开放网络，无口令）" : "（WPA2，口令不回显）");
     if (SetHotspotConfig(&cfg) != WIFI_SUCCESS) {
         printf("[NET] ⚠ AP: SetHotspotConfig 失败（ssid/口令/信道可能不合法）\n");
         s_ap_state = GW_AP_FAILED;
@@ -685,8 +686,8 @@ static int net_ap_task_ensure(void)
 
 int gw_net_ap_start(const char *ssid, const char *psk, uint8_t channel)
 {
-    if (ssid == NULL || psk == NULL || ssid[0] == '\0' || psk[0] == '\0') {
-        return -1;
+    if (ssid == NULL || psk == NULL || ssid[0] == '\0') {
+        return -1;      /* psk 允许空串：开放热点（用户 2026-10-24 要求） */
     }
     if (net_ap_task_ensure() != 0) {
         return -1;
@@ -744,8 +745,8 @@ int gw_net_sta_start(const char *ssid, const char *psk)
     WifiDeviceConfig cfg;
     int net_id = -1;
 
-    if (ssid == NULL || psk == NULL || ssid[0] == '\0' || psk[0] == '\0') {
-        return -1;
+    if (ssid == NULL || psk == NULL || ssid[0] == '\0') {
+        return -1;      /* psk 允许空串：开放热点（用户 2026-10-24 要求） */
     }
     if (net_wifi_on() != 0) {
         return -1;

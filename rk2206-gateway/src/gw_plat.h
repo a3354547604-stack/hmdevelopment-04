@@ -16,6 +16,7 @@
 /* ------------------------------- UART0（E53 座，接汇聚 H1） ------------------------------- */
 /* 帧的切分在 gw_proto.c，这里只管字节搬进搬出。read 非阻塞：返回 0 就是当前没数据。 */
 int gw_plat_uart0_init(void);
+int gw_plat_uart0_set_baud(unsigned int baud);
 int gw_plat_uart0_write(const uint8_t *buf, uint32_t len);
 uint32_t gw_plat_uart0_read(uint8_t *buf, uint32_t len);
 

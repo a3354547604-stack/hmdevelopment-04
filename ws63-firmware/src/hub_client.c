@@ -41,6 +41,7 @@
 #include "soc_osal.h"
 #include "common_def.h"
 #include "pinctrl.h"
+#include "gpio.h"
 #include "uart.h"
 
 #include "sle_common.h"
@@ -370,6 +371,12 @@ static volatile uint8_t  g_rx_ring[HUB_RX_RING_SIZE];
 static volatile uint32_t g_rx_w;
 static volatile uint32_t g_rx_r;
 static volatile uint32_t g_uart_err;
+static volatile uint32_t g_uart_rx_bytes;   /* 诊断：UART1 收到的原始字节数（t169 现场用） */
+static volatile int g_uart_init_ret = -999;  /* t170：uapi_uart_init 返回值 */
+static volatile int g_uart_cb_ret = -999;    /* t170：rx 回调注册返回值 */
+static uint8_t  g_dbg_rx[32];               /* 诊断：最近 32 字节的滚动窗口 */
+static volatile uint8_t g_dbg_w;            /* 写入位置 */
+static uint32_t g_dbg_last_bytes;           /* 上次打印时的累计字节数 */
 /* UART **发送**侧统计（F-70-01）：tx_err=失败总数、tx_short=没写完、tx_param=参数/总线错。
  * 必须分开计数：`short` 说明对端没接、FIFO 满或波特率不匹配（链路问题），`param` 说明本端
  * 根本没配好（uart_init 失败/总线上没有这个口）——两者排查方向完全相反，混成一个数就只能猜。 */
@@ -389,6 +396,11 @@ static void hub_uart_rx_cb(const void *buffer, uint16_t length, bool error)
     }
     if (buffer == NULL || length == 0u) {
         return;
+    }
+    g_uart_rx_bytes += length;
+    for (i = 0; i < length; i++) {
+        g_dbg_rx[g_dbg_w] = p[i];
+        g_dbg_w = (uint8_t)((g_dbg_w + 1u) % sizeof(g_dbg_rx));
     }
     /* ISR：只入环。hub_glink_feed 会解析、会回 NACK（写串口），绝不能在这里做。 */
     for (i = 0; i < length; i++) {
@@ -1081,23 +1093,20 @@ static int hub_on_gw_cmd(void *ctx, const hub_gw_t *gw, const char *payload, uin
 }
 
 /* 由主循环调用：把一条命令写给某个已就绪的节点 */
-static int cli_write_node(hub_cli_t *c, const char *json, uint16_t len)
+/* 读请求取数：节点的属性是 READ|WRITE|NOTIFY，但用写会被部分固件按「只读属性」拒掉；
+ * 读请求在官方样例里就是「由服务端回一帧当前数据」的语义，这里用它做轮询。 */
+static int cli_read_node(hub_cli_t *c)
 {
-    ssapc_write_param_t param = {0};
-
-    if (c == NULL || c->stage != HUB_STAGE_DONE || c->prop_handle == 0u || len == 0u) {
+    if (c == NULL || c->stage != HUB_STAGE_DONE || c->prop_handle == 0u) {
         return -1;
     }
 #if HUB_MOCK
     if (c->vnode >= 0) {
-        return (int)len;                /* 虚拟节点：真正的应答在 mock 分支里合成 */
+        return 0;
     }
 #endif
-    param.handle = c->prop_handle;
-    param.type = SSAP_PROPERTY_TYPE_VALUE;
-    param.data_len = len;
-    param.data = (uint8_t *)(uintptr_t)json;
-    return (ssapc_write_req(HUB_CLIENT_ID, c->conn_id, &param) == ERRCODE_SLE_SUCCESS) ? (int)len : -1;
+    return (ssapc_read_req(HUB_CLIENT_ID, c->conn_id, c->prop_handle,
+                           SSAP_PROPERTY_TYPE_VALUE) == ERRCODE_SLE_SUCCESS) ? 0 : -1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1212,9 +1221,11 @@ static void hub_run_poll(uint8_t slot, uint16_t poll_id)
         return;
     }
 #endif
-    if (cli_write_node(c, buf, (uint16_t)n) < 0) {
-        HUB_LOG("poll sn=%s write FAILED (stage=%u)", g_agg.node[idx].sn,
-                (unsigned)c->stage);
+    (void)buf;                          /* 读请求不带负载；节点在 read 回调里回当前样本 */
+    (void)n;
+    if (cli_read_node(c) < 0) {
+        HUB_LOG("poll sn=%s read FAILED (stage=%u handle=0x%x)", g_agg.node[idx].sn,
+                (unsigned)c->stage, (unsigned)c->prop_handle);
     }
 }
 
@@ -1476,13 +1487,30 @@ static void hub_stat(void)
         return;
     }
     g_last_stat_ms = now;
+    if (g_uart_rx_bytes != g_dbg_last_bytes && g_uart_rx_bytes > 0u) {
+        char hx[3 * sizeof(g_dbg_rx) + 1];
+        uint8_t k;
+        g_dbg_last_bytes = g_uart_rx_bytes;
+        for (k = 0; k < sizeof(g_dbg_rx); k++) {
+            (void)snprintf(&hx[k * 3u], 4u, "%02X ", g_dbg_rx[(g_dbg_w + k) % sizeof(g_dbg_rx)]);
+        }
+        hx[sizeof(g_dbg_rx) * 3u] = '\0';
+        HUB_LOG("RXRING w=%u %s", (unsigned)g_dbg_w, hx);
+    }
+    /* t170：打印 UART1 两根脚的真实电平。
+     * ub 恒 0 且 uart 错误也不再增长时，无法区分「线没接上」与「引脚没被复用」，
+     * 于是直接读引脚：空闲时 TX(IO15) 与 RX(IO16) 都应为 1（3.3 V 上拉/对端空闲高）；
+     * RX 读 0 或抖动 = 线错/悬空，RX 恒 1 而 ub 恒 0 = 线接对但没数据。 */
+    HUB_LOG("PINS tx15=%d rx16=%d uerr=%u init=%d cb=%d",
+            (int)uapi_gpio_get_val(HUB_UART_TXD_PIN), (int)uapi_gpio_get_val(HUB_UART_RXD_PIN),
+            (unsigned)g_uart_err, (int)g_uart_init_ret, (int)g_uart_cb_ret);
     /* t70：把 last_late 与最近一次结算的 rtt 打进 STAT —— poll_ok 恒 0 那次就是靠
      * 「rx 在涨而 poll_ok 不动」看出来的，rtt 则是量真实应答时延的唯一现场数字。 */
-    HUB_LOG("STAT up=%us rx=%u poll_ok=%u poll_miss=%u late=%u rtt=%u@%u ev_on=%u ev_off=%u ev_fall=%u "
+    HUB_LOG("STAT up=%us ub=%u rx=%u poll_ok=%u poll_miss=%u late=%u rtt=%u@%u ev_on=%u ev_off=%u ev_fall=%u "
             "disc=%u unknown=%u up_sent=%u retrans=%u gw_miss=%u drop(ev=%u up=%u uart=%u) conns=%d wl=%d "
             "tx(ok=%u err=%u short=%u param=%u) "
             "sub(conf=%u forced=%u late=%u pend=%d unconf=%d)",
-            (unsigned)g_agg.uptime_s, (unsigned)g_agg.rx_frames, (unsigned)g_agg.poll_ok,
+            (unsigned)g_agg.uptime_s, (unsigned)g_uart_rx_bytes, (unsigned)g_agg.rx_frames, (unsigned)g_agg.poll_ok,
             (unsigned)g_agg.poll_miss, (unsigned)g_agg.ev_online, (unsigned)g_agg.ev_offline,
             (unsigned)g_agg.poll_late, (unsigned)g_agg.last_rtt_ms,
             (unsigned)g_agg.last_rtt_slot,
@@ -1607,11 +1635,13 @@ static void hub_uart_init(void)
     (void)uapi_pin_set_pull(HUB_UART_RXD_PIN, PIN_PULL_TYPE_UP);
     (void)uapi_uart_deinit(HUB_UART_BUS);
     ret = uapi_uart_init(HUB_UART_BUS, &pin_cfg, &attr, NULL, &g_uart_buf_cfg);
+    g_uart_init_ret = (int)ret;
     HUB_LOG("uart%d init ret=%d (IO15=TX/IO16=RX mode=%d %u 8N1)",
             (int)HUB_UART_BUS, (int)ret, (int)HUB_UART_PIN_MODE, (unsigned)HUB_UART_BAUD);
     ret = uapi_uart_register_rx_callback(HUB_UART_BUS,
                                          UART_RX_CONDITION_FULL_OR_SUFFICIENT_DATA_OR_IDLE,
                                          1, hub_uart_rx_cb);
+    g_uart_cb_ret = (int)ret;
     HUB_LOG("uart rx callback ret=%d", (int)ret);
 }
 
@@ -1771,8 +1801,19 @@ void *hub_client_task(const char *arg)
         {
             uint8_t buf[128];
             int32_t got;
+            static int64_t s_raw_last;
             while ((got = hub_port_read(NULL, buf, sizeof(buf))) > 0) {
-                (void)hub_glink_feed(&g_glink, NULL, buf, (uint32_t)got);
+                int f = hub_glink_feed(&g_glink, NULL, buf, (uint32_t)got);
+                /* t171：字节进来了却没解出帧 → 打印原始字节，区分「乱码」与「根本不是帧」 */
+                if (f == 0 && (now - s_raw_last) > 2000) {
+                    s_raw_last = now;
+                    HUB_LOG("RX no-frame len=%d: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                            (int)got,
+                            (int)buf[0], (int)buf[got > 1 ? 1 : 0], (int)buf[got > 2 ? 2 : 0],
+                            (int)buf[got > 3 ? 3 : 0], (int)buf[got > 4 ? 4 : 0], (int)buf[got > 5 ? 5 : 0],
+                            (int)buf[got > 6 ? 6 : 0], (int)buf[got > 7 ? 7 : 0], (int)buf[got > 8 ? 8 : 0],
+                            (int)buf[got > 9 ? 9 : 0], (int)buf[got > 10 ? 10 : 0], (int)buf[got > 11 ? 11 : 0]);
+                }
             }
         }
 

@@ -2,7 +2,7 @@
  * gw_plat.c — 板级访问层实现（唯一 include "lz_hardware.h" 的文件）
  *
  * 依据：引脚与接线表 v1.1 §0.3/§2.1（网关 M0 接线表）与官方样例
- *   - UART0  E53 座 TX=GPIO0_PB6 / RX=GPIO0_PB7，MUX_FUNC2
+ *   - UART0  E53 座 TX=GPIO0_PB7 / RX=GPIO0_PB6，MUX_FUNC2（实测通断 2026-10-27）
  *     【实测】用户万用表通断 2026-10-27：E53 座 UART_TX 孔 ↔ B6、UART_RX 孔 ↔ B7，
  *     与 gw_config.h:25-26 一致；samples/b6_uart0/uart_example.c:46-47 的注释
  *     （PB6=RX）只算线索，已由该实测证伪。
@@ -33,14 +33,17 @@ volatile int g_gw_uart_last_len = -127;
 
 /* uart rxBlock/txBlock = NONE_BLOCK 是刻意的：接收走「周期轮询 + 环形缓冲」，
  * 阻塞式读会把协议任务钉死在一个字节上，粘包/半包的切分就没法按契约 §3.6 做。 */
-int gw_plat_uart0_init(void)
+/* t170：UART0 的实测速率与标称不符（汇聚侧每帧被拆成约 10 倍字节），现场需要
+ * 不改固件就能逐档试波特率，直到 `[UART] frames=` 开始增长。
+ * 返回 0 表示驱动接受了这一档。 */
+int gw_plat_uart0_set_baud(unsigned int baud)
 {
     UartAttribute attr;
 
     (void)LzUartDeinit(GW_UART0_ID);
 
     memset(&attr, 0, sizeof(attr));
-    attr.baudRate = GW_UART0_BAUD;
+    attr.baudRate = baud;
     attr.dataBits = UART_DATA_BIT_8;
     attr.stopBits = UART_STOP_BIT_1;
     attr.parity = UART_PARITY_NONE;
@@ -48,14 +51,17 @@ int gw_plat_uart0_init(void)
     attr.rxBlock = UART_BLOCK_STATE_NONE_BLOCK;
     attr.txBlock = UART_BLOCK_STATE_NONE_BLOCK;
 
-    PinctrlSet(GW_UART0_PIN_RX, MUX_FUNC2, PULL_KEEP, DRIVE_LEVEL2);
+    /* RX 必须上拉：悬空时线上噪声会让每帧随机丢字节（t171 实测约 50% 帧出错）。 */
+    PinctrlSet(GW_UART0_PIN_RX, MUX_FUNC2, PULL_UP, DRIVE_LEVEL2);
     PinctrlSet(GW_UART0_PIN_TX, MUX_FUNC2, PULL_KEEP, DRIVE_LEVEL2);
 
     g_gw_uart_init_rc = (int)LzUartInit(GW_UART0_ID, &attr);
-    if (g_gw_uart_init_rc != LZ_HARDWARE_SUCCESS) {
-        return -1;
-    }
-    return 0;
+    return (g_gw_uart_init_rc == LZ_HARDWARE_SUCCESS) ? 0 : -1;
+}
+
+int gw_plat_uart0_init(void)
+{
+    return gw_plat_uart0_set_baud(GW_UART0_BAUD);
 }
 
 int gw_plat_uart0_write(const uint8_t *buf, uint32_t len)

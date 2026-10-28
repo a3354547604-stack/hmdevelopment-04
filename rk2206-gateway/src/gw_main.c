@@ -904,6 +904,14 @@ static int gw_try_timesync(void)
 }
 
 /* ============================== 任务 ============================== */
+/* t-uart 现场诊断：统计 UART0 收到多少字节、最近 16 字节原样留一份，
+ * 以便区分"一点没收到 / 收到但 CRC 错 / 收到垃圾"。 */
+static uint32_t g_rx_bytes;
+static uint8_t  g_rx_ring[16];
+static uint8_t  g_rx_w;
+static uint32_t g_rx_last_print_ms;
+static uint32_t g_rx_frames;
+
 static void uart_task(void *arg)
 {
     uint8_t rx[256];
@@ -920,15 +928,28 @@ static void uart_task(void *arg)
         now = gw_now_ms();
         n = gw_plat_uart0_read(rx, sizeof(rx));
         if (n > 0) {
+            uint32_t k;
+            g_rx_bytes += n;
+            for (k = 0; k < n; k++) {
+                g_rx_ring[g_rx_w] = rx[k];
+                g_rx_w = (uint8_t)((g_rx_w + 1u) % sizeof(g_rx_ring));
+            }
             (void)gw_parser_push(&s_parser, rx, n);
         }
         for (;;) {
             r = gw_parser_poll(&s_parser, &frame, &err);
             if (r == GW_PARSE_FRAME) {
+                g_rx_frames++;
                 handle_frame(&frame, now);
                 continue;
             }
             if (r == GW_PARSE_ERR) {
+                /* 诊断：把解析失败的原因与首字节打出来（现场只看得到这一处） */
+                printf("[UART] parse err reason=%u seq=%u rx_bytes=%u ring=%02X%02X%02X%02X%02X%02X\n",
+                       (unsigned)err.reason, (unsigned)err.seq, (unsigned)g_rx_bytes,
+                       g_rx_ring[(g_rx_w + 0) % 16], g_rx_ring[(g_rx_w + 1) % 16],
+                       g_rx_ring[(g_rx_w + 2) % 16], g_rx_ring[(g_rx_w + 3) % 16],
+                       g_rx_ring[(g_rx_w + 4) % 16], g_rx_ring[(g_rx_w + 5) % 16]);
                 /* 契约 §3.6：CRC/LEN 错 → GW_NACK；同 SEQ+reason 只 NACK 一次防风暴 */
                 if (err.suppressed == 0) {
                     nack_len = gw_frame_encode_nack(nack, sizeof(nack), err.seq, err.seq, err.reason);
@@ -941,6 +962,14 @@ static void uart_task(void *arg)
             break;
         }
         gw_pending_tick(now);
+        if (now - g_rx_last_print_ms >= 10000u) {
+            g_rx_last_print_ms = now;
+            printf("[UART] rx_bytes=%u frames=%u crc_err=%u fmt_err=%u ring=%02X%02X%02X%02X\n",
+                   (unsigned)g_rx_bytes, (unsigned)g_rx_frames, (unsigned)s_parser.crc_err,
+                   (unsigned)s_parser.fmt_err,
+                   g_rx_ring[(g_rx_w + 0) % 16], g_rx_ring[(g_rx_w + 1) % 16],
+                   g_rx_ring[(g_rx_w + 2) % 16], g_rx_ring[(g_rx_w + 3) % 16]);
+        }
         LOS_Msleep(GW_UART_POLL_MS);
     }
 }

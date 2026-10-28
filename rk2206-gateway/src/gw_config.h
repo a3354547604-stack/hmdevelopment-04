@@ -22,8 +22,11 @@
  * 1. 引脚（引脚与接线表 v1.3 §0.3 / §2.1）
  *    网名（原理图）→ SDK 宏：A2=GPIO0_PA2、A5=GPIO0_PA5、B4=GPIO0_PB4 …（字母=端口，数字=序号）
  * ------------------------------------------------------------------ */
-#define GW_PIN_UART0_TX         GPIO0_PB6   /* E53 座 UART_TX 孔 ↔ B6（用户通断实测，2026-10-27）→ 汇聚 IO07 */
-#define GW_PIN_UART0_RX         GPIO0_PB7   /* E53 座 UART_RX 孔 ↔ B7（同上）→ 汇聚 IO08 */
+/* 官方 b6_uart0/README_zh.md:14-16 定死：GPIO0_PB6 = UART0_RX_M0，GPIO0_PB7 = UART0_TX_M0。
+ * 注意：E53 座丝印是按"对端"命名的——丝印 UART_TX 孔接的是 PB6（本板 RX），丝印 UART_RX 孔接的是 PB7（本板 TX），
+ *      所以接线是"直连"：汇聚 TX1→丝印 UART_TX 孔、汇聚 RX1→丝印 UART_RX 孔。 */
+#define GW_PIN_UART0_TX         GPIO0_PB7   /* = UART0_TX_M0（接线表 v1.3 的"座子 UART_RX 孔"） */
+#define GW_PIN_UART0_RX         GPIO0_PB6   /* = UART0_RX_M0（接线表 v1.3 的"座子 UART_TX 孔"） */
 #define GW_PIN_433_DAT          GPIO0_PA2   /* E53_GPIO_A2  433 接收 DAT/干接点，低=触发 */
 #define GW_PIN_ALARM_IN         GPIO0_PA5   /* E53_GPIO_A5 — r5 已删本地声光（用户裁定），此脚空闲；定义保留仅为兼容，全仓无驱动调用 */
 #define GW_PIN_PWM_BUZZER       GPIO0_PB4   /* E53_PWM0_M1_GPIO_B4  备用，默认关闭（GW_HAS_PWM_BUZZER） */
@@ -45,7 +48,7 @@
  * 2. UART0（契约 §3.1 / §0.8）
  * ------------------------------------------------------------------ */
 #define GW_UART_ID              0
-#define GW_UART_BAUD            115200
+#define GW_UART_BAUD           9600u
 #define GW_UART_RX_RING         2048        /* 契约 §3.6：收发各 ≥2048 字节 */
 #define GW_UART_TX_RING         2048
 #define GW_UART_DEINIT_ON_EXIT  0           /* 官方样例有不 Deinit 直接 Init 的分支，这里只 Init 一次 */

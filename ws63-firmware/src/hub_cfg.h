@@ -131,8 +131,8 @@
  * **默认必须留空**：留空时 hub_client.c 里那段整体被预处理掉，镜像与不带钩子完全一致。
  * 何时启用：只在没有网关的台架上做订阅链路实测时临时改成 "M1"/"M2"/"M4"。
  */
-#define HUB_TEST_PREBIND_ON     0
-#define HUB_TEST_PREBIND_SN     ""
+#define HUB_TEST_PREBIND_ON     1
+#define HUB_TEST_PREBIND_SN     "M2"
 
 #define HUB_CCCD_STATUS_REJECTED 0x4u    /* 本机拒绝：唯一值得重试的 cfm 状态（见上文第 2 条） */
 #define HUB_SUB_CONFIRM_MS       1500u   /* 写完 CCCD 后等"首帧"的窗口 */
@@ -232,8 +232,8 @@ static inline int hub_sub_decide(uint8_t sub_tries, int cfm_status, int got_fram
 /* UART1（汇聚↔网关，契约 §3.1）                                        */
 /* ------------------------------------------------------------------ */
 
-#define HUB_UART_BUS            UART_BUS_1
-#define HUB_UART_BAUD           115200u
+#define HUB_UART_BUS            UART_BUS_2
+#define HUB_UART_BAUD           9600u
 /* 收发各 ≥ 2048 字节环形缓冲（§3.6 缓冲要求） */
 #define HUB_RX_RING_SIZE        2048u
 #define HUB_RX_BUF_SIZE         512u
@@ -252,9 +252,9 @@ static inline int hub_sub_decide(uint8_t sub_tries, int cfm_status, int got_fram
  * `GPIO_15` 这类 SDK 符号，**只有 hub_client.c / hub_main.c 可以 include 它**，
  * 纯逻辑模块（hub_agg / hub_frame / hub_glink / hub_adv / hub_vnode）一律不许 include，
  * 否则它们就编不进主机单测了 —— 这是"无板可验证"的前提。 */
-#define HUB_UART_TXD_PIN        GPIO_15
-#define HUB_UART_RXD_PIN        GPIO_16
-#define HUB_UART_PIN_MODE       PIN_MODE_1
+#define HUB_UART_TXD_PIN        GPIO_08
+#define HUB_UART_RXD_PIN        GPIO_07
+#define HUB_UART_PIN_MODE       PIN_MODE_2
 
 /* 上电回环自检（《引脚与接线表》§3.2）：短接排针 23/24 再上电，必须打印
  * `[UART1] loopback ok, tx=<帧> rx=<帧>`；没短接时打印 no echo（接网关是正常工作态）。

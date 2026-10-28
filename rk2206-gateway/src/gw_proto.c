@@ -5,6 +5,7 @@
  */
 #include "gw_proto.h"
 #include <string.h>
+#include <stdio.h>
 
 /* ============================== CRC16 ============================== */
 /* 契约 §3.3 的参考实现（位运算版，避免 512 字节表占 RAM）。
@@ -254,6 +255,19 @@ gw_parse_result_t gw_parser_poll(gw_parser_t *p, gw_frame_t *frame, gw_frame_err
     crc_calc = gw_crc16_modbus(p->buf + 2, GW_FRAME_CRC_COVER_HDR + (uint32_t)plen);
     crc_wire = (uint16_t)(p->buf[total - 2] | (p->buf[total - 1] << 8));
     if (crc_calc != crc_wire) {
+        /* t171 现场取证：把整帧按十六进制打出来，好在 PC 上离线复算 CRC。
+         * 只在出错时打一行，正常帧不打印；plen 已由 LEN 字段限定上限。 */
+        {
+            uint32_t i;
+            uint32_t show = total > 48u ? 48u : total;
+            printf("[gw] CRCDUMP total=%lu plen=%lu calc=%04X wire=%04X :",
+                   (unsigned long)total, (unsigned long)plen,
+                   (unsigned)crc_calc, (unsigned)crc_wire);
+            for (i = 0u; i < show; i++) {
+                printf(" %02X", p->buf[i]);
+            }
+            printf("\n");
+        }
         p->crc_err++;
         parser_consume(p, 1);
         parser_mark_err(p, err, seq, GW_RC_CRC);

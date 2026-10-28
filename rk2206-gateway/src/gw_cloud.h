@@ -51,6 +51,7 @@ int  gw_cloud_is_connected(const gw_cloud_t *cl);
 
 /* QoS1 发布；返回 0 成功。返回码直接透传 paho 的错误码便于查表。 */
 int  gw_cloud_publish(gw_cloud_t *cl, const char *topic, const char *payload, uint32_t len);
+int  gw_cloud_publish_qos(gw_cloud_t *cl, const char *topic, const char *payload, uint32_t len, int qos);
 /* 周期性喂 paho（收下行包/发 ping）；建议 200 ms 一次 */
 void gw_cloud_yield(gw_cloud_t *cl, uint32_t ms);
 

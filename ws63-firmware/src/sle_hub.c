@@ -341,7 +341,8 @@ static errcode_t sle_uuid_server_property_add(void)
     property.permissions = SLE_UUID_TEST_PROPERTIES;
     sle_uuid_setu2(SLE_UUID_SERVER_NTF_REPORT, &property.uuid);
     property.value = osal_vmalloc(sizeof(g_sle_property_value));
-    property.operate_indication = SSAP_OPERATE_INDICATION_BIT_READ | SSAP_OPERATE_INDICATION_BIT_NOTIFY;
+    property.operate_indication = SSAP_OPERATE_INDICATION_BIT_READ | SSAP_OPERATE_INDICATION_BIT_WRITE |
+                                  SSAP_OPERATE_INDICATION_BIT_NOTIFY;  /* WRITE：允许汇聚用「写 poll 请求」取数（否则 write 被服务端拒） */
     if (property.value == NULL) {
         osal_printk("[speed server] sle property mem fail\r\n");
         return ERRCODE_SLE_FAIL;

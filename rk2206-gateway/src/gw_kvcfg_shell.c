@@ -14,6 +14,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "shell.h"
 
@@ -71,6 +72,29 @@ extern volatile int g_gw_uart_init_rc;
 extern volatile int g_gw_uart_last_wr;
 extern volatile int g_gw_uart_last_len;
 
+static UINT32 gw_uartbaud_shell_cmd(UINT32 argc, const CHAR **argv)
+{
+    int want;
+    int rc;
+
+    /* XARGS 约定：argv[0] 是命令名本身（见 gw_hw.c:298 的注释）。 */
+    if (argc < 2 || argv == NULL || argv[1] == NULL) {
+        printf("[%s] 用法：uartbaud <波特率>   例：uartbaud 1152000\n", GW_LOG_TAG);
+        printf("[%s] 现档位=%d（标称）。测法：改档后看 `[UART] frames=` 是否开始增长。\n",
+               GW_LOG_TAG, (int)GW_UART0_BAUD);
+        return 0u;
+    }
+    want = atoi(argv[1]);
+    if (want <= 0 || want > 4000000) {
+        printf("[%s] 非法波特率：%s\n", GW_LOG_TAG, argv[1]);
+        return 0u;
+    }
+    rc = gw_plat_uart0_set_baud((unsigned int)want);
+    printf("[%s] uartbaud %d -> rc=%d (0=驱动接受；uart_init_rc=%d)\n",
+           GW_LOG_TAG, want, rc, (int)g_gw_uart_init_rc);
+    return 0u;
+}
+
 static UINT32 gw_uinfo_shell_cmd(UINT32 argc, const CHAR **argv)
 {
     (void)argc; (void)argv;
@@ -89,6 +113,7 @@ void gw_kvcfg_shell_register(void)
     UINT32 rc = osCmdReg(CMD_TYPE_STD, "gwkv", XARGS, (CMD_CBK_FUNC)gw_kvcfg_shell_cmd);
     (void)osCmdReg(CMD_TYPE_STD, "uart", XARGS, (CMD_CBK_FUNC)gw_uart_shell_cmd);
     (void)osCmdReg(CMD_TYPE_STD, "uinfo", XARGS, (CMD_CBK_FUNC)gw_uinfo_shell_cmd);
+    (void)osCmdReg(CMD_TYPE_STD, "uartbaud", XARGS, (CMD_CBK_FUNC)gw_uartbaud_shell_cmd);
 
     printf("[%s] 串口凭证工具：命令 `gwkv`（%s）—— 用法见 rk2206-gateway/施工单-凭证写入Flash-KV.md\n",
            GW_LOG_TAG, (rc == 0u) ? "注册成功" : "注册失败（shell 未初始化？）");

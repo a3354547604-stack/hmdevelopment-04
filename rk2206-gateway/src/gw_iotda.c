@@ -270,8 +270,6 @@ uint32_t gw_iotda_props_json(char *out, uint32_t cap, const char *event_time, co
 
     jw_puts(&w, ",\"nodes_online\":");
     jw_put_json_str(&w, st->nodes_online);
-    jw_puts(&w, ",\"battery\":");
-    jw_put_i32(&w, st->battery);
     jw_puts(&w, ",\"alarm_state\":");
     jw_put_u64(&w, st->alarm_state);
 

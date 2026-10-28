@@ -161,7 +161,7 @@ int gw_cloud_is_connected(const gw_cloud_t *cl)
     return (cl->connected && cl->client.isconnected) ? 1 : 0;
 }
 
-int gw_cloud_publish(gw_cloud_t *cl, const char *topic, const char *payload, uint32_t len)
+int gw_cloud_publish_qos(gw_cloud_t *cl, const char *topic, const char *payload, uint32_t len, int qos)
 {
     MQTTMessage msg;
 
@@ -172,13 +172,18 @@ int gw_cloud_publish(gw_cloud_t *cl, const char *topic, const char *payload, uin
         return -2;
     }
     memset(&msg, 0, sizeof(msg));
-    msg.qos = GW_MQTT_QOS;
+    msg.qos = (enum QoS)qos;
     msg.retained = 0;           /* 契约 §4.1：不 retain */
     msg.dup = 0;
     msg.id = 0;                 /* 0 = 让 paho 自己分配 packet id */
     msg.payload = (void *)(uintptr_t)payload;
     msg.payloadlen = (size_t)len;
     return MQTTPublish(&cl->client, topic, &msg);
+}
+
+int gw_cloud_publish(gw_cloud_t *cl, const char *topic, const char *payload, uint32_t len)
+{
+    return gw_cloud_publish_qos(cl, topic, payload, len, GW_MQTT_QOS);
 }
 
 void gw_cloud_yield(gw_cloud_t *cl, uint32_t ms)

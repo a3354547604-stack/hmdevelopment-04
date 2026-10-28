@@ -245,8 +245,10 @@ void gw_prov_init(gw_prov_t *p, const gw_prov_ops_t *ops,
     snprintf(p->device_sn, sizeof(p->device_sn), "%s",
              (device_sn != NULL && device_sn[0] != '\0') ? device_sn : GW_DEVICE_SN);
     snprintf(p->firmware, sizeof(p->firmware), "%s", (firmware != NULL) ? firmware : GW_PROV_FIRMWARE);
+    /* 空串 = 开放热点（用户要求去口令）；非空但短于下限才回退到编译期默认值 */
     snprintf(p->ap_psk, sizeof(p->ap_psk), "%s",
-             (ap_psk != NULL && strlen(ap_psk) >= GW_PROV_PSK_MIN) ? ap_psk : GW_PROV_AP_PSK);
+             (ap_psk != NULL && (ap_psk[0] == '\0' || strlen(ap_psk) >= GW_PROV_PSK_MIN))
+                 ? ap_psk : GW_PROV_AP_PSK);
     p->ap_channel = channel;
     gw_prov_make_ap_ssid(p->device_sn, p->ap_ssid, sizeof(p->ap_ssid));
     p->mode = GW_PROV_MODE_IDLE;
