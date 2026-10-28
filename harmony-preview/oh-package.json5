@@ -1,0 +1,12 @@
+{
+  "modelVersion": "26.0.0",
+  "name": "eldercare-preview",
+  "version": "1.0.0",
+  "description": "独居老人居家安全监测与应急辅助系统 · 鸿蒙客户端（纯视觉预览版，无后端）",
+  "main": "",
+  "author": "HMProgram",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {},
+  "dynamicDependencies": {}
+}

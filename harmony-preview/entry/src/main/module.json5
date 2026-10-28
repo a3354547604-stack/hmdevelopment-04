@@ -1,0 +1,46 @@
+/**
+ * entry 模块清单（Stage 模型）—— 预览版专用。
+ *
+ * **没有 requestPermissions**：预览版不发任何网络请求，也就不该申请 INTERNET。
+ * 这是「预览版不会碰到服务器」的结构性保证——不是靠代码里少写一行 fetch，
+ * 而是系统层面就不给网络能力。要接真实服务器请回到 harmony-app。
+ *
+ * deviceTypes 写 ["default"] 的理由与正式版一致：SDK 的 device-define 里
+ * 只有 default / liteWearable / tablet，写 phone 会报能力集交集为空。
+ */
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "default"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "action.system.home"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

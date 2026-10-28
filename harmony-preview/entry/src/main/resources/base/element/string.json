@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "居家安全监测客户端（纯视觉预览模块，不联网）" },
+    { "name": "EntryAbility_desc", "value": "居家安全守护 预览版" },
+    { "name": "EntryAbility_label", "value": "居家安全守护·预览" }
+  ]
+}

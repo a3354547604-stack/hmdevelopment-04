@@ -1,0 +1,19 @@
+/**
+ * 应用级清单（AppScope）—— 预览版专用。
+ *
+ * bundleName 与正式版（com.hmprogram.eldercare）**故意不同**：
+ * 装有正式版的机器上还能同时装预览版，不会互相覆盖；也便于一眼分辨
+ * 「这是看视觉的预览包，不是能连服务器的正式包」。
+ *
+ * 预览版不含任何服务器地址、不含 INTERNET 权限（见 entry/src/main/module.json5）。
+ */
+{
+  "app": {
+    "bundleName": "com.hmprogram.eldercare.preview",
+    "vendor": "HMProgram",
+    "versionCode": 1000000,
+    "versionName": "1.0.0-preview",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

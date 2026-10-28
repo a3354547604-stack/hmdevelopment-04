@@ -1,0 +1,9 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/RegisterPage",
+    "pages/AlertDetailPage",
+    "pages/NetConfigPage",
+    "pages/ReportPage"
+  ]
+}

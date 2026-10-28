@@ -1,0 +1,12 @@
+/** entry 模块包描述（预览版）。依赖为空；不引入任何第三方包。 */
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "鸿蒙客户端预览模块：纯静态数据的页面集合，无网络层",
+  "main": "",
+  "author": "HMProgram",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {},
+  "dynamicDependencies": {}
+}

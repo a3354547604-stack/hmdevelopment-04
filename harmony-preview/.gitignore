@@ -1,0 +1,16 @@
+# 预览版工程：构建产物与本地配置不入库（与正式版同一口径）
+/build/
+/entry/build/
+/.hvigor/
+/.cxx/
+/oh_modules/
+/entry/oh_modules/
+/.preview/
+/entry/.preview/
+local.properties
+*.hap
+*.app
+*.png.bak
+
+# DevEco 自动生成的工程索引（与 harmony-app 同一口径：不入库）
+.idea/
