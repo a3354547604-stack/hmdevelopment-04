@@ -6,6 +6,10 @@
  *
  * 角标数字直接取静态数据里的未处理条数；正式版是「谁拉到谁写 AppStorage」，
  * 预览版没有轮询，读一次常量即可，视觉结果一样。
+ *
+ * 图标用 `resources/base/media/*.svg` 自绘矢量图，不用 emoji：
+ * emoji 的胖瘦/配色由系统 emoji 字体决定，换台设备就变样，也不像正式产品；
+ * SVG 是单色图，运行时只靠 `fillColor()` 上色——选中/未选中只换颜色，不换资源。
  */
 
 import { AppTheme } from '../common/AppTheme';
@@ -19,13 +23,17 @@ import { ProfilePage } from './ProfilePage';
 export struct MainTabs {
   @State index: number = 0;
   private pending: number = PreviewData.status().pending_alerts;
+  private online: boolean = PreviewData.status().online;
 
   @Builder
-  tabBarItem(title: string, icon: string, index: number) {
+  tabBarItem(title: string, icon: Resource, index: number) {
     Column({ space: 2 }) {
       Stack() {
-        Text(icon)
-          .fontSize(22)
+        Image(icon)
+          .width(22)
+          .height(22)
+          .fillColor(this.index === index ? AppTheme.COLOR_PRIMARY : AppTheme.COLOR_TEXT_HINT)
+          .objectFit(ImageFit.Contain)
         if (index === 1 && this.pending > 0) {
           Text(this.pending > 99 ? '99+' : `${this.pending}`)
             .fontSize(10)
@@ -36,7 +44,7 @@ export struct MainTabs {
             .borderRadius((AppTheme.BADGE_HEIGHT - 8) / 2)
             .textAlign(TextAlign.Center)
             .padding({ left: 3, right: 3 })
-            .offset({ x: 14, y: -6 })
+            .offset({ x: 10, y: -4 })
         }
       }
       .height(AppTheme.BADGE_HEIGHT)
@@ -54,7 +62,8 @@ export struct MainTabs {
 
   build() {
     Column() {
-      // 顶部条：只说这是谁家的数据，不出现数据源/服务器地址/离线标记
+      // 顶部条：只说这是谁家的数据，不出现数据源/服务器地址/离线标记；
+      // 右侧补一个在线点——原先这行只放「小盒子」四个字，独占约 40vp 却没有任何信息。
       Row({ space: 8 }) {
         Text(UserCopy.BOX_NAME)
           .fontSize(AppTheme.FONT_BODY)
@@ -63,26 +72,37 @@ export struct MainTabs {
           .layoutWeight(1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Row({ space: 4 }) {
+          Column()
+            .width(8)
+            .height(8)
+            .borderRadius(4)
+            .backgroundColor(this.online ? AppTheme.COLOR_LEVEL0 : AppTheme.COLOR_OFFLINE)
+          Text(this.online ? UserCopy.NODE_NORMAL : UserCopy.NODE_LOST)
+            .fontSize(AppTheme.FONT_CAPTION - 1)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+            .maxLines(1)
+        }
       }
       .width('100%')
-      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 8, bottom: 8 })
+      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 6, bottom: 6 })
       .backgroundColor(AppTheme.COLOR_SURFACE)
 
       Tabs({ barPosition: BarPosition.End, index: this.index }) {
         TabContent() {
           HomePage()
         }
-        .tabBar(this.tabBarItem(UserCopy.TAB_HOME, '🏠', 0))
+        .tabBar(this.tabBarItem(UserCopy.TAB_HOME, $r('app.media.ic_tab_home'), 0))
 
         TabContent() {
           AlertListPage()
         }
-        .tabBar(this.tabBarItem(UserCopy.TAB_ALERTS, '🔔', 1))
+        .tabBar(this.tabBarItem(UserCopy.TAB_ALERTS, $r('app.media.ic_tab_alert'), 1))
 
         TabContent() {
           ProfilePage()
         }
-        .tabBar(this.tabBarItem(UserCopy.TAB_PROFILE, '👤', 2))
+        .tabBar(this.tabBarItem(UserCopy.TAB_PROFILE, $r('app.media.ic_tab_profile'), 2))
       }
       .barHeight(64)
       .barMode(BarMode.Fixed)

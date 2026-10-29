@@ -16,10 +16,11 @@
     "products": [
       {
         "name": "default",
-        "compatibleSdkVersion": 12,
-        "compileSdkVersion": 12,
-        "targetSdkVersion": 12,
-        "runtimeOS": "OpenHarmony"
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "compileSdkVersion": "26.0.0",
+        "targetSdkVersion": "26.0.0",
+        "runtimeOS": "HarmonyOS"
       }
     ],
     "buildModeSet": [

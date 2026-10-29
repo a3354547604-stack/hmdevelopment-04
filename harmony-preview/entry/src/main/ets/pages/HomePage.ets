@@ -16,7 +16,7 @@ import { AppTheme, LiteralConstants } from '../common/AppTheme';
 import { Formatter } from '../common/Formatter';
 import { UserCopy } from '../common/UserCopy';
 import { PrimaryButton } from '../components/CommonViews';
-import { DeviceStatus, GatewayProperties, HourlyBucket, NodeItem } from '../model/Types';
+import { AlertItem, DeviceStatus, GatewayProperties, HourlyBucket, NodeItem } from '../model/Types';
 import { PreviewData } from '../data/PreviewData';
 
 @Component
@@ -26,6 +26,10 @@ export struct HomePage {
   @State nowMs: number = Date.now();
   private todayTotal: number = PreviewData.homeTotal();
   private todayHourly: HourlyBucket[] = PreviewData.homeHourly();
+
+  // 最近一条提醒：补给首页用。原先首页到「看看这周」下面就是整片空白（预览器实测
+  // 占掉 40% 屏高，看着像没加载完），而家属最想知道的正是「最近出过什么事、处理了没」。
+  private latest: AlertItem = PreviewData.alerts()[0];
 
   // ------------------------------------------------------------ 大字卡（结论）
   private hasEmergency(): boolean {
@@ -56,14 +60,14 @@ export struct HomePage {
     return AppTheme.COLOR_PRIMARY;
   }
 
-  private headlineIcon(): string {
+  private headlineIcon(): Resource {
     if (this.hasEmergency()) {
-      return '⚠️';
+      return $r('app.media.ic_status_warning');
     }
     if (this.pending() > 0) {
-      return '💬';
+      return $r('app.media.ic_status_message');
     }
-    return '🌤️';
+    return $r('app.media.ic_status_sun');
   }
 
   /** 副标题：「刚刚看过一遍」/「3 分钟前看过」——让用户知道数据新不新。 */
@@ -109,45 +113,54 @@ export struct HomePage {
     return 0;
   }
 
-  private gasLine(): string {
-    return UserCopy.SENSOR_GAS + ' ' + UserCopy.gasText(this.gasLevel());
-  }
-
-  private doorwayLine(): string {
-    const p: GatewayProperties = this.status.properties;
-    if (p.door === undefined) {
-      return UserCopy.SENSOR_DOOR + ' ' + LiteralConstants.PLACEHOLDER;
+  // 房间行拆成「房间名 / 传感器名 / 读数」三列之后，右侧只放读数本身。
+  // 原先右侧是 `燃气 正常`、`有人活动 有人` 这种「传感器名 + 读数」的整句，
+  // 和左边的 `正常`（节点在线）并排出现两个「正常」，读起来像重复。
+  private sensorName(type: string): string {
+    if (type === 'gas') {
+      return UserCopy.SENSOR_GAS;
     }
-    return UserCopy.SENSOR_DOOR + ' ' + (p.door ? UserCopy.DOOR_OPEN : UserCopy.DOOR_CLOSED);
+    if (type === 'presence') {
+      return UserCopy.SENSOR_PRESENCE;
+    }
+    return UserCopy.SENSOR_DOOR;
   }
 
-  private doorwayColor(): string {
+  /** 右侧读数；节点掉线时统一显示「联系不上」，比显示旧读数安全。 */
+  private sensorValue(type: string): string {
+    const n: NodeItem | undefined = this.nodeOf(type);
+    if (n === undefined || !n.online) {
+      return UserCopy.NODE_LOST;
+    }
+    const p: GatewayProperties = this.status.properties;
+    if (type === 'gas') {
+      return UserCopy.gasText(this.gasLevel());
+    }
+    if (type === 'presence') {
+      if (p.presence === undefined) {
+        return LiteralConstants.PLACEHOLDER;
+      }
+      return p.presence ? UserCopy.PRESENCE_YES : UserCopy.PRESENCE_NO;
+    }
+    if (p.door === undefined) {
+      return LiteralConstants.PLACEHOLDER;
+    }
+    return p.door ? UserCopy.DOOR_OPEN : UserCopy.DOOR_CLOSED;
+  }
+
+  private sensorColor(type: string): string {
+    const n: NodeItem | undefined = this.nodeOf(type);
+    if (n === undefined || !n.online) {
+      return AppTheme.COLOR_LEVEL2;
+    }
+    if (type === 'gas') {
+      return AppTheme.levelColor(this.gasLevel());
+    }
+    if (type === 'presence') {
+      return AppTheme.COLOR_TEXT_PRIMARY;
+    }
     const p: GatewayProperties = this.status.properties;
     return p.door === true ? AppTheme.COLOR_LEVEL1 : AppTheme.COLOR_TEXT_SECONDARY;
-  }
-
-  private motionLine(): string {
-    const p: GatewayProperties = this.status.properties;
-    if (p.presence === undefined) {
-      return UserCopy.SENSOR_PRESENCE + ' ' + LiteralConstants.PLACEHOLDER;
-    }
-    return UserCopy.SENSOR_PRESENCE + ' ' + (p.presence ? UserCopy.PRESENCE_YES : UserCopy.PRESENCE_NO);
-  }
-
-  private nodeStateLine(type: string): string {
-    const n: NodeItem | undefined = this.nodeOf(type);
-    if (n === undefined) {
-      return UserCopy.ROOM_PREFIX + '还没装';
-    }
-    return n.online ? UserCopy.NODE_NORMAL : UserCopy.NODE_LOST;
-  }
-
-  private nodeStateColor(type: string): string {
-    const n: NodeItem | undefined = this.nodeOf(type);
-    if (n === undefined) {
-      return AppTheme.COLOR_TEXT_HINT;
-    }
-    return n.online ? AppTheme.COLOR_LEVEL0 : AppTheme.COLOR_LEVEL2;
   }
 
   /** 「最长一段没动静」：按小时桶数连续为 0 的段。 */
@@ -173,35 +186,65 @@ export struct HomePage {
     return best.toString() + ' 小时';
   }
 
+  /** 节点序列号 → 房间名（提醒只带 sn，不带 location）。 */
+  private roomOfSn(sn: string): string {
+    const nodes: NodeItem[] = this.status.nodes;
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].sn === sn) {
+        return nodes[i].location;
+      }
+    }
+    return UserCopy.ROOM_PREFIX;
+  }
+
+  /** 「最近一条提醒」下方那行小字：多久前 · 哪个房间 · 处理状态。 */
+  private latestLine(): string {
+    const when: string = Formatter.fmtAgo(this.latest.ts, this.nowMs);
+    const room: string = this.roomOfSn(this.latest.node_sn);
+    const state: string = this.latest.status === 'pending' ? '还没处理' : '已处理';
+    return when + ' · ' + room + ' · ' + state;
+  }
+
+  // 房间行：整宽一行（图标 / 房间名+传感器名 / 右侧读数）。
+  // 早前三张卡横排，360vp 宽的屏上每张只剩约 101vp，房间名被挤成省略号、
+  // 第三张还被屏幕右缘切掉（预览器实测）；老人也更容易读竖排的整行。
   @Builder
-  roomCard(icon: string, room: string, line: string, lineColor: string, nodeState: string, nodeColor: string) {
-    Column({ space: 6 }) {
-      Row({ space: 6 }) {
-        Text(icon)
-          .fontSize(AppTheme.FONT_SECTION)
+  roomRow(icon: Resource, room: string, sensor: string, value: string, valueColor: string) {
+    Row({ space: 10 }) {
+      Image(icon)
+        .width(AppTheme.FONT_SECTION)
+        .height(AppTheme.FONT_SECTION)
+        .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .objectFit(ImageFit.Contain)
+      Column({ space: 2 }) {
         Text(room)
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Medium)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-        Blank()
-        Text(nodeState)
-          .fontSize(AppTheme.FONT_CAPTION - 1)
-          .fontColor(nodeColor)
+          .maxLines(1)
+        Text(sensor)
+          .fontSize(AppTheme.FONT_CAPTION)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .maxLines(1)
       }
-      .width('100%')
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
 
-      Text(line)
-        .fontSize(AppTheme.FONT_SECTION)
-        .fontColor(lineColor)
+      Text(value)
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(valueColor)
         .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .width('100%')
     }
-    .layoutWeight(1)
-    .padding(AppTheme.CARD_PADDING)
-    .backgroundColor(AppTheme.COLOR_SURFACE)
-    .borderRadius(AppTheme.CARD_RADIUS)
-    .alignItems(HorizontalAlign.Start)
+    .width('100%')
+    .padding({ top: 10, bottom: 10 })
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  rowDivider() {
+    Divider()
+      .strokeWidth(AppTheme.LINE_WIDTH)
+      .color(AppTheme.COLOR_DIVIDER)
   }
 
   @Builder
@@ -234,8 +277,11 @@ export struct HomePage {
             // 大字卡：今天有没有事
             Column({ space: 6 }) {
               Row({ space: 8 }) {
-                Text(this.headlineIcon())
-                  .fontSize(28)
+                Image(this.headlineIcon())
+                  .width(28)
+                  .height(28)
+                  .fillColor(Color.White)
+                  .objectFit(ImageFit.Contain)
                 Text(this.headline())
                   .fontSize(AppTheme.FONT_SECTION + 2)
                   .fontWeight(FontWeight.Bold)
@@ -257,20 +303,61 @@ export struct HomePage {
             .borderRadius(AppTheme.CARD_RADIUS)
             .alignItems(HorizontalAlign.Start)
 
-            // 三个房间
-            Row({ space: AppTheme.CARD_GAP }) {
-              this.roomCard('🔥', this.roomName('gas', UserCopy.ROOM_KITCHEN),
-                this.gasLine(), AppTheme.levelColor(this.gasLevel()),
-                this.nodeStateLine('gas'), this.nodeStateColor('gas'))
-              this.roomCard('🚶', this.roomName('presence', UserCopy.ROOM_BEDROOM),
-                this.motionLine(), AppTheme.COLOR_TEXT_PRIMARY,
-                this.nodeStateLine('presence'), this.nodeStateColor('presence'))
-              this.roomCard('🚪', this.roomName('door', UserCopy.ROOM_HALL),
-                this.doorwayLine(), this.doorwayColor(),
-                this.nodeStateLine('door'), this.nodeStateColor('door'))
+            // 三个房间：竖排整宽。原先三张卡横排，360vp 屏上每张只剩约 101vp，
+            // 房间名被截成「燃气 …」「有人…」，第三张「门厅」还被屏幕右缘切掉。
+            Column() {
+              this.roomRow($r('app.media.ic_room_gas'), this.roomName('gas', UserCopy.ROOM_KITCHEN),
+                this.sensorName('gas'), this.sensorValue('gas'), this.sensorColor('gas'))
+              this.rowDivider()
+              this.roomRow($r('app.media.ic_room_bed'), this.roomName('presence', UserCopy.ROOM_BEDROOM),
+                this.sensorName('presence'), this.sensorValue('presence'), this.sensorColor('presence'))
+              this.rowDivider()
+              this.roomRow($r('app.media.ic_room_door'), this.roomName('door', UserCopy.ROOM_HALL),
+                this.sensorName('door'), this.sensorValue('door'), this.sensorColor('door'))
             }
             .width('100%')
-            .alignItems(VerticalAlign.Top)
+            .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
+            .backgroundColor(AppTheme.COLOR_SURFACE)
+            .borderRadius(AppTheme.CARD_RADIUS)
+
+            // 最近一条提醒：填掉首页下半屏的空白，同时把「最近的异常」顶到一屏内。
+            Column({ space: 6 }) {
+              Row({ space: 6 }) {
+                Image($r('app.media.ic_tab_alert'))
+                  .width(AppTheme.FONT_BODY)
+                  .height(AppTheme.FONT_BODY)
+                  .fillColor(AppTheme.COLOR_LEVEL2)
+                  .objectFit(ImageFit.Contain)
+                Text(UserCopy.alertTitle(this.latest.type))
+                  .fontSize(AppTheme.FONT_BODY)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+                  .layoutWeight(1)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                Text('›')
+                  .fontSize(AppTheme.FONT_SECTION)
+                  .fontColor(AppTheme.COLOR_TEXT_HINT)
+              }
+              .width('100%')
+              .alignItems(VerticalAlign.Center)
+
+              Text(this.latestLine())
+                .fontSize(AppTheme.FONT_CAPTION)
+                .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+                .width('100%')
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            .width('100%')
+            .padding(AppTheme.CARD_PADDING)
+            .backgroundColor(AppTheme.COLOR_SURFACE)
+            .borderRadius(AppTheme.CARD_RADIUS)
+            .alignItems(HorizontalAlign.Start)
+            .onClick(() => {
+              AppStorage.setOrCreate<number>('openAlertId', this.latest.id);
+              router.pushUrl({ url: 'pages/AlertDetailPage' });
+            })
 
             // 今日小结
             Column({ space: 10 }) {

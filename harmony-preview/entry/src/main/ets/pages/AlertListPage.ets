@@ -17,9 +17,9 @@ import { PreviewData } from '../data/PreviewData';
 
 @Component
 export struct AlertListPage {
-  /** 0 = 全部、1 = 未处理 */
-  @State filterIndex: number = 1;
-  @State items: AlertItem[] = PreviewData.alertsOf('pending');
+  /** 0 = 全部、1 = 未处理。默认「全部」：只有 2 条未处理时下半屏全空，看着像没加载完。 */
+  @State filterIndex: number = 0;
+  @State items: AlertItem[] = PreviewData.alertsOf('all');
   @State refreshing: boolean = false;
   private status: DeviceStatus = PreviewData.status();
 
@@ -63,7 +63,7 @@ export struct AlertListPage {
 
       if (this.items.length === 0) {
         EmptyView({
-          icon: '🌿',
+          icon: $r('app.media.ic_ok_circle'),
           title: UserCopy.ALERT_EMPTY,
           hint: '有情况会自动出现在这里'
         })

@@ -44,16 +44,21 @@ export struct ProfilePage {
 
   @Builder
   row(label: string, value: string, chevron: boolean, onTap: () => void) {
+    // 标题不再参与瓜分宽度：原先 `label.layoutWeight(1)` 遇到长提示（修改密码那行）
+    // 会被挤成「修改 / 密码」两行，右侧提示还顶到 › 上。改成标题不缩、提示占剩余宽度。
     Row({ space: 8 }) {
       Text(label)
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-        .layoutWeight(1)
+        .maxLines(1)
+        .flexShrink(0)
       Text(value)
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .textAlign(TextAlign.End)
+        .layoutWeight(1)
       if (chevron) {
         Text('›')
           .fontSize(AppTheme.FONT_SECTION)
@@ -161,8 +166,11 @@ export struct ProfilePage {
           this.card(UserCopy.SEC_FAMILY)
           Column({ space: 4 }) {
             Row({ space: 8 }) {
-              Text('👨‍👩‍👧')
-                .fontSize(22)
+              Image($r('app.media.ic_family'))
+                .width(22)
+                .height(22)
+                .fillColor(AppTheme.COLOR_PRIMARY)
+                .objectFit(ImageFit.Contain)
               Column({ space: 2 }) {
                 Text(PREVIEW_USERNAME)
                   .fontSize(AppTheme.FONT_BODY)
@@ -187,8 +195,11 @@ export struct ProfilePage {
           this.card(UserCopy.SEC_DEVICE)
           Column() {
             Row({ space: 8 }) {
-              Text('📦')
-                .fontSize(22)
+              Image($r('app.media.ic_device_box'))
+                .width(22)
+                .height(22)
+                .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
+                .objectFit(ImageFit.Contain)
               Column({ space: 2 }) {
                 Text(PREVIEW_DEVICE_NAME)
                   .fontSize(AppTheme.FONT_BODY)
