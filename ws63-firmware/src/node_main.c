@@ -153,6 +153,7 @@ static void *node_task(const char *arg)
         NODE_SN_STR);
 #endif
 
+    uint32_t next_push_ms = 0;
     while (1) {
         uint32_t now = uapi_tcxo_get_ms();
         int len = 0;
@@ -180,6 +181,14 @@ static void *node_task(const char *arg)
                         NODE_SN_STR, kind);
                 }
             }
+        }
+
+        /* 2.5) 周期上报：节点独立运行时不能等汇聚来轮询（汇聚可能读/写都不被协议栈接受，
+         *      而节点是「有连接就推」的一端），所以每 2 s 主动推一帧当前样本。
+         *      id 用 0：表示「非应答帧」，与 poll 应答（带 id）区分。 */
+        if (node_link_connected() && (int32_t)(now - next_push_ms) >= 0) {
+            next_push_ms = now + 2000u;
+            answer_poll(&s, 0);
         }
 
         /* 3) 本地心跳（只打日志，不发帧）：30 s 一次，确认节点还活着 */
