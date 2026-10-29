@@ -1214,7 +1214,8 @@ static void test_433_and_ring(void)
 
 /* ================= 12. §4.5 set_threshold（阈值下发） ================= */
 /* 期望值来源：§4.5 的 result_code 码表（0/1/2/7）、§6.9 items 的 21 键与默认值、
- * §8 各参数表的范围、§8.8 的去重窗（跌倒 30 s / 其余 60 s）、§3.7 SEQ=5 的实测 payload。
+ * §8 各参数表的范围、§8.8 的去重窗（跌倒 30 s / 其余 60 s）、§3.7 SEQ=5 的实测 payload、
+ * 算法参数 co_t1_mv 的跨端范围（服务器 ALGORITHM_SPECS = 节点固件 NODE_CO_T1_MIN/MAX = 200–3300）。
  * on_cmd() 本身在 gw_main.c（要板子），所以这里测的是它调用到的全部判定逻辑。 */
 
 static const gw_contract_frame_t *find_frame(const char *needle)
@@ -1240,7 +1241,7 @@ static void test_set_threshold(void)
     uint32_t i;
     int rc;
 
-    t_start("§4.5 set_threshold：21 键校验 / 0x11 payload / 本地规则生效");
+    t_start("§4.5 set_threshold：22 键校验 / 0x11 payload / 本地规则生效");
 
     gw_settings_init(&st);
     t_ok(st.gas_t1_mv == 1500u && st.gas_t2_mv == 2500u && st.no_motion_min == 30u &&
@@ -1248,7 +1249,9 @@ static void test_set_threshold(void)
          st.alert_repush_s[2] == 300u && st.fall_suppress_s == 30u && st.alert_suppress_s == 60u &&
          st.node_offline_timeout_s == 9u && st.report_interval_s == 60u && st.temp_high_c == 35.0,
          "默认值逐条对齐契约 §6.9 items（1500/2500/30/[0,60,300]/30/60/9/60/35.0）");
-    t_ok(gw_threshold_key_count() == 21u, "键表恰好 21 个键（§6.9 items）");
+    /* 22 = §6.9 items 的 21 键 + 算法参数 co_t1_mv（t170；服务器 ALGORITHM_SPECS 同口径） */
+    t_ok(gw_threshold_key_count() == 22u,
+         "键表恰好 22 个键（§6.9 items 21 + 算法参数 co_t1_mv）");
 
     /* ① 21 键逐个下发合法值：任何键"表里有、落值没分支"都会在这里暴露 */
     {
@@ -1295,14 +1298,74 @@ static void test_set_threshold(void)
             if (gw_threshold_describe(spec, desc, sizeof(desc)) > 0u) { described++; }
             if ((st.applied_mask & (1u << i)) != 0u) { bit_set++; }
         }
-        snprintf(msg, sizeof(msg), "21 键逐个下发合法值都回 result_code=0（%d/21）", all_ok);
-        t_ok(all_ok == 21, msg);
-        snprintf(msg, sizeof(msg), "21 键的成功响应都含 result/key/value（%d/21）", echoed);
-        t_ok(echoed == 21, msg);
-        snprintf(msg, sizeof(msg), "21 键都能被 gw_threshold_describe 格式化（%d/21）", described);
-        t_ok(described == 21, msg);
-        snprintf(msg, sizeof(msg), "applied_mask 记录全部下发过的键（%u/21）", (unsigned)bit_set);
-        t_ok(bit_set == 21u, msg);
+        snprintf(msg, sizeof(msg), "22 键逐个下发合法值都回 result_code=0（%d/22）", all_ok);
+        t_ok(all_ok == 22, msg);
+        snprintf(msg, sizeof(msg), "22 键的成功响应都含 result/key/value（%d/22）", echoed);
+        t_ok(echoed == 22, msg);
+        snprintf(msg, sizeof(msg), "22 键都能被 gw_threshold_describe 格式化（%d/22）", described);
+        t_ok(described == 22, msg);
+        snprintf(msg, sizeof(msg), "applied_mask 记录全部下发过的键（%u/22）", (unsigned)bit_set);
+        t_ok(bit_set == 22u, msg);
+    }
+
+    /* ①b co_t1_mv（MQ-7 一级门槛，t170）：算法参数要打通整条下发链，三件事必须同时成立——
+     *   ① 键在表里、整型、200–3300，且标了 from_contract=2（算法参数，不是"我们兜的宽界"）；
+     *   ② 校验放行并把值落到 settings，0x11 payload **逐字节**原样带出去（不是"包含"就算过）；
+     *   ③ 越界回 2（§4.5 参数越界），不是 1（未知键）——回 1 会被云端当成"网关不认这个键"，
+     *      于是 App 侧看到的是"键不存在"而不是"值不合理"，排障方向会被带偏。 */
+    {
+        const gw_th_spec_t *cs = gw_threshold_spec("co_t1_mv");
+        static const char k_expect[] =
+            "{\"cmd\":\"set_threshold\",\"key\":\"co_t1_mv\",\"value\":900}";
+        uint32_t n;
+
+        t_ok(cs != NULL && cs->kind == GW_TH_INT && cs->lo == 200.0 && cs->hi == 3300.0 &&
+             cs->from_contract == 2u,
+             "co_t1_mv 在键表里：整型 200–3300，来源=算法参数（契约未登记）");
+
+        memset(&v, 0, sizeof(v));
+        v.scalar = 900.0;
+        rc = gw_threshold_apply(&st, "co_t1_mv", &v);
+        t_ok(rc == GW_RC_OK && st.co_t1_mv == 900u,
+             "co_t1_mv=900 → 0 并落值（st.co_t1_mv 进 gw_settings）");
+
+        n = gw_threshold_cmd_payload("co_t1_mv", &v, payload, sizeof(payload));
+        t_ok(n == (uint32_t)(sizeof(k_expect) - 1u) && strcmp(payload, k_expect) == 0,
+             "co_t1_mv=900 的 0x11 payload 与期望逐字节一致（整数不带 .0）");
+
+        echo[0] = '\0';
+        (void)gw_threshold_cmd_paras(GW_RC_OK, "co_t1_mv", &v, echo, sizeof(echo));
+        t_ok(strstr(echo, "\"key\":\"co_t1_mv\"") != NULL &&
+             strstr(echo, "\"value\":900") != NULL,
+             "co_t1_mv 的成功响应回显 key 与原值（§4.5）");
+
+        v.scalar = 200.0;
+        t_ok(gw_threshold_apply(&st, "co_t1_mv", &v) == GW_RC_OK && st.co_t1_mv == 200u,
+             "co_t1_mv=200（下界，含端点）→ 0");
+        v.scalar = 3300.0;
+        t_ok(gw_threshold_apply(&st, "co_t1_mv", &v) == GW_RC_OK && st.co_t1_mv == 3300u,
+             "co_t1_mv=3300（上界，含端点）→ 0");
+        v.scalar = 3301.0;
+        t_ok(gw_threshold_apply(&st, "co_t1_mv", &v) == GW_RC_RANGE,
+             "co_t1_mv=3301 → 2（超上限；负向：不能被当成 0 放过去）");
+        t_ok(st.co_t1_mv == 3300u,
+             "越界值不落库：st.co_t1_mv 仍停在上一合法值 3300");
+        v.scalar = 199.0;
+        t_ok(gw_threshold_apply(&st, "co_t1_mv", &v) == GW_RC_RANGE,
+             "co_t1_mv=199 → 2（低于下限：MQ-7 洁净空气也有 200–600 mV，低于 200 是接线错）");
+        v.scalar = 900.5;
+        t_ok(gw_threshold_apply(&st, "co_t1_mv", &v) == GW_RC_RANGE,
+             "co_t1_mv=900.5 → 2（整数键不收小数，节点按 int 解析会静默取整）");
+        memset(&v, 0, sizeof(v));
+        v.is_array = 1u;
+        v.n = 1;
+        v.elems[0] = 900.0;
+        t_ok(gw_threshold_apply(&st, "co_t1_mv", &v) == GW_RC_RANGE,
+             "co_t1_mv 收到数组 → 2（类型不符）");
+        /* 复位成默认值：上面这些越界尝试别留给后续用例 */
+        memset(&v, 0, sizeof(v));
+        v.scalar = 900.0;
+        (void)gw_threshold_apply(&st, "co_t1_mv", &v);
     }
 
     /* ② 未知键 → §4.5 result_code=1 */
@@ -2791,7 +2854,7 @@ int main(void)
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
     test_crc_and_encode();
     test_contract_frames();          /* §3.7 六条样例帧：解析 + 重编 */
-    test_set_threshold();            /* §4.5 set_threshold：21 键校验 + 生效 + 0x11 payload */
+    test_set_threshold();            /* §4.5 set_threshold：22 键校验 + 生效 + 0x11 payload */
     test_threshold_fail_paras();     /* t111 L-1 收口：失败响应 paras 必须是 {}、不谎报成功 */
     test_kvcfg();                    /* t34 凭证 KV：布局 + 落盘 + 串口命令 + 负向 */
     test_wifi_cmd();                 /* t136 串口 wifi：边界校验 + 口令不回显 + 失败可判读 */

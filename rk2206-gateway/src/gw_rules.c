@@ -378,6 +378,15 @@ static const gw_th_spec_t s_th_specs[] = {
     /* alert_repush_s：§8.8 推送节奏 [0,60,300]，最多 3 次 —— 元素数与秒数都有出处，
      * 所以这里 emin/emax=1..3 也算「契约」。 */
     { "alert_repush_s",         GW_TH_INT_ARRAY,  0,       0,     0, 86400,   1,   3,  1, 1 },
+    /* co_t1_mv（t170）：**归属「算法参数」**——MQ-7 的一级门槛，只有 M1 消费（网关只校验+落值+透传
+     * 0x11，不参与任何本地判定），与服务器 `ALGORITHM_SPECS` 同口径：可下发、但不进 §6.9 的 items。
+     * 范围 200–3300 mV 的出处不是契约（v1.5 §8.2 只登记了 gas_*，MQ-7 标 P1、`co` 本阶段不接）：
+     * 服务器 server/app/settings_keys.py 是 200–3300，节点固件 node_cfg.h 的
+     * NODE_CO_T1_MIN_MV/NODE_CO_T1_MAX_MV 也是 200–3300，两端一致 → from_contract=2。
+     * 为什么上限取 3300 而不是「可能的最大读数」：AO 是 1:1 分压的 0–3.3 V 模拟量，用 ADC 满量程
+     * 才不会把有效标定值挡在门外（与节点侧同一句理由）。
+     * 放在表尾而不是 gas_t1_mv 旁边，是为了不改动既有 21 键的位序——applied_mask 的位号就是表下标。 */
+    { "co_t1_mv",               GW_TH_INT,      200,     3300,     0,    0,   0,   0,  2, 1 },
 };
 
 const gw_th_spec_t *gw_threshold_spec(const char *key)
@@ -422,6 +431,16 @@ int gw_threshold_check_array(const gw_th_spec_t *spec, const double *v, int n)
     return GW_RC_OK;
 }
 
+/* 范围出处文案。三种取值分开写，是因为「结构宽界」（我们自己兜的一个大到不会误伤的界）
+ * 和「算法参数」（跨端约定、有真实出处）在排障时是两件事：前者要随契约补全而收窄，
+ * 后者只要两端没改就稳定。 */
+static const char *th_source_text(const gw_th_spec_t *spec)
+{
+    if (spec->from_contract == 1u) { return "契约"; }
+    if (spec->from_contract == 2u) { return "算法参数（跨端约定）"; }
+    return "结构宽界";
+}
+
 uint32_t gw_threshold_describe(const gw_th_spec_t *spec, char *out, uint32_t cap)
 {
     int n;
@@ -436,14 +455,14 @@ uint32_t gw_threshold_describe(const gw_th_spec_t *spec, char *out, uint32_t cap
     } else {
         n = snprintf(out, cap, "%s=[%g..%g] 来源=%s%s",
                      spec->key, spec->lo, spec->hi,
-                     spec->from_contract ? "契约" : "结构宽界",
+                     th_source_text(spec),
                      spec->p0_effective ? "" : " (P1:写入不生效但不报错)");
     }
     return (n > 0 && (uint32_t)n < cap) ? (uint32_t)n : 0u;
 }
 
 /* ============= 阈值下发落地（契约 §4.5 set_threshold → §8 生效） ============= */
-/* 键盘表 s_th_specs 已经是"21 键 + 类型 + 范围"的唯一来源，这一段只补两件事：
+/* 键盘表 s_th_specs 已经是"22 键 + 类型 + 范围"的唯一来源，这一段只补两件事：
  *   ① 每个键"当前生效值"存放处（gw_settings_t），默认值逐条对齐契约 §6.9 items 示例；
  *   ② 把值推给真正消费它的状态机（gw_settings_sync）。
  * 校验一律复用 gw_threshold_check_scalar/check_array，不另写一份范围判断——
@@ -459,6 +478,7 @@ void gw_settings_init(gw_settings_t *s)
     s->gas_t1_mv                 = 1500u;
     s->gas_t2_mv                 = 2500u;
     s->gas_recover_mv            = 200u;
+    s->co_t1_mv                  = 900u;    /* 算法参数：与服务器 ALGORITHM_SPECS 默认值一致（节点固件 NODE_CO_T1_MV=1500 只是它自己的上电初值） */
     s->gas_l1_hold_s             = 10u;
     s->gas_l2_hold_s             = 6u;
     s->gas_recover_hold_s        = 30u;
@@ -493,7 +513,7 @@ const char *gw_threshold_key_at(uint32_t idx)
 
 /* 键 → gw_settings_t 里的存放位置。用 offsetof 而不是一长串 strcmp：
  * 这样"表里有键、却忘了加落值分支"能被主机自测一次性查出来（见 gw_selftest 的
- * test_set_threshold：枚举 21 键逐个下发，任何键没落值都会失败），
+ * test_set_threshold：枚举 22 键逐个下发，任何键没落值都会失败），
  * 而手写分支最容易在加键时漏掉一个，运行时表现为"合法值也回 result=1"。 */
 typedef struct {
     const char *key;
@@ -522,8 +542,9 @@ static const th_dst_t s_th_dst[] = {
     { "env_hold_min",              0, (uint16_t)offsetof(gw_settings_t, env_hold_min) },
     { "alert_suppress_s",          0, (uint16_t)offsetof(gw_settings_t, alert_suppress_s) },
     { "fall_suppress_s",           0, (uint16_t)offsetof(gw_settings_t, fall_suppress_s) },
+    { "co_t1_mv",                  0, (uint16_t)offsetof(gw_settings_t, co_t1_mv) },
     /* alert_repush_s（整型数组）不在本表：它落的是 s->alert_repush_s[]/alert_repush_n，
-     * 不是单个标量字段。21 键 = 20 行标量 + 1 个数组键。 */
+     * 不是单个标量字段。22 键 = 21 行标量 + 1 个数组键。 */
 };
 
 static const th_dst_t *th_dst_of(const char *key)

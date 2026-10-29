@@ -137,8 +137,10 @@ uint8_t gw_alarm_state_from(uint8_t gas_level, uint8_t fall_alarm,
 /* 为什么把键表做成一张表而不是一串 if：键清单的唯一来源是契约 §6.9 的 items 键名
  * （逐键取值范围见 §8 各参数表）。App 的 PUT settings、云端投递、网关下发三处必须
  * 共用同一份键名与范围——否则会出现「App 放行、网关回 result=2」这种最难查的不一致。
- * 本表**不引入 §6.9 之外的键**：`gas_l1_to_l2_s` 是 §8.2 算法参数，不在 items 里，
- * 因此也不在这里（下发它必须回 result=1 未知键，见 §6.10 的 1003 说明）。 */
+ * 本表**以 §6.9 的 items 为准（21 键）**，唯一例外是 `co_t1_mv`：它是**可下发的算法参数**
+ * （服务器 server/app/settings_keys.py 的 `ALGORITHM_SPECS` 同口径——接受下发、不进 items），
+ * 登记在表尾并标 `from_contract=2`。**`gas_l1_to_l2_s` 不在此列**：它是 §8.2 里明写
+ * 「不可下发」的算法参数，下发它必须回 result=1 未知键（见 §6.10 的 1003 说明）。 */
 typedef enum {
     GW_TH_INT = 0,          /* JSON 整数 */
     GW_TH_FLOAT,            /* JSON 浮点（整数也接受） */
@@ -151,7 +153,8 @@ typedef struct {
     double      lo, hi;             /* 标量键的取值范围（含端点） */
     double      elem_lo, elem_hi;   /* 数组键：单元素范围 */
     uint8_t     elem_min, elem_max; /* 数组键：元素个数 */
-    uint8_t     from_contract;      /* 1=范围在契约里写明（§4.5/§8.x 范围列）；0=契约只给默认值，这里是结构宽界 */
+    uint8_t     from_contract;      /* 1=范围在契约里写明（§4.5/§8.x 范围列）；0=契约只给默认值，这里是结构宽界
+                                     * 2=算法参数：契约没登记这个键，范围是跨端约定（服务器键表 = 节点固件常量） */
     uint8_t     p0_effective;       /* 0=P1 键：P0 写入不生效，但**不得报错**（§6.9 presence_hold_s） */
 } gw_th_spec_t;
 
@@ -180,12 +183,14 @@ typedef struct {
     int     n;
 } gw_th_value_t;
 
-/* 21 键的当前生效值。**默认值逐个对齐契约 §6.9 items 示例**（不是随口给的）：
+/* 22 键的当前生效值 = §6.9 items 的 21 键 + 算法参数 co_t1_mv（见 s_th_specs 表尾）。
+ * **默认值逐个对齐契约 §6.9 items 示例**（不是随口给的）：
  * 网关重启后即使没有任何下发，本地规则也必须按契约默认值跑。 */
 typedef struct {
     uint32_t no_motion_min;             /* §8.5 默认 30 */
     uint32_t presence_hold_s;           /* §8.5 默认 60；P1 键：写入不生效但不得报错 */
     uint32_t gas_t1_mv, gas_t2_mv, gas_recover_mv;                  /* §8.2 1500/2500/200 */
+    uint32_t co_t1_mv;                  /* MQ-7 一级门槛：算法参数（契约未登记），默认 900 跟服务器一致 */
     uint32_t gas_l1_hold_s, gas_l2_hold_s, gas_recover_hold_s;      /* §8.2 10/6/30 */
     uint32_t away_after_open_s;         /* §8.5 默认 600 */
     uint32_t door_open_alarm_s;         /* §8.6 默认 180 */

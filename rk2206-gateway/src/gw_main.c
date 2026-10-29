@@ -91,7 +91,7 @@ static uint16_t s_demo_gas_mv;
 
 static uint32_t s_report_interval_ms = GW_REPORT_INTERVAL_MS;
 
-/* 阈值下发（t33 / 契约 §4.5 set_threshold）：21 键的当前生效值。
+/* 阈值下发（t33 / 契约 §4.5 set_threshold）：22 键的当前生效值（21 个 §6.9 items + 算法参数 co_t1_mv）。
  * 默认值在 gw_settings_init() 里逐条对齐契约 §6.9 items——网关重启后即使没有任何下发，
  * 本地规则也按契约默认值跑，不会出现"重启后阈值回退成代码里的老常量"。 */
 static gw_settings_t s_settings;
@@ -2186,7 +2186,7 @@ static void gw_main_entry(void)
     gw_fall_init(&s_fall);
     gw_motion_init(&s_motion, GW_NO_MOTION_MIN_DEF * 60000u, GW_AWAY_AFTER_OPEN_S * 1000u);
     gw_dedup_init(&s_dedup);
-    /* 阈值（t33）：先把 21 键装成契约 §6.9 的默认值，再推给状态机。
+    /* 阈值（t33）：先把 22 键装成契约 §6.9 的默认值（+ co_t1_mv 的跨端默认 900），再推给状态机。
      * 放在三个 init 之后是必须的——gw_settings_sync 是"覆盖式"写入，
      * 早于 init 调用会被 init 里的默认值盖回去。 */
     gw_settings_init(&s_settings);
