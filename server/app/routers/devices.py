@@ -19,7 +19,14 @@ from ..errors import ApiError, ok
 from ..mocks import virtual
 from ..payload import prune_none
 from ..services import alerts, iotda
-from ..settings_keys import DEFAULTS, dispatch_targets, normalize_payload, validate_items
+from ..settings_keys import (
+    ALGORITHM_SPECS,
+    DEFAULTS,
+    KNOWN_KEYS,
+    dispatch_targets,
+    normalize_payload,
+    validate_payload,
+)
 from ..timeutil import dt_to_ms, ms_to_dt, now_ms
 
 log = logging.getLogger("app.devices")
@@ -246,6 +253,17 @@ def _settings_payload(device: dict) -> dict:
     }
 
 
+def _algorithm_items(device: dict) -> dict[str, Any]:
+    """`settings_json.algorithm` 里的算法参数（co_t1_mv 等）。
+
+    它们**不进** `_settings_payload` 的 `items`：§6.9 的 items 是 App 消费的 21 键固定形状
+    （t171 的原话是「不进入用户可调 SETTINGS_SPEC」，同一条纪律在这里体现为响应形状不变）。
+    """
+    raw = db.jload(device.get("settings_json"), {}) or {}
+    stored = raw.get("algorithm") or {}
+    return {k: v for k, v in stored.items() if k in ALGORITHM_SPECS}
+
+
 @router.get("/{device_id}/settings")
 def get_settings(device_id: int, user: CurrentUser) -> dict:
     device = device_context(user, device_id)
@@ -256,7 +274,7 @@ def get_settings(device_id: int, user: CurrentUser) -> dict:
 def put_settings(device_id: int, payload: SettingsIn, user: CurrentUser) -> dict:
     device = device_context(user, device_id, need_owner=True)
     items = normalize_payload(payload.model_dump())
-    validated = validate_items(items)
+    validated, algorithm = validate_payload(items)
 
     raw = db.jload(device.get("settings_json"), {}) or {}
     merged = dict(DEFAULTS)
@@ -264,8 +282,13 @@ def put_settings(device_id: int, payload: SettingsIn, user: CurrentUser) -> dict
     merged.update(validated)
     # source 回到 local：改动还只在服务器上，未下发到设备（§6.11 的观察口径）
     stored = {"items": merged, "source": "local", "updated_at": now_ms()}
+    if algorithm or raw.get("algorithm"):
+        # 算法参数与 items 分开存：既能持久化又不污染 §6.9 的 21 键响应
+        algo_now = dict(raw.get("algorithm") or {})
+        algo_now.update(algorithm)
+        stored["algorithm"] = algo_now
     db.execute("UPDATE devices SET settings_json = :s WHERE id = :did", {"s": db.jdump(stored), "did": device_id})
-    log.info("设备 %s 阈值更新：%s", device["sn"], sorted(validated))
+    log.info("设备 %s 阈值更新：%s（算法参数 %s）", device["sn"], sorted(validated), sorted(algorithm))
     return ok(_settings_payload({**device, "settings_json": db.jdump(stored)}))
 
 
@@ -275,12 +298,16 @@ def post_config(device_id: int, payload: ConfigIn, user: CurrentUser) -> dict:
     settings_payload = _settings_payload(device)
     items: dict[str, Any] = settings_payload["items"]
 
+    algorithm = _algorithm_items(device)
     requested = payload.keys
     if requested:
-        unknown = [key for key in requested if key not in DEFAULTS]
+        # §6.10：认得出的键 = 21 个可调项 + 已登记的算法参数（co_t1_mv），其余才是 1003
+        unknown = [key for key in requested if key not in DEFAULTS and key not in ALGORITHM_SPECS]
         if unknown:
-            raise ApiError(1003, field=unknown[0], allowed=sorted(DEFAULTS))
-        selected = {key: items[key] for key in requested}
+            raise ApiError(1003, field=unknown[0], allowed=KNOWN_KEYS)
+        selected = {}
+        for key in requested:
+            selected[key] = items[key] if key in items else algorithm.get(key, ALGORITHM_SPECS[key].default)
     else:
         selected = dict(items)
 

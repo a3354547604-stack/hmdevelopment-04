@@ -4,6 +4,12 @@
 算法参数（一级滞留升二级，P0 固定 60 s），既不进 §6.9 响应，也不接受 §6.10 PUT 下发
 （下发即 `1003` 未知键）；要开放运行时配置必须走契约变更。见下方 `ALGORITHM_PARAMS`。
 
+算法参数分两类，别混：
+- `gas_l1_to_l2_s`（AWS 三级：`ALGORITHM_PARAMS`）——**契约 §8.2 明确排除**，PUT/config 一律 `1003`；
+- `co_t1_mv`（`ALGORITHM_SPECS`）——M1 固件已有 MQ-7 通道（t171），**接受** PUT/config 并经
+  `set_threshold` 下发，但**不进 §6.9 的 `items`**（值单独落在 `settings_json.algorithm`）：
+  App 的 21 键核对口径不变，桌面端/App 也不必为它加控件。
+
 每项标注：
 - `node`：谁消费（M0 = 汇聚/网关侧，M1/M2/M4 = 节点）；
 - `dispatch`：P0 是否支持远程下发。P1 项（环境阈值、门长开告警、告警重推）先只落库与回显，
@@ -35,6 +41,16 @@ ALGORITHM_PARAMS: dict[str, Any] = {
     "gas_l1_to_l2_s": 60,  # 一级滞留多久升二级；P0 固定，改值走契约变更
 }
 
+
+# 「可下发的算法参数」（t171）：不进 SETTINGS_SPEC / DEFAULTS / §6.9 items，但校验与下发都要认它。
+# 范围 200–3300 mV：MQ-7 的 AO 在洁净空气约 200–600 mV、CO 上去后快速抬升，3300 以上已饱和
+# （固件侧按 12 bit ADC 折算，见 ws63-firmware 的 M1 阈值段）；改范围要同步改固件。
+ALGORITHM_SPECS: dict[str, KeySpec] = {
+    "co_t1_mv": KeySpec(
+        "co_t1_mv", "int", 900, 200, 3300, "M1", True,
+        "MQ-7 CO 一级阈值（算法参数：可下发、不进 items）",
+    ),
+}
 
 SETTINGS_SPEC: dict[str, KeySpec] = {
     # ---- 活动/存在（M4 门厅：干簧管 + PIR）----
@@ -75,6 +91,9 @@ SETTINGS_SPEC: dict[str, KeySpec] = {
 }
 
 DEFAULTS: dict[str, Any] = {name: spec.default for name, spec in SETTINGS_SPEC.items()}
+
+# 契约 §6.10 的 `allowed` 要给出「服务器认得的所有键」：21 个可调项 + 已登记的算法参数
+KNOWN_KEYS: list[str] = sorted({*SETTINGS_SPEC, *ALGORITHM_SPECS})
 
 # 别名兼容：契约 §6.7 规定按「路径参数优先，冲突时 1001」，这里给两条等价别名
 ALIASES: dict[str, str] = {
@@ -123,21 +142,35 @@ def normalize_payload(payload: Any) -> dict[str, Any]:
     return items
 
 
-def validate_items(items: dict[str, Any]) -> dict[str, Any]:
-    """逐项校验；未知键 1003，类型 1001，越界 1002（契约 §6.9）。"""
+def validate_payload(items: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """逐项校验，返回 `(可调项, 算法参数)`；未知键 1003，类型 1001，越界 1002（契约 §6.9/§6.10）。
+
+    两拨分开返回的理由：算法参数（`ALGORITHM_SPECS`）能落库能下发，但**不能进 `items`**——
+    §6.9 的 items 是给 App 的 21 键固定形状，混进去会同时撑破 App 的字段核对与契约。
+    """
     validated: dict[str, Any] = {}
+    algorithm: dict[str, Any] = {}
     for key, value in items.items():
         spec = SETTINGS_SPEC.get(key)
-        if spec is None:
-            raise ApiError(1003, field=key, allowed=sorted(SETTINGS_SPEC))
-        validated[key] = _check_value(spec, value)
+        if spec is not None:
+            validated[key] = _check_value(spec, value)
+            continue
+        algo = ALGORITHM_SPECS.get(key)
+        if algo is None:
+            raise ApiError(1003, field=key, allowed=KNOWN_KEYS)
+        algorithm[key] = _check_value(algo, value)
 
     merged = {name: DEFAULTS[name] for name in SETTINGS_SPEC}
     merged.update(validated)
     # 跨字段约束：L2 阈值必须高于 L1，否则分级状态机无法进入 L2
     if merged["gas_t2_mv"] <= merged["gas_t1_mv"]:
         raise ApiError(1002, field="gas_t2_mv", allowed=[merged["gas_t1_mv"] + 1, 5000], note="必须大于 gas_t1_mv")
-    return validated
+    return validated, algorithm
+
+
+def validate_items(items: dict[str, Any]) -> dict[str, Any]:
+    """只要可调项时的旧入口（算法参数会被当未知键拒掉，语义同 t30/t62 的 D-01 口径）。"""
+    return validate_payload(items)[0]
 
 
 def dispatch_targets(items: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
@@ -145,7 +178,7 @@ def dispatch_targets(items: dict[str, Any]) -> tuple[dict[str, Any], dict[str, s
     accepted: dict[str, Any] = {}
     rejected: dict[str, str] = {}
     for key, value in items.items():
-        spec = SETTINGS_SPEC[key]
+        spec = SETTINGS_SPEC.get(key) or ALGORITHM_SPECS[key]
         if spec.dispatch:
             accepted[key] = value
         else:

@@ -210,6 +210,57 @@ def test_put_settings_algorithm_param_1003_and_not_persisted(client, device):
     assert conf.status_code == 400 and conf.json()["code"] == 1003, conf.text
 
 
+def test_put_settings_co_t1_mv_accepted_but_not_in_items(client, device):
+    """t171：co_t1_mv（M1 的 MQ-7 一级阈值）属于「可下发的算法参数」——
+
+    接受 PUT（不再按 1003 未知键拒），但**不进 §6.9 的 `items`**：那是 App 消费的 21 键固定形状，
+    混进去会同时撑破 App 的字段核对与契约；值单独落在 `settings_json.algorithm`。
+    """
+    resp = client.put(f"/api/devices/{device['id']}/settings", headers=_auth(device["token"]),
+                      json={"items": {"co_t1_mv": 900}})
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["data"]["items"]
+    assert len(items) == len(DEFAULTS) == 21
+    assert "co_t1_mv" not in items
+    assert items["gas_t1_mv"] == 1500                     # 相邻键未受影响
+    row = db.fetch_one("SELECT settings_json FROM devices WHERE id = :d", {"d": device["id"]})
+    assert db.jload(row["settings_json"])["algorithm"]["co_t1_mv"] == 900
+
+
+def test_put_settings_co_t1_mv_boundaries_inclusive(client, device):
+    """范围 200–3300 含端点（固件侧按同一区间判一级 CO）。"""
+    for good in (200, 3300):
+        resp = client.put(f"/api/devices/{device['id']}/settings", headers=_auth(device["token"]),
+                          json={"items": {"co_t1_mv": good}})
+        assert resp.status_code == 200, (good, resp.text)
+
+
+def test_put_settings_co_t1_mv_out_of_range_1002(client, device):
+    """越界回 1002，且 `field`/`allowed` 指回 co_t1_mv 的合法区间。"""
+    for bad in (199, 3301):
+        resp = client.put(f"/api/devices/{device['id']}/settings", headers=_auth(device["token"]),
+                          json={"items": {"co_t1_mv": bad}})
+        assert resp.status_code == 400 and resp.json()["code"] == 1002, (bad, resp.text)
+        assert resp.json()["data"]["field"] == "co_t1_mv"
+        assert resp.json()["data"]["allowed"] == [200, 3300]
+
+
+def test_config_dispatches_co_t1_mv(client, device):
+    """§6.10/§6.11：co_t1_mv 是「认得出的键」——进 accepted（走 set_threshold），不是 1003。"""
+    resp = client.post(f"/api/devices/{device['id']}/config", headers=_auth(device["token"]),
+                       json={"keys": ["co_t1_mv"]})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["accepted"] == ["co_t1_mv"]
+    assert data["rejected"] == []
+    assert data["request_id"]                            # 已投递 IoTDA（mock 模式也返回 request_id）
+
+    # 下发用的是设备侧 set_threshold 命令（与 §3.4 的 0x11 set 帧一一对应）
+    from app.services import iotda
+    key = "co_t1_mv"
+    assert key not in iotda._OFFICIAL_COMMANDS
+
+
 def test_put_settings_requires_owner_1104(client, device):
     family = create_user()
     token = login(client, family["username"])
