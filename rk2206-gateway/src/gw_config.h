@@ -185,8 +185,27 @@
 #define GW_IOT_PWM_PORT         0           /* a8_hal_pwm/README_zh.md:41：port 0 = GPIO_PB4 */
 #define GW_PWM_PORT             GW_IOT_PWM_PORT  /* gw_plat.c 的 IoTPwm* 参数名（同一处定义） */
 
-/* 433（引脚与接线表 §2.1：200 ms 复查、3 s 去重） */
-#define GW_433_POLL_MS          200
+/* 433 触发模式（单键遥控：火蝠 H34R 学习型接收板只学得会一路输出）。
+ *
+ * 为什么必须可配：学习型接收板的输出极性由模块自己定（有的拉低、有的拉高），
+ * 手上没有模块手册时只能靠实测。三种模式共用同一个 3 s 去重窗口：
+ *   edge = PB0 电平发生「稳定变化」即算一次触发 —— 不关心极性，高有效/低有效都能收
+ *   low  = 原语义：低电平有效（干接点 / OC 输出）
+ *   high = 高电平有效
+ * 默认 edge：用户只有一个按键，没必要先弄清模块输出是高还是低才能报警。 */
+#define GW_433_TRIGGER_EDGE     0
+#define GW_433_TRIGGER_LOW      1
+#define GW_433_TRIGGER_HIGH     2
+#ifndef GW_433_TRIGGER_MODE
+#define GW_433_TRIGGER_MODE     GW_433_TRIGGER_EDGE
+#endif
+
+/* 采样周期：edge 模式靠「连续两次读到同一电平」滤掉毛刺，50 ms 对遥控器按键
+ * （按住 ≥100 ms）有两倍余量；比原来的 200 ms 复查更不容易漏掉短按。 */
+#define GW_433_SAMPLE_MS        50
+#define GW_433_IDLE_PRINT_MS    5000        /* 开机后每 5 s 打一行 [433] pb0=… */
+#define GW_433_TASK_STACK       2048
+#define GW_433_TASK_PRIO        30          /* 最低优先级：只负责可观测，不参与实时 */
 #define GW_433_DEDUP_MS         3000
 
 /* 声光（契约 §8.1 级别 + §4.5 静音范围 + §4.7 断网提示） */

@@ -33,6 +33,7 @@
 #include "gw_hw.h"
 
 #include "ohos_init.h"
+#include "shell.h"
 #include "los_task.h"
 #include "los_tick.h"
 #include "lz_hardware.h"
@@ -118,6 +119,7 @@ void gw_pending_ack(uint16_t ack_seq);
 static void demo_gas_tick(uint32_t now);
 static uint8_t  s_offline_noticed;
 static volatile uint8_t s_433_pending_sos;
+static volatile uint8_t s_433_task_ok;     /* gw433 采样任务起来了就不让 tick 再采（t145） */
 
 static uint32_t gw_now_ms(void)
 {
@@ -1342,7 +1344,11 @@ static void tick_task(void *arg)
         }
         GW_TR("A", tr_i);
         gw_alarm_tick(&s_alarm, now);
-        gw_433_poll(&s_433, now);
+        /* 433 采样默认由 gw433 任务以 50 ms 跑（t145）；只有它没起来时才退回 tick 的 100 ms，
+         * 否则同一个 ctx 被两个任务同时改统计量。 */
+        if (s_433_task_ok == 0u) {
+            gw_433_poll(&s_433, now);
+        }
 
         /* ---- 按键采样放最前（t141）----
          * 为什么：t141 现场 `keys` 报「正在采基线（0 点已采）」，而配网侧只有一条
@@ -1827,8 +1833,8 @@ static void on_433(void *arg, uint32_t now)
 {
     (void)arg;
     (void)now;
-    /* 中断/复查任务里不做上云：只置标志，由 tick_task 统一走真实事件链路，
-     * 避免在 433 的 200 ms 节拍里直接碰 MQTT（阻塞会让复查丢事件）。 */
+    /* 采样/回调路径里不做上云：只置标志，由 tick_task 统一走真实事件链路，
+     * 避免在 433 的 50 ms 采样节拍里直接碰 MQTT（阻塞会让采样丢事件）。 */
     s_433_pending_sos = 1;
 }
 
@@ -2093,6 +2099,61 @@ int gw_prov_cmd(const char *line, char *out, uint32_t cap)
     return -1;
 }
 
+/* ============================== 433 采样任务与诊断（t145） ============================== */
+
+/*
+ * 为什么单独开一个任务，而不是留在 tick 里：
+ *   ① edge 模式要求采样周期 ≤50 ms，tick 是 100 ms，留在 tick 里就等于把
+ *      "连续两次同电平"的判据建立在 100 ms 的间隔上，短按（≈150 ms）可能只剩一个样本；
+ *   ② 单独任务能独立降优先级（GW_433_TASK_PRIO=30），433 只是可观测/告警源，
+ *      不能因为它抢占 UART 收帧和声光节拍。
+ * 每 GW_433_IDLE_PRINT_MS 打一行 pb0=…：用户不装万用表也能确认线接没接上
+ * （模块断电/没接线时电平恒定不变，edges 一直是 0）。
+ */
+static void gw_433_task(void *arg)
+{
+    uint32_t now;
+    uint32_t last_print = 0u;
+    char line[128];
+
+    (void)arg;
+    (void)gw_433_report(&s_433, gw_now_ms(), line, (uint32_t)sizeof(line));
+    printf("[%s] 433 采样就绪：%s", GW_LOG_TAG, line);
+    printf("[%s] 433 采样 %u ms，每 %u ms 打印 pb0=（mode=%s）\n", GW_LOG_TAG,
+           (unsigned)GW_433_SAMPLE_MS, (unsigned)GW_433_IDLE_PRINT_MS,
+           gw_433_mode_name(s_433.mode));
+
+    for (;;) {
+        LOS_Msleep(GW_433_SAMPLE_MS);
+        now = gw_now_ms();
+        gw_433_tick(&s_433, now);
+        if ((uint32_t)(now - last_print) >= GW_433_IDLE_PRINT_MS) {
+            last_print = now;
+            printf("[433] pb0=%u\n", (unsigned)s_433.cur_level);
+        }
+    }
+}
+
+/*
+ * 串口 `433`（与 `uinfo` 同一风格：一行说清"现在是什么状态、凭什么这么判"）。
+ * 现场判读顺序：先看 level 是否随按键变化（不变=线/模块问题），
+ * 再看 edges 涨不涨（涨=电平在变但被判成抖动/去重），最后看 trigger 涨不涨。
+ */
+static UINT32 gw_433_shell_cmd(UINT32 argc, const CHAR **argv)
+{
+    char line[128];
+
+    (void)argc;
+    (void)argv;
+    if (gw_433_report(&s_433, gw_now_ms(), line, (uint32_t)sizeof(line)) > 0) {
+        printf("%s", line);
+    } else {
+        printf("[433] 无法取状态（未初始化？）\n");
+    }
+    printf("[433] 判读：level 不随按键变→线/模块；edges 涨而 trigger 不涨→被 3 s 去重或抖动挡住\n");
+    return 0u;
+}
+
 static void gw_main_entry(void)
 {
     /* 这行里的 GW_IMAGE_TAG 是构建脚本的断言锚点：tools/gw-build.sh 会在
@@ -2175,6 +2236,9 @@ static void gw_main_entry(void)
      * 用于烧板后逐键标定（通道号/阈值不猜，实测回填配网实现说明）。 */
     gw_keys_shell_register();
     gw_prov_shell_register();
+    /* 8.3) 433 诊断（t145）：`433` 一行给出 mode/level/edges/last/trigger。
+     * 单键遥控只有一路输出，用户不必装万用表就能判断"模块和线到底通没通"。 */
+    (void)osCmdReg(CMD_TYPE_STD, "433", XARGS, (CMD_CBK_FUNC)gw_433_shell_cmd);
 
     /* 9) 任务 */
     if (task_create(uart_task, NULL, GW_TASK_STACK_UART, GW_TASK_PRIO_UART, "gwUart") != LOS_OK) {
@@ -2188,6 +2252,12 @@ static void gw_main_entry(void)
     }
     if (task_create(prov_http_task, NULL, GW_PROV_HTTP_TASK_STACK, GW_PROV_HTTP_TASK_PRIO, "gwProv") != LOS_OK) {
         printf("[%s] ⚠ 配网 HTTP 任务创建失败：本地配网 API 不可用\n", GW_LOG_TAG);
+    }
+    if (task_create(gw_433_task, NULL, GW_433_TASK_STACK, GW_433_TASK_PRIO, "gw433") != LOS_OK) {
+        printf("[%s] ⚠ 433 采样任务创建失败：退回 tick 里 100 ms 复查（抖动过滤精度下降）\n",
+               GW_LOG_TAG);
+    } else {
+        s_433_task_ok = 1u;
     }
     printf("[%s] 任务已启动：UART0=%u 8N1，等待汇聚帧…\n", GW_LOG_TAG, GW_UART_BAUD);
 }

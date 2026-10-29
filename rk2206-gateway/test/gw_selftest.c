@@ -1067,17 +1067,107 @@ static void test_cache(void)
     }
 }
 
+/* ============================== 9.1 433 edge 模式（t145） ============================== */
+/*
+ * 为什么单开一段：edge 是新增判据（极性未知的单键遥控），三条性质必须被钉死——
+ *   ① 50 ms 内 0→1→0 的抖动不触发（否则天线毛刺会天天误报 SOS）；
+ *   ② 稳定翻转只触发一次（否则按住 200 ms 会报多次）；
+ *   ③ 3 s 内第二次触发被去重（与 low/high 共用同一窗口）。
+ * 时间戳按 50 ms 一档手工推进，和板上 gw433 任务的采样节奏一致。
+ */
+static void test_433_edge_mode(void)
+{
+    gw_433_t ctx;
+    int hits = 0;
+    char line[128];
+    const char *p;
+
+    t_start("§2.1 433 edge 模式：50 ms 抖动不触发 / 稳定翻转一次 / 3 s 去重");
+    {
+        extern void gw_selftest_433_cb(void *arg, uint32_t now);
+        /* 先把宿主电平归到「松开 = 高」，否则 start 的基线就是上一条用例残留的低电平，
+         * 后面的"翻到低"根本不算变化 —— 这类用例污染比断言写错更难查，显式复位。 */
+        gw_host_433_release();
+        (void)gw_433_start(&ctx, gw_selftest_433_cb, &hits);
+        t_ok(ctx.mode == GW_433_TRIGGER_MODE && ctx.mode == GW_433_TRIGGER_EDGE,
+             "开机默认模式 = edge（GW_433_TRIGGER_MODE）");
+        t_ok(ctx.cur_level == 1 && ctx.stable_level == 1,
+             "开机会先采一个基线（当前高电平），不然首拍会白报一次 SOS");
+        t_ok(strcmp(gw_433_mode_name(ctx.mode), "edge") == 0, "mode 名字 = edge");
+
+        /* ① 抖动：一个采样周期内 0→1→0 */
+        gw_host_433_pulse();                 /* 电平 0（兼带 ISR，edge 模式不看 ISR） */
+        gw_433_tick(&ctx, 1000);
+        gw_host_433_release();               /* 电平 1 */
+        gw_433_tick(&ctx, 1050);
+        t_ok(hits == 0, "50 ms 内 0→1→0 抖动不触发");
+        t_ok(ctx.edges == 0, "抖动不计入稳定变化次数（edges 仍 0）");
+
+        /* ② 稳定翻转：同一电平连读两次才算变化 */
+        gw_host_433_pulse();                 /* 电平 0 */
+        gw_433_tick(&ctx, 1100);             /* 第 1 次读到 0：只算"还在抖" */
+        t_ok(hits == 0, "单个样本不算稳定变化");
+        gw_433_tick(&ctx, 1150);             /* 第 2 次读到 0：稳定变化 → 触发 */
+        t_ok(hits == 1, "连续两次同电平 → 触发一次");
+        t_ok(ctx.edges == 1 && ctx.cur_level == 0, "edges=1 且当前电平 0");
+        gw_433_tick(&ctx, 1200);
+        t_ok(hits == 1, "电平不变时不再重复触发");
+
+        /* ③ 3 s 内第二次稳定翻转被去重 */
+        gw_host_433_release();               /* 电平 1 */
+        gw_433_tick(&ctx, 1250);
+        gw_433_tick(&ctx, 1300);             /* 稳定回到 1：距上次触发 150 ms */
+        t_ok(hits == 1 && ctx.edges == 2, "第二次稳定变化被 3 s 去重挡住（edges 照样计数）");
+        t_ok(ctx.deduped == 1, "去重计数 +1（diagnostic）");
+
+        /* ④ 超过 3 s 后恢复正常 */
+        gw_host_433_pulse();                 /* 电平 0 */
+        gw_433_tick(&ctx, 5100);
+        gw_433_tick(&ctx, 5150);             /* 距上次触发 4000 ms */
+        t_ok(hits == 2, "超过 3 s 的新触发 → 再次回调");
+        t_ok(ctx.triggers == 2 && ctx.edges == 3, "triggers=2 / edges=3");
+    }
+
+    t_start("`433` 命令行的格式与判读字段");
+    {
+        unsigned long n;
+
+        n = (unsigned long)gw_433_report(&ctx, 5150, line, (uint32_t)sizeof(line));
+        t_ok(n > 0 && strstr(line, "[433] mode=edge") != NULL, "行首是 [433] mode=edge");
+        t_ok(strstr(line, " level=0 ") != NULL, "level 是当前电平");
+        t_ok(strstr(line, " edges=3 ") != NULL, "edges 是稳定变化次数");
+        t_ok(strstr(line, " last=0ms ") != NULL, "last 是距上次触发的毫秒数");
+        t_ok(strstr(line, " trigger=2 ") != NULL, "trigger 是去重后触发次数");
+        t_ok(strstr(line, " dedup_ms=3000") != NULL, "dedup_ms 与配置一致");
+        p = strstr(line, "\n");
+        t_ok(p != NULL && p[1] == '\0', "整行以换行结尾且只有一行");
+
+        ctx.triggers = 0;
+        (void)gw_433_report(&ctx, 6000, line, (uint32_t)sizeof(line));
+        t_ok(strstr(line, " last=- ") != NULL, "从未触发时 last=-（不编一个假的 0ms）");
+        t_ok(gw_433_report(&ctx, 6000, line, 16) == -1, "缓冲区太小返回 -1（不越界写）");
+
+        ctx.mode = GW_433_TRIGGER_LOW;
+        t_ok(strcmp(gw_433_mode_name(ctx.mode), "low") == 0, "mode 名字 = low");
+        ctx.mode = GW_433_TRIGGER_HIGH;
+        t_ok(strcmp(gw_433_mode_name(ctx.mode), "high") == 0, "mode 名字 = high");
+    }
+}
+
 /* ============================== 9. 433 与环形缓冲 ============================== */
 static void test_433_and_ring(void)
 {
     gw_433_t ctx;
     int hits = 0;
 
-    t_start("§2.1 433：中断置标志 + 200 ms 复查 + 3 s 去重");
+    t_start("§2.1 433 low 模式：中断置标志 + 采样复查 + 3 s 去重");
     {
         /* 回调计数：用文件级静态变量包一层，避免依赖 lz 头 */
         extern void gw_selftest_433_cb(void *arg, uint32_t now);
         gw_433_start(&ctx, gw_selftest_433_cb, &hits);
+        /* 默认编译期模式已改为 edge（t145），这段用例验的是原来的低电平语义，
+         * 所以显式切回 low —— 否则把断言解释权交给了配置常量，改配置就悄悄失效。 */
+        ctx.mode = GW_433_TRIGGER_LOW;
         gw_host_433_pulse();                     /* 触发（低电平 + ISR） */
         gw_433_poll(&ctx, 100000);
         t_ok(hits == 1, "首次触发 → 回调 1 次");
@@ -2723,6 +2813,7 @@ int main(void)
     test_alarm();
     test_cache();
     test_433_and_ring();
+    test_433_edge_mode();
 
     printf("\n==== 结果：通过 %d / 失败 %d ====\n", s_pass, s_fail);
     return (s_fail == 0) ? 0 : 1;
