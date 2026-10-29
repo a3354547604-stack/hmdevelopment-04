@@ -744,3 +744,89 @@ sha256 **完全一致**，指纹可复现。
 - **上板实测**：TX2(IO06) 通道需要真人躺 15–20 s 才产生边沿（`tx2_edges` 至今为 0）；阈值试验钩子的上板复跑也不做
   （本次只在容器里编过 `-DRADAR_THR_TEST_ENABLE=1` 的变体，没有打这种包、也没有上板）。
 - 只重编了 `m2`（`radar_hub.c` 只在 m2 的源文件清单里）。
+
+## 14. t169 记录：M1 接入 MQ-7（ADC ch3）与 co 上报（无板验证）
+
+卡面（t169）来源：用户 2026-10-29 把 MQ-2 + MQ-7 + AHT20 接到**同一块** WS63（M1），要求固件同时采两路。
+接线是**用户接线实测**（【实测】2026-10-29 用户口述 + 任务卡）：MQ-7 AO → **16 脚 IO10 = ADC ch3**（1:1 分压）；
+MQ-2 AO → 17 脚 IO09 = ch2；AHT20 仍在 I2C1（IO15/IO16）。
+与【本地文档】`docs/技术/引脚与接线表.md:57,73`（`ch3 = IO10`）、`:236`（MQ-7 原登记为「P1 可选、本阶段不接线」）一致 ——
+**本次是「提前接上了」，不是换了通道**。负载电阻未到货、**MQ-7 的 AO 还没接**，故本卡只保证
+「编译通过 + 逻辑正确 + 上板能起来」，读数标定等电阻到货后再做（卡面明确要求）。
+
+### 14.1 改了什么、为什么
+
+| # | 文件 | 改前 | 改后 | 为什么 |
+|---|---|---|---|---|
+| 1 | `node_cfg.h` | `NODE_MQ2_ADC_CH_P1A 3`（注释写「MQ-5 预留」）、`NODE_MQ2_ADC_CH_P1B 4`（「MQ-7 预留」） | `NODE_CO_ADC_CH 3` + `NODE_MQ2_ADC_CH_P1 4`（MQ-5 P1 预留） | 旧定义是按引脚表规划写的，与实际接线反了；照旧写会把 CO 采到 ch4 上（永远 0），而且日志里看不出错 |
+| 2 | `node_cfg.h` | 无 co 侧参数 | `NODE_CO_DIV_NUM/DEN`(2/1)、`NODE_CO_AVG_N 8`、`NODE_CO_T1_MV/T2_MV`(1500/2500)、`NODE_CO_T1_MIN/MAX_MV`(200/3300)、`NODE_SET_KEY_CO_T1`、`NODE_LOG_EVERY_N 8u` | 与 MQ-2 **同口径**（同分压比、同窗口）才可比、才能复用云端标定表；T1/T2 注释里标死「结构默认值、待 CAL 标定」 |
+| 3 | `node_sensor_gas.c` | `mq2_adc_init()` + `mq2_sample()` 各自一套读写逻辑 | 抽出 `adc_avg_sample(ch, ring, idx, cnt, n, last)` 两路共用；`adc_init_once()` 一次初始化并打两路通道号 | 各写一份的后果是某天有人只把燃气侧窗口调大，两路就不在一个口径上了；`uapi_adc_init` 初始化的是**整颗 ADC**，分两次调反而第二次拿错误码 |
+| 4 | `node_sensor_gas.c` | `s->co_mv = 0; s->has_co = false;`（常量） | `co_sample()` 采 ch3，窗口平均后 `co_mv = avg × 2`，`has_co = (至少成功采到一帧)` | 卡面要求 co 上报真实值；**失败时整键不出现**而不是发 0（见 §14.3 的规则说明） |
+| 5 | `node_sensor_gas.c` | 快照填充在 `node_sensor_sample` 两个分支里各写一遍 | 抽 `fill_snapshot()`，门控早退与正常分支共用 | 两处漂移是这类代码的经典坑：只在正常分支填 co，poll 应答就会拿到上一帧的旧值 |
+| 6 | `node_sensor_gas.c` | 无本地打印 | 每 8 帧（2 s×8 = 16 s）打 `[M1] gas=%umV co=%umV t=%s%d.%dC h=%s%d.%d%% warmup=%d` | 用户要在串口直接看数。**不用 `%f`**：SDK 的 vsnprintf 不支持浮点（`radar_hub.c:314` 已踩过），改按 0.1 分度整数拆 `%d.%d`，负号单独打 |
+| 7 | `node_sensor_gas.c` | `apply_set` 只认 `gas_t1_mv` | 加 `co_t1_mv` 分支：范围校验 → 越界 `1002`，其它键 `1003` | 与 `gas_t1_mv` 同风格；`co_t1_mv` 目前**只存不用**（未接事件触发，见 §14.4） |
+| 8 | `node_json.c` | `if (s->has_co)` 无说明 | 补注释：置位由驱动决定，ADC 起不来/一次没采到 → 整键不出现，绝不写 0 | 把「为什么可以缺键」写在读的人会怀疑的那一行，避免后人「贴心地」补个 `else co=0` |
+
+既有逻辑（采样周期门控、warmup、AHT20 掉线自愈、事件上升沿）没动。
+
+### 14.2 无板验证（命令与结果，全部可复现）
+
+| 命令 | 结果 |
+|---|---|
+| `tools/build-lock.sh python3 tools/node-json-check.py` | 通过：`SELFTEST OK` + `ALIAS_OK` + 「用 JSON 解析器复检了 10 帧…✅ 全部通过」（`node_json.c` 以 `-Wall -Wextra -Werror` 编过） |
+| `tools/build-lock.sh docker run --rm … ws63wsl:latest python3 tools/node-compile-check.py` | **共 41 个（目标 × 文件）编译，失败 0 个**（含 SDK 的 `-Werror` 级别警告） |
+| 容器内用**同一套编译参数**把 `node_sensor_gas.c` 编成 `.o` 后 `nm -S` / `strings` | 符号齐全：`g_co_ring 0x20`(=8×4)、`g_co_avg/g_co_cnt/g_co_idx/g_co_mv_last/g_co_t1_mv`、`g_co_valid 1 B`、`g_mv_ring 0x20`；字符串里有 `[M1] gas=%umV co=%umV t=%s%d.%dC h=%s%d.%d%% warmup=%d`、`[M1] adc init ret=%d ch2=%d(IO09/MQ-2) ch3=%d(IO10/MQ-7)`、`[M1] set co_t1_mv=%d out of range` |
+| 容器内 `gcc -std=c99 -Wall -Wextra -Werror -I ws63-firmware/src … node_json.c` 跑两帧 | `has_co=false` → payload 里**没有** `co` 键；`has_co=true` → `"co":1234`（真实值，不再是常量 0），其余字段一致 |
+| `bash ws63-firmware/scripts/node-build.sh m1` | 退出 0；角色断言通过（`EC-NODE-ROLE=M1 type=gas`×1，其它角色标记 0，`[MOCK]`×0）；`custom/` 残留 0 |
+| `grep -a -F -c 'co_t1_mv' ws63-firmware/out/{NODE_M1,NODE_M2,NODE_M4,HUB_HUB}.fwpkg` | M1 = **3**；M2 / M4 / HUB = **0**（只有 M1 的包带新代码，其它角色的包没被这次改动碰到） |
+
+产物指纹（`ws63-firmware/out/NODE_M1.fwpkg`，本机实测）：
+
+| 口径 | t169 前（2026-10-19 00:34 的包） | t169 后（2026-10-29 21:30） |
+|---|---|---|
+| 体积 | 1468136 B | **1468584 B**（+448 B） |
+| md5 | —（旧包已被覆盖，未留档；**不作判据**） | `1d2e48953a9336d20ffeb5c945313503` |
+| sha256 | — | `27f3223041bfcce12ce9a24d61f1b6765633fc6d3235f1d39b388afce85b8847` |
+
+按 AGENTS.md 的指纹口径：`.fwpkg` 实测可复现，sha256 可当「这包是哪次构建」的标识；
+但**旧包的同口径哈希没留**，所以「体积 +448 B」+「新字符串只在 M1 包里」才是本次改动进镜像的证据。
+
+### 14.3 串口上应该看到什么（用户自检用）
+
+```text
+[M1] adc init ret=0 ch2=2(IO09/MQ-2) ch3=3(IO10/MQ-7)
+[M1] sensor init done: adc_ok=1 aht20_ok=1 gas_t1=1500mV co_t1=1500mV warmup=172800s
+[M1] gas=3200mV co=1250mV t=23.5C h=41.2% warmup=1          ← 每 16 s 一行（8 帧 × 2 s）
+```
+
+- 第 3 行第一次出现在第 8 帧（约 16 s 后）；`warmup=1` 会持续 48 h（§2.4.1 老化期），**不是故障**。
+- MQ-7 的 AO 没接时，`co=` 会是一个贴近 0 的小值（引脚浮空），**这属于「没接」而不是「空气干净」**：
+  上板后若看到 `co` 键存在但恒为极小值，先查 AO 是否真接上了。
+- 若 ADC 起不来（`adc_ok=0`），上行帧里**不会出现 `co` 键**，这是设计行为。
+
+**为什么「不写 co」而不是「写 0」**：契约 §0.4 允许可选键缺省，而 0 mV 会被云端/App 当成
+「洁净空气」。传感器坏了反而显示「空气很好」是最坏的失败模式 —— 缺一个键，上层还能看出「没数据」。
+
+### 14.4 未做（按卡面要求标注，不得写成已验证）
+
+- **MQ-7 读数标定**：AO 未接、负载电阻未到货，`NODE_CO_T1_MV/T2_MV = 1500/2500` 是**结构默认值**，
+  不是标定值；mV→ppm 要按手册 `Rs/R0` 曲线 + 负载电阻算，属 CAL 范畴。
+- **`co_t1_mv` 还没接入「超阈值立即上报」**：本轮只做「存 + 回 OK + 范围校验」。拿未标定的阈值去触发
+  CO 事件会误报，故事件仍只由 `gas_t1_mv`（MQ-2）决定，下一张卡（标定后）再接。
+- **上板实测**：本次无板上板（用户只有 3.2 V/4.9 V 两个电压读数，AO 未接）；`[M1] gas=… co=…`
+  那行的实际数值形态、ch3 在真板上的底噪，都属**待用户实测**。
+- **引脚表更新**：`docs/技术/引脚与接线表.md:236` 仍写 MQ-7「P1 可选、本阶段不接线」，与现状（已接 ch3）
+  不一致；`docs/` 归 PM 维护、本卡 inScope 不含它，留给 PM 决定是否改。
+- 只重编了 `m1`（`node_sensor_gas.c` 只在 m1 的源文件清单里；M2/M4/HUB 的包未被触碰，见 §14.2 的 grep 对照）。
+
+### 14.5 跨模块待办（**不在本卡 inScope，未改**，报 PM 派单）
+
+节点侧已经能收 `co_t1_mv`，但整条下行链路上还缺两处登记（按【本地文档】实查）：
+
+| 位置 | 现状 | 缺什么 |
+|---|---|---|
+| `rk2206-gateway/src/gw_rules.c:361` | 逐键表里有 `gas_t1_mv` / `gas_t2_mv`（`GW_TH_INT`，0–5000），**没有** `co_t1_mv` | 加一行 `{ "co_t1_mv", GW_TH_INT, 0, 5000, 1500, … }`，否则网关在校验层就会把这个键挡掉 |
+| `server/app/settings_keys.py:45` | `KeySpec("gas_t1_mv", "int", 1500, 0, 5000, "M1")`，**没有** `co_t1_mv` | 加对应 KeySpec，否则云端下发在 API 层就被判成未知键 |
+
+结论：**「节点能收」≠「链路能通」**。本卡只做节点侧；这两处不登记的话，`set co_t1_mv` 到不了 M1。
+等 MQ-7 标定完成、真要下发阈值时，由 PM 给 gw / backend 各开一张卡（本次不擅自扩大改动）。

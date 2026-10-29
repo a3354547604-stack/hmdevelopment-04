@@ -97,14 +97,34 @@
 /* 3. M1：MQ-2 烟雾 + AHT20（引脚表 §4）                                */
 /* ================================================================== */
 
-#define NODE_MQ2_ADC_CH         2       /* IO09 = ADC ch2（唯一在用的一路） */
-#define NODE_MQ2_ADC_CH_P1A     3       /* IO10 = ch3，MQ-5 预留（本阶段不接） */
-#define NODE_MQ2_ADC_CH_P1B     4       /* IO11 = ch4，MQ-7 预留（本阶段不接） */
+/* 两路模拟量传感器都在同一颗 ADC 上，靠通道号区分（用户 2026-10-29 实测接线）：
+ *   MQ-2 AO → 17 脚 IO09 = ADC ch2（燃气/烟雾）
+ *   MQ-7 AO → 16 脚 IO10 = ADC ch3（一氧化碳）
+ * 旧版把 ch3 标成「MQ-5 预留」、ch4 标成「MQ-7 预留」，是按引脚表 v1.3 的规划写的；
+ * 用户实际把 MQ-7 接到了 16 脚 = ch3，故按实测接线改，ch4 退回 MQ-5（P1）预留。 */
+#define NODE_MQ2_ADC_CH         2       /* IO09 = ADC ch2：MQ-2 烟雾 */
+#define NODE_CO_ADC_CH          3       /* IO10 = ADC ch3：MQ-7 一氧化碳（16 脚） */
+#define NODE_MQ2_ADC_CH_P1      4       /* IO11 = ch4：MQ-5 液化气预留（P1，未接） */
 #define NODE_MQ2_DIV_NUM        2       /* 分压 1:1（10k/10k）→ AO 侧 = ADC × 2 */
 #define NODE_MQ2_DIV_DEN        1
 #define NODE_MQ2_AVG_N          8       /* 滑动平均窗口 8 帧 = 16 s（2 s/帧） */
 #define NODE_GAS_T1_MV          1500    /* §8.2 一级阈值（AO 侧，结构默认值，待 CAL-02 标定） */
 #define NODE_GAS_T2_MV          2500    /* §8.2 二级阈值 */
+
+/* MQ-7 与 MQ-2 必须**同口径**：同一分压比、同一窗口长度，否则两路读数不可比，
+ * 云端标定表也没法复用。分压比现在是 1:1（电阻到货前 AO 不接，先按 1:1 写死）。 */
+#define NODE_CO_DIV_NUM         2       /* 1:1 分压（10k/10k）→ AO 侧 = ADC × 2 */
+#define NODE_CO_DIV_DEN         1
+#define NODE_CO_AVG_N           8       /* 滑动平均窗口 8 帧 = 16 s（与 MQ-2 同窗口） */
+/* MQ-7 的 T1/T2 是**结构默认值、待 CAL 标定**：MQ-7 的 AO 电压与 CO 浓度的换算
+ * 依赖负载电阻 R_L 与预热曲线（手册 Rs/R0 曲线），本阶段 AO 未接、电阻未到货，
+ * 先按与燃气同量级给数，等实测标定后由下行 set co_t1_mv 覆盖。 */
+#define NODE_CO_T1_MV           1500    /* 结构默认值、待 CAL 标定 */
+#define NODE_CO_T2_MV           2500    /* 结构默认值、待 CAL 标定 */
+/* 本地周期打印间隔：每 8 帧（2 s/帧 → 16 s）打一行 `[M1] gas=… co=…`，
+ * 用户串口直读看数用；8 帧是「一屏能同时看到两路原始 mV 与温湿度」的折中，
+ * 太密会盖住启动日志、太稀看不出趋势。 */
+#define NODE_LOG_EVERY_N        8u
 
 #define NODE_AHT20_ADDR         0x38
 #define NODE_I2C_BAUD           400000
@@ -183,10 +203,12 @@
 /* 节点本地可 set 的键（键名必须与 §6.7 / §8.x 的 settings 键名逐字一致）：
  *   presence_hold_s  §2.4.4 明确「阈值可由命令 set 调整」  —— M4
  *   gas_t1_mv        §8.2 一级阈值，节点用它决定「超阈值立即上报」（§2.3）—— M1
+ *   co_t1_mv         MQ-7 的一级阈值（同风格），待 CAL 标定后由云端下发覆盖 —— M1
  * 其余键（no_motion_min / fall_suppress_s / gas_t2_mv …）是网关/服务器侧判定依据，
  * 节点收到也不该自己改行为，返回 result=1003（未知键）并打日志，避免两处阈值打架。 */
 #define NODE_SET_KEY_PRESENCE_HOLD  "presence_hold_s"
 #define NODE_SET_KEY_GAS_T1         "gas_t1_mv"
+#define NODE_SET_KEY_CO_T1          "co_t1_mv"
 #define NODE_SET_RESULT_OK          0
 #define NODE_SET_RESULT_OUT_OF_RANGE 1002   /* 值越界：result 非 0 即失败，见交付说明 */
 #define NODE_SET_RESULT_UNKNOWN_KEY 1003    /* 与 §6.7 的「1003 未知键」同码，便于云端对齐 */
@@ -195,5 +217,9 @@
 #define NODE_PRESENCE_HOLD_MAX_S    600
 #define NODE_GAS_T1_MIN_MV          200
 #define NODE_GAS_T1_MAX_MV          3300
+/* co_t1_mv 与 gas_t1_mv 同范围：两路都是 1:1 分压的 0–3.3 V 模拟量，
+ * 上限用 ADC 满量程（3300 mV）而不是「可能的最大读数」，避免把有效标定值挡在门外。 */
+#define NODE_CO_T1_MIN_MV           200
+#define NODE_CO_T1_MAX_MV           3300
 
 #endif /* NODE_CFG_H */

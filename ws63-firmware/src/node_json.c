@@ -213,7 +213,9 @@ int node_json_gas(char *buf, size_t cap, const char *sn, const char *fw, const n
         jw_raw(&w, ",\"lpg\":");
         jw_u32(&w, (uint32_t)s->lpg_mv);
     }
-    if (s->has_co) {
+    if (s->has_co) {                                 /* 由驱动在「至少成功采到一帧」后才置位：
+                                                      * ADC 初始化失败 / 一次没采到 → 整键不出现。
+                                                      * 绝不写 0：0 mV 会被云端当成「洁净空气」。 */
         jw_raw(&w, ",\"co\":");
         jw_u32(&w, (uint32_t)s->co_mv);
     }
