@@ -778,6 +778,7 @@ MQ-2 AO → 17 脚 IO09 = ch2；AHT20 仍在 I2C1（IO15/IO16）。
 | 容器内用**同一套编译参数**把 `node_sensor_gas.c` 编成 `.o` 后 `nm -S` / `strings` | 符号齐全：`g_co_ring 0x20`(=8×4)、`g_co_avg/g_co_cnt/g_co_idx/g_co_mv_last/g_co_t1_mv`、`g_co_valid 1 B`、`g_mv_ring 0x20`；字符串里有 `[M1] gas=%umV co=%umV t=%s%d.%dC h=%s%d.%d%% warmup=%d`、`[M1] adc init ret=%d ch2=%d(IO09/MQ-2) ch3=%d(IO10/MQ-7)`、`[M1] set co_t1_mv=%d out of range` |
 | 容器内 `gcc -std=c99 -Wall -Wextra -Werror -I ws63-firmware/src … node_json.c` 跑两帧 | `has_co=false` → payload 里**没有** `co` 键；`has_co=true` → `"co":1234`（真实值，不再是常量 0），其余字段一致 |
 | `bash ws63-firmware/scripts/node-build.sh m1` | 退出 0；角色断言通过（`EC-NODE-ROLE=M1 type=gas`×1，其它角色标记 0，`[MOCK]`×0）；`custom/` 残留 0 |
+| 同一条构建命令**再跑一次** | 退出 0，脚本自检打印「m1 产物与编译前逐位相同（`27f32230…5b8847`）—— 可复现构建」；两次 `md5sum` 均 `1d2e4895…13503`、体积均 1468584 B |
 | `grep -a -F -c 'co_t1_mv' ws63-firmware/out/{NODE_M1,NODE_M2,NODE_M4,HUB_HUB}.fwpkg` | M1 = **3**；M2 / M4 / HUB = **0**（只有 M1 的包带新代码，其它角色的包没被这次改动碰到） |
 
 产物指纹（`ws63-firmware/out/NODE_M1.fwpkg`，本机实测）：
