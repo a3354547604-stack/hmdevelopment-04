@@ -21,6 +21,7 @@ import { router } from '@kit.ArkUI';
 import { AppConfig } from '../common/AppConfig';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
+import { BackBar } from '../components/BackBar';
 import { PrimaryButton } from '../components/CommonViews';
 import { LoadingView } from '../components/StateViews';
 import { ScanCache, ScanItem, WifiResult, WifiSubmit } from '../model/ProvisionTypes';
@@ -183,7 +184,7 @@ struct NetConfigPage {
         })
       if (this.showAddr) {
         TextInput({ text: this.addrInput, placeholder: 'http://192.168.2.1' })
-          .height(44)
+          .constraintSize({ minHeight: 44 })
           .fontSize(AppTheme.FONT_CAPTION)
           .backgroundColor(AppTheme.COLOR_BG)
           .borderRadius(AppTheme.BTN_RADIUS)
@@ -239,7 +240,7 @@ struct NetConfigPage {
             }
           }
           .width('100%')
-          .height(44)
+          .constraintSize({ minHeight: 44 })
           .padding({ left: 12, right: 12 })
           .backgroundColor(this.ssid === item.ssid ? AppTheme.COLOR_BG : AppTheme.COLOR_SURFACE)
           .borderRadius(AppTheme.BTN_RADIUS)
@@ -367,20 +368,12 @@ struct NetConfigPage {
     .alignItems(HorizontalAlign.Start)
   }
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   build() {
     Column() {
-      Row() {
-        Text('‹ ' + UserCopy.BACK)
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(AppTheme.COLOR_PRIMARY)
-          .onClick(() => {
-            router.back();
-          })
-        Blank()
-      }
-      .width('100%')
-      .height(44)
-      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+      BackBar()
 
       Text(UserCopy.NC_TITLE)
         .fontSize(AppTheme.FONT_TITLE)
@@ -413,7 +406,7 @@ struct NetConfigPage {
             Column({ space: 8 }) {
               Text(this.errorText)
                 .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_LEVEL2)
+                .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
                 .width('100%')
               Text(UserCopy.NC_RETRY_HINT)
                 .fontSize(AppTheme.FONT_CAPTION)
@@ -433,6 +426,7 @@ struct NetConfigPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTop })
     .backgroundColor(AppTheme.COLOR_BG)
     .alignItems(HorizontalAlign.Start)
   }

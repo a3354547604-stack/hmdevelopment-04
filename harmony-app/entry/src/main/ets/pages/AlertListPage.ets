@@ -15,7 +15,7 @@ import { AppTheme, LiteralConstants } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
 import { AlertRow } from '../components/AlertRow';
 import { SegmentedBar } from '../components/SettingRows';
-import { LoadingView, EmptyView } from '../components/StateViews';
+import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
 import { DeviceStatus, NodeItem, AlertItem } from '../model/Types';
 import { ServiceHub } from '../service/ServiceHub';
 import { ApiResult } from '../model/Result';
@@ -143,6 +143,16 @@ export struct AlertListPage {
 
       if (this.state.loading && this.state.items.length === 0) {
         LoadingView({ hint: UserCopy.LOADING })
+      } else if (this.state.errorText.length > 0) {
+        // 拉取失败时不能落到「没有提醒」的空态：那会让家属以为今天没事
+        ErrorView({
+          message: this.state.errorText,
+          code: this.state.errorCode,
+          retryText: UserCopy.RETRY,
+          onRetry: () => {
+            this.reload();
+          }
+        })
       } else if (this.state.items.length === 0) {
         EmptyView({
           icon: $r('app.media.ic_ok_circle'),

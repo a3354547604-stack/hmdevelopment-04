@@ -17,7 +17,7 @@ import { AppTheme, LiteralConstants } from '../common/AppTheme';
 import { Formatter } from '../common/Formatter';
 import { UserCopy } from '../common/UserCopy';
 import { PrimaryButton } from '../components/CommonViews';
-import { LoadingView, EmptyView } from '../components/StateViews';
+import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
 import {
   ActivityReport, AlertItem, AlertListResult, DeviceStatus, GatewayProperties, HourlyBucket, NodeItem
 } from '../model/Types';
@@ -136,14 +136,15 @@ export struct HomePage {
     return UserCopy.HOME_ALL_WELL;
   }
 
-  private headlineColor(): string {
+  /** 大字卡底色：用级别「深色」变体，白字才能过 WCAG AA（评审 ④）。 */
+  private headlineColor(): Resource {
     if (this.hasEmergency()) {
-      return AppTheme.COLOR_LEVEL2;
+      return AppTheme.COLOR_LEVEL2_DEEP;
     }
     if (this.pending() > 0) {
-      return AppTheme.COLOR_LEVEL1;
+      return AppTheme.COLOR_LEVEL1_DEEP;
     }
-    return AppTheme.COLOR_PRIMARY;
+    return AppTheme.COLOR_PRIMARY_FILL;
   }
 
   private headlineIcon(): Resource {
@@ -249,19 +250,20 @@ export struct HomePage {
     return p.door ? UserCopy.DOOR_OPEN : UserCopy.DOOR_CLOSED;
   }
 
-  private sensorColor(type: string): string {
+  private sensorColor(type: string): Resource {
     const n: NodeItem | undefined = this.nodeOf(type);
     if (n === undefined || !n.online) {
       return AppTheme.COLOR_LEVEL2;
     }
     if (type === 'gas') {
-      return AppTheme.levelColor(this.gasLevel());
+      // 文字压在白色卡面上，必须用深色档：原来的 #E6A23C 白底只有 2.18:1（WCAG AA 要 4.5:1）
+      return AppTheme.levelTextColor(this.gasLevel());
     }
     if (type === 'presence') {
       return AppTheme.COLOR_TEXT_PRIMARY;
     }
     const p: GatewayProperties = this.state.status.properties;
-    return p.door === true ? AppTheme.COLOR_LEVEL1 : AppTheme.COLOR_TEXT_SECONDARY;
+    return p.door === true ? AppTheme.COLOR_LEVEL1_TEXT : AppTheme.COLOR_TEXT_SECONDARY;
   }
 
   /** 节点序列号 → 房间名（提醒只带 sn，不带 location）。 */
@@ -296,6 +298,13 @@ export struct HomePage {
     let best: number = 0;
     let cur: number = 0;
     for (let i = 0; i < this.todayHourly.length; i++) {
+      // 夜里睡觉不算「没动静」：只统计白天窗口的空档（评审 ⑤），
+      // 否则每天凌晨都会算出一段 7~8 小时空窗，家属会被无意义地惊到。
+      const h: number = this.todayHourly[i].hour;
+      if (h < LiteralConstants.DAY_START_HOUR || h > LiteralConstants.DAY_END_HOUR) {
+        cur = 0;
+        continue;
+      }
       if (this.todayHourly[i].count === 0) {
         cur = cur + 1;
         if (cur > best) {
@@ -306,20 +315,25 @@ export struct HomePage {
       }
     }
     if (best === 0) {
-      return '一直有动静';
+      return UserCopy.HOME_STILL_MOVING;
     }
-    return best.toString() + ' 小时';
+    return best.toString();
+  }
+
+  /** 单位单独给：没有异常时数字位显示「一直有动静」，此时不能挂「小时」。 */
+  private quietUnit(): string {
+    return this.longestQuiet() === UserCopy.HOME_STILL_MOVING ? '' : '小时';
   }
 
   // 房间行：整宽一行（图标 / 房间名+传感器名 / 右侧读数）。
   // 早前三张卡横排，360vp 宽的屏上每张只剩约 101vp，房间名被挤成省略号、
   // 第三张还被屏幕右缘切掉（预览器实测）；老人也更容易读竖排的整行。
   @Builder
-  roomRow(icon: Resource, room: string, sensor: string, value: string, valueColor: string) {
+  roomRow(icon: Resource, room: string, sensor: string, value: string, valueColor: Resource) {
     Row({ space: 10 }) {
       Image(icon)
-        .width(AppTheme.FONT_SECTION)
-        .height(AppTheme.FONT_SECTION)
+        .width(AppTheme.ICON_SM)
+        .height(AppTheme.ICON_SM)
         .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
         .objectFit(ImageFit.Contain)
       Column({ space: 2 }) {
@@ -344,6 +358,9 @@ export struct HomePage {
     .width('100%')
     .padding({ top: 10, bottom: 10 })
     .alignItems(VerticalAlign.Center)
+    // 房间行合成一句：图标只是装饰，房间/传感器/读数才是信息
+    .accessibilityGroup(true)
+    .accessibilityText(room + '，' + sensor + '，' + value)
   }
 
   @Builder
@@ -357,6 +374,16 @@ export struct HomePage {
     Column() {
       if (this.state.loading) {
         LoadingView({ hint: UserCopy.LOADING })
+      } else if (this.state.errorText.length > 0 && this.state.updatedAt === 0) {
+        // 一次都没拉到数据就失败：不能继续画「一切都好」，那等于在没数据时下结论
+        ErrorView({
+          message: this.state.errorText,
+          code: this.state.errorCode,
+          retryText: UserCopy.RETRY,
+          onRetry: () => {
+            this.reload();
+          }
+        })
       } else if (!this.state.hasDevice) {
         EmptyView({ icon: $r('app.media.ic_empty_folder'), title: '还没有添加设备', hint: '去「我的」里点「添加设备」' })
       } else {
@@ -367,14 +394,14 @@ export struct HomePage {
               Column({ space: 6 }) {
                 Row({ space: 8 }) {
                   Image(this.headlineIcon())
-                    .width(28)
-                    .height(28)
-                    .fillColor(Color.White)
+                    .width(AppTheme.ICON_LG)
+                    .height(AppTheme.ICON_LG)
+                    .fillColor(AppTheme.COLOR_ON_ACCENT)
                     .objectFit(ImageFit.Contain)
                   Text(this.headline())
                     .fontSize(AppTheme.FONT_SECTION + 2)
                     .fontWeight(FontWeight.Bold)
-                    .fontColor(Color.White)
+                    .fontColor(AppTheme.COLOR_ON_ACCENT)
                     .layoutWeight(1)
                     .maxLines(2)
                 }
@@ -383,7 +410,7 @@ export struct HomePage {
                 if (this.checkedText().length > 0) {
                   Text(this.checkedText())
                     .fontSize(AppTheme.FONT_CAPTION)
-                    .fontColor('#EAF2EF')
+                    .fontColor(AppTheme.COLOR_ON_ACCENT_SUBTLE)
                 }
               }
               .width('100%')
@@ -396,7 +423,7 @@ export struct HomePage {
               if (this.troubleText().length > 0) {
                 Text(this.troubleText())
                   .fontSize(AppTheme.FONT_CAPTION)
-                  .fontColor(AppTheme.COLOR_LEVEL1)
+                  .fontColor(AppTheme.COLOR_LEVEL1_TEXT)
                   .width('100%')
                   .padding({ left: 4 })
               }
@@ -438,6 +465,7 @@ export struct HomePage {
                     Text('›')
                       .fontSize(AppTheme.FONT_SECTION)
                       .fontColor(AppTheme.COLOR_TEXT_HINT)
+                      .accessibilityLevel('no')
                   }
                   .width('100%')
                   .alignItems(VerticalAlign.Center)
@@ -471,7 +499,7 @@ export struct HomePage {
                   this.statBlock(UserCopy.HOME_TODAY_WALK,
                     this.todayOk ? this.todayTotal.toString() : LiteralConstants.PLACEHOLDER, '次')
                   this.statBlock(UserCopy.HOME_TODAY_ALERT, this.pending().toString(), '条')
-                  this.statBlock(UserCopy.HOME_QUIET, this.longestQuiet(), '')
+                  this.statBlock(UserCopy.HOME_QUIET, this.longestQuiet(), this.quietUnit())
                 }
                 .width('100%')
               }
@@ -481,15 +509,25 @@ export struct HomePage {
               .borderRadius(AppTheme.CARD_RADIUS)
               .alignItems(HorizontalAlign.Start)
 
-              // 看看这周
-              PrimaryButton({
-                text: UserCopy.HOME_WEEK_LINK,
-                canTap: true,
-                loading: false,
-                plain: true,
-                onTap: () => {
-                  router.pushUrl({ url: 'pages/ReportPage' });
-                }
+              // 看看这周：整行可点，做成「文字 + ›」的链接行——原先白底描边的按钮
+              // 在小屏上像个输入框，还白白占掉一整行高度（评审 ⑫）。
+              Row({ space: 4 }) {
+                Text(UserCopy.HOME_WEEK_LINK)
+                  .fontSize(AppTheme.FONT_BODY)
+                  .fontColor(AppTheme.COLOR_PRIMARY)
+                  .layoutWeight(1)
+                Text('›')
+                  .fontSize(AppTheme.FONT_BODY)
+                  .fontColor(AppTheme.COLOR_TEXT_HINT)
+                  .accessibilityLevel('no')
+              }
+              .width('100%')
+              .height(AppTheme.BTN_HEIGHT)
+              .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
+              .backgroundColor(AppTheme.COLOR_SURFACE)
+              .borderRadius(AppTheme.CARD_RADIUS)
+              .onClick(() => {
+                router.pushUrl({ url: 'pages/ReportPage' });
               })
 
               if (this.state.errorText.length > 0) {
@@ -519,7 +557,7 @@ export struct HomePage {
   @Builder
   statBlock(label: string, value: string, unit: string) {
     Column({ space: 2 }) {
-      Row({ space: 2 }) {
+      Row({ space: 4 }) {
         Text(value)
           .fontSize(AppTheme.FONT_NUMBER_MD)
           .fontWeight(FontWeight.Bold)

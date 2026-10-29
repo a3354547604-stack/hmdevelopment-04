@@ -31,21 +31,37 @@ export struct AlertRow {
   onTap: (id: number) => void = () => {
   };
 
+  /** 读屏用的整句：时间+房间+类型，再补级别与状态（左边框和图标对读屏没有信息量）。 */
+  private a11yLabel(): string {
+    const level: string = AppTheme.levelText(this.alert.level);
+    const status: string = this.alert.status === 'pending' ? '还没处理'
+      : (this.alert.status === 'confirmed' ? UserCopy.ALERT_SEEN_TIP : UserCopy.ALERT_HANDLED_TIP);
+    return UserCopy.alertLine(this.alert.type, this.room, Formatter.fmtWhen(this.alert.ts, Date.now())) +
+      '，' + level + '，' + status;
+  }
+
   build() {
     // 左侧色条改成整卡的左边框：原先是一个固定 44vp 高的色块，卡片实际约 68vp，
     // 色条短一截悬在中间，看着像没对齐（预览器实测）。
     Row({ space: 10 }) {
       Column({ space: 2 }) {
-        Text(UserCopy.alertLine(this.alert.type, this.room, Formatter.fmtClock(this.alert.ts)))
+        Text(UserCopy.alertLine(this.alert.type, this.room, Formatter.fmtWhen(this.alert.ts, Date.now())))
           .fontSize(AppTheme.FONT_BODY)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
         if (this.alert.status === 'pending') {
+          // 状态文字不再用红色：级别已经由左边框表达，红字会和「报警」抢注意力
           Text('还没处理')
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL2)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        } else if (this.alert.status === 'confirmed') {
+          // 「看过了」是第三种状态：既没处理、也不是没看到，原来这里什么都不显示，
+          // 用户没法把它和「未处理」「已处理」区分开（预览器实拍：第二行是空的）。
+          Text(UserCopy.ALERT_SEEN_TIP)
+            .fontSize(AppTheme.FONT_CAPTION)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
         } else if (this.alert.status === 'resolved') {
           Text(UserCopy.ALERT_HANDLED_TIP)
             .fontSize(AppTheme.FONT_CAPTION)
@@ -58,12 +74,16 @@ export struct AlertRow {
       Text('›')
         .fontSize(AppTheme.FONT_SECTION)
         .fontColor(AppTheme.COLOR_TEXT_HINT)
+        .accessibilityLevel('no')
     }
     .width('100%')
     .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING, top: 10, bottom: 10 })
     .backgroundColor(AppTheme.COLOR_SURFACE)
     .borderRadius(AppTheme.CARD_RADIUS)
     .border({ width: { left: 4 }, color: AppTheme.levelColor(this.alert.level) })
+    // 整行合成一句话，色条/箭头不单独念
+    .accessibilityGroup(true)
+    .accessibilityText(this.a11yLabel())
     .onClick(() => this.onTap(this.alert.id))
   }
 }

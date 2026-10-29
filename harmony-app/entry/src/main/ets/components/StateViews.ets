@@ -41,10 +41,11 @@ export struct EmptyView {
   build() {
     Column({ space: 10 }) {
       Image(this.icon)
-        .width(44)
-        .height(44)
+        .width(AppTheme.ICON_EMPTY)
+        .height(AppTheme.ICON_EMPTY)
         .fillColor(AppTheme.COLOR_TEXT_HINT)
         .objectFit(ImageFit.Contain)
+        .accessibilityLevel('no')
       Text(this.title)
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
@@ -80,13 +81,14 @@ export struct ErrorView {
   build() {
     Column({ space: 12 }) {
       Image($r('app.media.ic_status_warning'))
-        .width(40)
-        .height(40)
+        .width(AppTheme.ICON_XL)
+        .height(AppTheme.ICON_XL)
         .fillColor(AppTheme.COLOR_LEVEL2)
         .objectFit(ImageFit.Contain)
+        .accessibilityLevel('no')
       Text(this.message)
         .fontSize(AppTheme.FONT_BODY)
-        .fontColor(AppTheme.COLOR_LEVEL2)
+        .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
         .textAlign(TextAlign.Center)
       if (this.code !== 0) {
         Text(`错误码 ${this.code}`)
@@ -96,7 +98,7 @@ export struct ErrorView {
       Button(this.retryText)
         .height(AppTheme.BTN_HEIGHT)
         .fontSize(AppTheme.FONT_BODY)
-        .backgroundColor(AppTheme.COLOR_PRIMARY)
+        .backgroundColor(AppTheme.COLOR_PRIMARY_FILL)
         .margin({ top: 8 })
         .onClick(() => this.onRetry())
     }

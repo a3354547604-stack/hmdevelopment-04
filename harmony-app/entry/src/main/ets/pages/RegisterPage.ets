@@ -12,6 +12,7 @@ import { AuthViewModel, LoginState } from '../viewmodel/AuthViewModel';
 import { AppConfig } from '../common/AppConfig';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
+import { BackBar } from '../components/BackBar';
 import { PrimaryButton } from '../components/CommonViews';
 import { SessionStore } from '../service/SessionStore';
 
@@ -48,19 +49,12 @@ export struct RegisterPage {
     }
   }
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   build() {
     Column() {
-      Row() {
-        Text('‹ ' + UserCopy.BACK)
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(AppTheme.COLOR_PRIMARY)
-          .onClick(() => {
-            router.back();
-          })
-        Blank()
-      }
-      .width('100%')
-      .height(44)
+      BackBar()
 
       Text(UserCopy.REGISTER_TITLE)
         .fontSize(AppTheme.FONT_TITLE)
@@ -118,16 +112,16 @@ export struct RegisterPage {
         if (this.localHint.length > 0) {
           Text(this.localHint)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL2)
+            .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
             .width('100%')
         } else if (this.state.errorText.length > 0) {
           Text(this.state.errorText)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL2)
+            .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
             .width('100%')
         }
 
-        PrimaryButton({
+                PrimaryButton({
           text: UserCopy.BTN_REGISTER_AND_IN,
           canTap: !this.state.submitting,
           loading: this.state.submitting,
@@ -155,7 +149,7 @@ export struct RegisterPage {
     }
     .width('100%')
     .height('100%')
-    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: this.safeTop })
     .backgroundColor(AppTheme.COLOR_BG)
     .alignItems(HorizontalAlign.Start)
   }

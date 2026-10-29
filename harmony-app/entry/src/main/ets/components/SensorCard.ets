@@ -15,7 +15,7 @@ export struct SensorCard {
   @Prop title: string = '';
   @Prop value: string = '--';
   @Prop stateText: string = '';
-  @Prop stateColor: string = AppTheme.COLOR_LEVEL0;
+  @Prop stateColor: Resource = AppTheme.COLOR_LEVEL0;
   @Prop subText: string = '';
   @Prop dimmed: boolean = false;
 

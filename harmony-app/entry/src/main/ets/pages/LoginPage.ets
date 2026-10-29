@@ -56,6 +56,9 @@ export struct LoginPage {
     }
   }
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   build() {
     Column() {
       Column({ space: 6 }) {
@@ -72,7 +75,7 @@ export struct LoginPage {
         if (this.expiredHint) {
           Text(UserCopy.AUTH_EXPIRED)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL1)
+            .fontColor(AppTheme.COLOR_LEVEL1_TEXT)
             .width('100%')
         }
         Text(UserCopy.LABEL_PHONE)
@@ -123,16 +126,16 @@ export struct LoginPage {
         if (this.localHint.length > 0) {
           Text(this.localHint)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL2)
+            .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
             .width('100%')
         } else if (this.state.errorText.length > 0) {
           Text(this.state.errorText)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL2)
+            .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
             .width('100%')
         }
 
-        PrimaryButton({
+                PrimaryButton({
           text: UserCopy.BTN_LOGIN,
           canTap: this.canSubmit(),
           loading: this.state.submitting,
@@ -181,7 +184,7 @@ export struct LoginPage {
     }
     .width('100%')
     .height('100%')
-    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: this.safeTop })
     .backgroundColor(AppTheme.COLOR_BG)
     .alignItems(HorizontalAlign.Start)
   }

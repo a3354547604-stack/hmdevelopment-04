@@ -39,26 +39,29 @@ export struct MainTabs {
     AppStorage.setOrCreate<boolean>(KEY_ONLINE, this.online);
   }
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   @Builder
   tabBarItem(title: string, icon: Resource, index: number) {
     Column({ space: 2 }) {
       Stack() {
         Image(icon)
-          .width(22)
-          .height(22)
+          .width(AppTheme.ICON_MD)
+          .height(AppTheme.ICON_MD)
           .fillColor(this.index === index ? AppTheme.COLOR_PRIMARY : AppTheme.COLOR_TEXT_HINT)
           .objectFit(ImageFit.Contain)
         if (index === 1 && this.pending > 0) {
           Text(this.pending > 99 ? '99+' : `${this.pending}`)
-            .fontSize(10)
-            .fontColor(Color.White)
+            .fontSize(AppTheme.FONT_BADGE)
+            .fontColor(AppTheme.COLOR_ON_ACCENT)
             .backgroundColor(AppTheme.COLOR_LEVEL2)
             .height(AppTheme.BADGE_HEIGHT - 8)
             .constraintSize({ minWidth: AppTheme.BADGE_HEIGHT - 8 })
             .borderRadius((AppTheme.BADGE_HEIGHT - 8) / 2)
             .textAlign(TextAlign.Center)
             .padding({ left: 3, right: 3 })
-            .offset({ x: 10, y: -4 })
+            .offset({ x: 6, y: -2 })
         }
       }
       .height(AppTheme.BADGE_HEIGHT)
@@ -70,8 +73,11 @@ export struct MainTabs {
         .fontWeight(this.index === index ? FontWeight.Medium : FontWeight.Normal)
     }
     .width('100%')
-    .height(56)
+    .constraintSize({ minHeight: 56 })
     .justifyContent(FlexAlign.Center)
+    // 读屏只念一次：标题 + 未读数（图标和角标是装饰）
+    .accessibilityGroup(true)
+    .accessibilityText(title + (index === 1 && this.pending > 0 ? '，' + this.pending + ' 条没处理' : ''))
   }
 
   build() {
@@ -92,7 +98,7 @@ export struct MainTabs {
             .height(8)
             .borderRadius(4)
             .backgroundColor(this.online ? AppTheme.COLOR_LEVEL0 : AppTheme.COLOR_OFFLINE)
-          Text(this.online ? UserCopy.NODE_NORMAL : UserCopy.NODE_LOST)
+          Text(this.online ? UserCopy.NODE_ONLINE : UserCopy.NODE_LOST)
             .fontSize(AppTheme.FONT_CAPTION - 1)
             .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
             .maxLines(1)
@@ -128,6 +134,7 @@ export struct MainTabs {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTop, bottom: this.safeBottom })
     .backgroundColor(AppTheme.COLOR_BG)
   }
 }

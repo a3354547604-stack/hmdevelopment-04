@@ -38,6 +38,7 @@ export class UserCopy {
   static readonly HOME_TODAY_WALK: string = '今天走动';
   static readonly HOME_TODAY_ALERT: string = '今天的提醒';
   static readonly HOME_QUIET: string = '最长没动静';
+  static readonly HOME_STILL_MOVING: string = '一直有动静';
   static readonly HOME_WEEK_LINK: string = '看看这周';
   static readonly BOX_NAME: string = '小盒子';
 
@@ -59,6 +60,9 @@ export class UserCopy {
   static readonly PRESENCE_NO: string = '没人';
   static readonly NODE_NORMAL: string = '正常';
   static readonly NODE_LOST: string = '联系不上';
+  /** 顶栏那个点只说「设备在不在线」，不要写成「正常」——首页可能同时有未处理提醒 */
+  static readonly NODE_ONLINE: string = '在线';
+
   static readonly ENV_TEMP: string = '屋里温度';
   static readonly ENV_HUMI: string = '屋里湿度';
 
@@ -78,6 +82,7 @@ export class UserCopy {
   static readonly ALERT_REASON_OTHER: string = '其它情况';
   static readonly ALERT_DONE: string = '已记录，谢谢';
   static readonly ALERT_HANDLED_TIP: string = '这件事已经处理过了';
+  static readonly ALERT_SEEN_TIP: string = '已经看过了（还没处理）';
 
   // ---------- 报表 ----------
   /** 没有对比基线时别留白，也别让用户自己算百分比。 */
@@ -131,6 +136,7 @@ export class UserCopy {
   static readonly NC_TITLE: string = '添加设备';
   static readonly NC_STEP1: string = '第 1 步：连上小盒子的 Wi-Fi';
   static readonly NC_STEP1_BODY: string = '打开手机设置里的 WLAN，连上名字以 ElderCare 开头的 Wi-Fi（密码在说明书上）';
+  static readonly NC_AP_LABEL: string = '小盒子的 Wi-Fi：';
   static readonly NC_STEP1_TROUBLE: string = '看不到这个 Wi-Fi？① 给小盒子重新上电 ② 长按配对键 3 秒 ③ 手机靠近一点再刷新';
   static readonly NC_STEP2: string = '第 2 步：选家里的 Wi-Fi';
   static readonly NC_STEP2_PICK: string = '选择你家的 Wi-Fi';
@@ -181,7 +187,7 @@ export class UserCopy {
       UserCopy.TAB_HOME, UserCopy.TAB_ALERTS, UserCopy.TAB_PROFILE,
       UserCopy.HOME_ALL_WELL, UserCopy.HOME_EMERGENCY, UserCopy.HOME_CHECKED_NOW,
       UserCopy.HOME_NET_WEAK, UserCopy.HOME_BOX_LOST, UserCopy.HOME_TODAY_WALK,
-      UserCopy.HOME_TODAY_ALERT, UserCopy.HOME_QUIET, UserCopy.HOME_WEEK_LINK, UserCopy.BOX_NAME,
+      UserCopy.HOME_TODAY_ALERT, UserCopy.HOME_QUIET, UserCopy.HOME_STILL_MOVING, UserCopy.HOME_WEEK_LINK, UserCopy.BOX_NAME,
       UserCopy.ROOM_KITCHEN, UserCopy.ROOM_BEDROOM, UserCopy.ROOM_HALL, UserCopy.ROOM_LIVING,
       UserCopy.ROOM_PREFIX, UserCopy.SENSOR_GAS, UserCopy.SENSOR_DOOR, UserCopy.SENSOR_PRESENCE,
       UserCopy.GAS_OK, UserCopy.GAS_HIGH, UserCopy.GAS_VERY_HIGH, UserCopy.DOOR_OPEN,
@@ -204,7 +210,7 @@ export class UserCopy {
       UserCopy.SEC_SECURITY, UserCopy.SEC_ABOUT, UserCopy.BIND_DEVICE, UserCopy.BIND_DEVICE_HINT,
       UserCopy.CHANGE_PWD, UserCopy.CHANGE_PWD_HINT, UserCopy.LOGOUT, UserCopy.NOTIFY_HINT,
       UserCopy.VERSION_LABEL,
-      UserCopy.NC_TITLE, UserCopy.NC_STEP1, UserCopy.NC_STEP1_BODY, UserCopy.NC_STEP1_TROUBLE,
+      UserCopy.NC_TITLE, UserCopy.NC_AP_LABEL, UserCopy.NC_STEP1, UserCopy.NC_STEP1_BODY, UserCopy.NC_STEP1_TROUBLE,
       UserCopy.NC_STEP2, UserCopy.NC_STEP2_PICK, UserCopy.NC_MANUAL, UserCopy.NC_HIDDEN,
       UserCopy.NC_PASSWORD, UserCopy.NC_SUBMIT, UserCopy.NC_STEP3, UserCopy.NC_CONNECTING,
       UserCopy.NC_STEP4, UserCopy.NC_OK, UserCopy.NC_BACK_HOME, UserCopy.NC_RETRY_HINT,
