@@ -43,6 +43,27 @@ export class Formatter {
     return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   }
 
+  /**
+   * 列表用时间：今天只给 `HH:mm`，昨天加「昨天」，更早带 `MM-DD`。
+   * 原先一律 `HH:mm:ss` 且不带日期，两天前的提醒看起来像今天刚发生（评审 ⑦）。
+   */
+  static fmtWhen(ts: number, nowMs: number): string {
+    if (!Number.isFinite(ts) || ts <= 0) {
+      return LiteralConstants.PLACEHOLDER;
+    }
+    const d: Date = new Date(ts);
+    const hm: string = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    const today: Date = new Date(nowMs);
+    const dayStart: number = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    if (ts >= dayStart) {
+      return hm;
+    }
+    if (ts >= dayStart - LiteralConstants.MS_PER_DAY) {
+      return `昨天 ${hm}`;
+    }
+    return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${hm}`;
+  }
+
   /** Unix 毫秒 → `YYYY-MM-DD HH:mm`（本地时区）。 */
   static fmtFull(ts: number): string {
     if (!Number.isFinite(ts) || ts <= 0) {

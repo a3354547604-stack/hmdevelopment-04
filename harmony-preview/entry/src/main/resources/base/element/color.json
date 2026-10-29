@@ -1,5 +1,28 @@
 {
   "color": [
+    { "name": "color_primary", "value": "#0E7C66" },
+    { "name": "color_primary_fill", "value": "#0E7C66" },
+    { "name": "color_primary_press", "value": "#0A5E4E" },
+    { "name": "color_on_primary", "value": "#FFFFFF" },
+    { "name": "color_bg", "value": "#F2F5F4" },
+    { "name": "color_surface", "value": "#FFFFFF" },
+    { "name": "color_text_primary", "value": "#1B2A26" },
+    { "name": "color_text_secondary", "value": "#5C6B66" },
+    { "name": "color_text_hint", "value": "#6E7C77" },
+    { "name": "color_divider", "value": "#E3E9E7" },
+    { "name": "color_disabled_bg", "value": "#E8EDEB" },
+    { "name": "color_level0", "value": "#2E9E5B" },
+    { "name": "color_level1", "value": "#E6A23C" },
+    { "name": "color_level2", "value": "#D64545" },
+    { "name": "color_offline", "value": "#9AA5A1" },
+    { "name": "color_level0_deep", "value": "#1E7A44" },
+    { "name": "color_level1_deep", "value": "#8A5A00" },
+    { "name": "color_level2_deep", "value": "#B02A2A" },
+    { "name": "color_level0_text", "value": "#1E7A44" },
+    { "name": "color_level1_text", "value": "#8A5A00" },
+    { "name": "color_level2_text", "value": "#B02A2A" },
+    { "name": "color_on_accent", "value": "#FFFFFF" },
+    { "name": "color_on_accent_subtle", "value": "#E6EFEA" },
     { "name": "start_window_background", "value": "#0E3B3E" }
   ]
 }

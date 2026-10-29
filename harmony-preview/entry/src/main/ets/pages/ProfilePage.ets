@@ -63,18 +63,19 @@ export struct ProfilePage {
         Text('›')
           .fontSize(AppTheme.FONT_SECTION)
           .fontColor(AppTheme.COLOR_TEXT_HINT)
+          .accessibilityLevel('no')
       }
     }
     .width('100%')
-    .height(48)
+    .constraintSize({ minHeight: 48 })
     .onClick(() => onTap())
   }
 
   @Builder
   card(title: string) {
     Text(title)
-      .fontSize(AppTheme.FONT_CAPTION)
-      .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+      .fontSize(AppTheme.FONT_LABEL)
+      .fontColor(AppTheme.COLOR_TEXT_HINT)
       .width('100%')
       .padding({ left: 4, bottom: 2 })
   }
@@ -96,7 +97,7 @@ export struct ProfilePage {
             .fontSize(AppTheme.FONT_CAPTION)
             .fontColor(AppTheme.COLOR_PRIMARY)
             .textAlign(TextAlign.Center)
-            .height(36)
+            .constraintSize({ minHeight: 36 })
             .layoutWeight(1)
             .borderRadius(AppTheme.BTN_RADIUS)
             .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
@@ -127,9 +128,10 @@ export struct ProfilePage {
         Text('−')
           .fontSize(AppTheme.FONT_SECTION)
           .fontColor(AppTheme.COLOR_PRIMARY)
+          .accessibilityText('减少 5 分钟')
           .textAlign(TextAlign.Center)
-          .width(56)
-          .height(40)
+          .width(AppTheme.TOUCH_MIN + 12)
+          .height(AppTheme.TOUCH_MIN)
           .borderRadius(AppTheme.BTN_RADIUS)
           .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
           .onClick(() => {
@@ -143,9 +145,10 @@ export struct ProfilePage {
         Text('＋')
           .fontSize(AppTheme.FONT_SECTION)
           .fontColor(AppTheme.COLOR_PRIMARY)
+          .accessibilityText('增加 5 分钟')
           .textAlign(TextAlign.Center)
-          .width(56)
-          .height(40)
+          .width(AppTheme.TOUCH_MIN + 12)
+          .height(AppTheme.TOUCH_MIN)
           .borderRadius(AppTheme.BTN_RADIUS)
           .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
           .onClick(() => {
@@ -167,8 +170,8 @@ export struct ProfilePage {
           Column({ space: 4 }) {
             Row({ space: 8 }) {
               Image($r('app.media.ic_family'))
-                .width(22)
-                .height(22)
+                .width(AppTheme.ICON_SM)
+                .height(AppTheme.ICON_SM)
                 .fillColor(AppTheme.COLOR_PRIMARY)
                 .objectFit(ImageFit.Contain)
               Column({ space: 2 }) {
@@ -196,8 +199,8 @@ export struct ProfilePage {
           Column() {
             Row({ space: 8 }) {
               Image($r('app.media.ic_device_box'))
-                .width(22)
-                .height(22)
+                .width(AppTheme.ICON_SM)
+                .height(AppTheme.ICON_SM)
                 .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
                 .objectFit(ImageFit.Contain)
               Column({ space: 2 }) {
@@ -256,7 +259,7 @@ export struct ProfilePage {
         Column({ space: 4 }) {
           this.card(UserCopy.SEC_SECURITY)
           Column() {
-            this.row(UserCopy.CHANGE_PWD, UserCopy.CHANGE_PWD_HINT, true, () => {
+            this.row(UserCopy.CHANGE_PWD, '', true, () => {
               this.savedTip = UserCopy.CHANGE_PWD_HINT;
             })
             Divider()
@@ -312,7 +315,7 @@ export struct ProfilePage {
                 .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
                 .width('100%')
               TextInput({ text: this.serverInput, placeholder: '预览版不使用' })
-                .height(44)
+                .constraintSize({ minHeight: 44 })
                 .fontSize(AppTheme.FONT_CAPTION)
                 .backgroundColor(AppTheme.COLOR_BG)
                 .borderRadius(AppTheme.BTN_RADIUS)

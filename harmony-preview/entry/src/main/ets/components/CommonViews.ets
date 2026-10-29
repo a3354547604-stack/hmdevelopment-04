@@ -39,7 +39,7 @@ export struct LevelBadge {
   build() {
     Text(AppTheme.levelText(this.level))
       .fontSize(AppTheme.FONT_CAPTION)
-      .fontColor(Color.White)
+      .fontColor(AppTheme.COLOR_ON_ACCENT)
       .height(AppTheme.BADGE_HEIGHT)
       .padding({ left: 10, right: 10 })
       .borderRadius(AppTheme.BADGE_RADIUS)
@@ -57,7 +57,7 @@ export struct StatTile {
   @Prop value: string = '--';
   @Prop unit: string = '';
   @Prop label: string = '';
-  @Prop valueColor: string = AppTheme.COLOR_TEXT_PRIMARY;
+  @Prop valueColor: Resource = AppTheme.COLOR_TEXT_PRIMARY;
 
   build() {
     Column({ space: 2 }) {
@@ -100,19 +100,19 @@ export struct PrimaryButton {
           LoadingProgress()
             .width(20)
             .height(20)
-            .color(this.plain ? AppTheme.COLOR_PRIMARY : Color.White)
+            .color(this.plain ? AppTheme.COLOR_PRIMARY : AppTheme.COLOR_ON_PRIMARY)
         }
         Text(this.loading ? '请稍候…' : this.text)
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.plain ? AppTheme.COLOR_PRIMARY : Color.White)
+          .fontColor(this.plain ? AppTheme.COLOR_PRIMARY : AppTheme.COLOR_ON_PRIMARY)
       }
       .justifyContent(FlexAlign.Center)
     }
     .width('100%')
     .height(AppTheme.BTN_HEIGHT)
     .borderRadius(AppTheme.BTN_RADIUS)
-    .backgroundColor(this.plain ? AppTheme.COLOR_SURFACE : AppTheme.COLOR_PRIMARY)
+    .backgroundColor(this.plain ? AppTheme.COLOR_SURFACE : AppTheme.COLOR_PRIMARY_FILL)
     .borderWidth(this.plain ? AppTheme.LINE_WIDTH : 0)
     .borderColor(AppTheme.COLOR_PRIMARY)
     .enabled(this.canTap && !this.loading)
@@ -126,7 +126,7 @@ export struct PrimaryButton {
 export struct InfoRow {
   @Prop label: string = '';
   @Prop value: string = '';
-  @Prop valueColor: string = AppTheme.COLOR_TEXT_PRIMARY;
+  @Prop valueColor: Resource = AppTheme.COLOR_TEXT_PRIMARY;
 
   build() {
     Row({ space: 12 }) {

@@ -8,6 +8,7 @@
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { SafeArea } from '../util/SafeArea';
 
 const DOMAIN: number = 0x0002;
 const TAG: string = 'EldercarePreview';
@@ -37,6 +38,8 @@ export default class EntryAbility extends UIAbility {
         return;
       }
       hilog.info(DOMAIN, TAG, 'loadContent succeeded');
+      // 读一次系统避让区：页面据此给状态栏 / 手势条留白（预览器里读不到会回退 0）
+      SafeArea.apply(windowStage.getMainWindowSync());
     });
   }
 

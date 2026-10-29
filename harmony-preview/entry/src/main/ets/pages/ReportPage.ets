@@ -9,6 +9,7 @@
 import { router } from '@kit.ArkUI';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
+import { BackBar } from '../components/BackBar';
 import { DailyBuckets } from '../components/Charts';
 import { ActivityReport, SummaryReport, TrendReport } from '../model/Types';
 import { PreviewData } from '../data/PreviewData';
@@ -48,12 +49,13 @@ struct ReportPage {
       ForEach(['这周', '这个月'], (label: string, index: number) => {
         Text(label)
           .fontSize(AppTheme.FONT_BODY)
-          .fontColor(this.periodIndex === index ? Color.White : AppTheme.COLOR_TEXT_SECONDARY)
-          .backgroundColor(this.periodIndex === index ? AppTheme.COLOR_PRIMARY : Color.Transparent)
+          .fontColor(this.periodIndex === index ? AppTheme.COLOR_ON_PRIMARY : AppTheme.COLOR_TEXT_SECONDARY)
+          .backgroundColor(this.periodIndex === index ? AppTheme.COLOR_PRIMARY_FILL : Color.Transparent)
           .textAlign(TextAlign.Center)
-          .height(38)
+          .constraintSize({ minHeight: 36 })
           .layoutWeight(1)
           .borderRadius(AppTheme.BTN_RADIUS)
+          .accessibilitySelected(this.periodIndex === index)
           .onClick(() => this.switchTo(index))
       }, (label: string) => label)
     }
@@ -72,7 +74,7 @@ struct ReportPage {
         .width('100%')
       Row({ space: 6 }) {
         Text(this.activity.total.toString())
-          .fontSize(38)
+          .fontSize(AppTheme.FONT_NUMBER_LG)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
         Text('次')
@@ -127,7 +129,7 @@ struct ReportPage {
       Row({ space: 8 }) {
         Column({ space: 2 }) {
           Text(this.summary.alerts.total.toString())
-            .fontSize(24)
+            .fontSize(AppTheme.FONT_NUMBER_MD)
             .fontWeight(FontWeight.Medium)
             .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
           Text('条提醒')
@@ -139,7 +141,7 @@ struct ReportPage {
 
         Column({ space: 2 }) {
           Text(this.summary.alerts.pending.toString())
-            .fontSize(24)
+            .fontSize(AppTheme.FONT_NUMBER_MD)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.summary.alerts.pending > 0 ? AppTheme.COLOR_LEVEL2 : AppTheme.COLOR_TEXT_PRIMARY)
           Text('还没处理')
@@ -151,7 +153,7 @@ struct ReportPage {
 
         Column({ space: 2 }) {
           Text(this.summary.alerts.false_alarm.toString())
-            .fontSize(24)
+            .fontSize(AppTheme.FONT_NUMBER_MD)
             .fontWeight(FontWeight.Medium)
             .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
           Text('误报')
@@ -177,20 +179,12 @@ struct ReportPage {
     .alignItems(HorizontalAlign.Start)
   }
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   build() {
     Column() {
-      Row() {
-        Text('‹ ' + UserCopy.BACK)
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(AppTheme.COLOR_PRIMARY)
-          .onClick(() => {
-            router.back();
-          })
-        Blank()
-      }
-      .width('100%')
-      .height(44)
-      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+      BackBar()
 
       Text(UserCopy.REPORT_TITLE)
         .fontSize(AppTheme.FONT_TITLE)
@@ -216,6 +210,7 @@ struct ReportPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTop })
     .backgroundColor(AppTheme.COLOR_BG)
     .alignItems(HorizontalAlign.Start)
   }

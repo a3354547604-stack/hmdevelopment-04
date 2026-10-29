@@ -34,6 +34,9 @@ export const PREVIEW_USERNAME: string = '138****0000';
 export const PREVIEW_DEVICE_NAME: string = '小盒子（客厅）';
 /** 配网向导第 2 步的「扫到的 Wi-Fi」列表。 */
 export const PREVIEW_WIFI: string[] = ['Home-5G', 'Home-2.4G', 'CMCC-8f2a', 'TP-LINK_2.4G'];
+// 配网热点名：正式版由 GET /api/provision/status 返回（NetConfigPage 读 r.data.ssid），
+// 预览版没有接口，放在数据层而不是页面里，避免文案改一次要翻页面。
+export const PREVIEW_AP_NAME: string = 'ElderCare-3F2A';
 
 /** `offsetDays` 天前的日期串（`YYYY-MM-DD`，报表柱状图用）。 */
 function dateOf(offsetDays: number): string {
@@ -46,6 +49,7 @@ function dateOf(offsetDays: number): string {
 }
 
 export class PreviewData {
+
   // ------------------------------------------------------------ 首页
   /**
    * 设备实时状态。
@@ -66,7 +70,8 @@ export class PreviewData {
       temp: 23.4,
       humi: 52,
       // 520 mV：远低于 2500 的预警线，属于「正常」的日常读数
-      smoke: 520,
+      // 气体读数与提醒列表对齐：有燃气提醒时读数必须是「超过预警线」的那一档
+      smoke: HOME_VARIANT === 0 ? 520 : 3120,
       battery: 255
     };
     return {
@@ -74,10 +79,12 @@ export class PreviewData {
       online: true,
       last_heartbeat: Date.now() - 12000,
       // 0 正常 / 1 预警 / 2 报警（契约 §8.1）
-      alarm_state: HOME_VARIANT === 0 ? 0 : (HOME_VARIANT === 1 ? 1 : 2),
+      // 报警级别取「未处理提醒里最高的 level」：写死数字会出现「首页报警、列表却只有预警」的冲突
+      alarm_state: PreviewData.pendingLevel(),
       properties: properties,
       nodes: nodes,
-      pending_alerts: HOME_VARIANT === 0 ? 0 : 3,
+      // 未处理条数从 alerts() 数出来：写死 3 而列表只有 2 条，是最容易被截图抓包的矛盾
+      pending_alerts: PreviewData.pendingCount(),
       server_ts: Date.now()
     };
   }
@@ -106,10 +113,14 @@ export class PreviewData {
   /** 五条提醒：两条未处理、一条看过了、两条已处理——列表三种状态一眼都能看到。 */
   static alerts(): AlertItem[] {
     const now: number = Date.now();
-    return [
+    const list: AlertItem[] = [
       {
-        id: 1024, device_id: 1, node_sn: 'EC-A1', type: 'gas', level: 2,
-        ts: now - 8 * MS_MIN, status: 'pending', push_count: 2, summary: '厨房燃气浓度 3120mV，超过报警阈值'
+        // 紧急演示态（variant 2）才是「报警」；普通「有提醒」态按预警呈现，
+        // 否则首页一进来就是一张红色紧急卡，和「有 2 条提醒」的口径自相矛盾。
+        id: 1024, device_id: 1, node_sn: 'EC-A1', type: 'gas',
+        level: HOME_VARIANT === 2 ? 2 : 1,
+        ts: now - 8 * MS_MIN, status: 'pending', push_count: 2,
+        summary: HOME_VARIANT === 2 ? '厨房燃气浓度 3120mV，超过报警阈值' : '厨房燃气浓度 3120mV，超过预警阈值'
       },
       {
         id: 1023, device_id: 1, node_sn: 'EC-A2', type: 'no_motion', level: 1,
@@ -128,6 +139,39 @@ export class PreviewData {
         ts: now - 2 * MS_DAY, status: 'resolved', push_count: 1, summary: '厨房燃气浓度偏高'
       }
     ];
+    if (HOME_VARIANT === 0) {
+      // 正常演示态：未处理都标成已处理，否则「首页一切正常、提醒页却有未处理」说不通
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].status === 'pending') {
+          list[i].status = 'resolved';
+        }
+      }
+    }
+    return list;
+  }
+
+  /** 未处理条数：由 alerts() 现数，避免「说有 3 条、列表只有 2 条」。 */
+  static pendingCount(): number {
+    const all: AlertItem[] = PreviewData.alerts();
+    let n: number = 0;
+    for (let i = 0; i < all.length; i++) {
+      if (all[i].status === 'pending') {
+        n = n + 1;
+      }
+    }
+    return n;
+  }
+
+  /** 未处理提醒里最高的 level（首页大字卡的报警级别由它决定）。 */
+  static pendingLevel(): number {
+    const all: AlertItem[] = PreviewData.alerts();
+    let level: number = 0;
+    for (let i = 0; i < all.length; i++) {
+      if (all[i].status === 'pending' && all[i].level > level) {
+        level = all[i].level;
+      }
+    }
+    return level;
   }
 
   /** 按筛片取提醒：`all` = 全部，`pending` = 只留未处理。 */
@@ -271,3 +315,6 @@ export class PreviewData {
     };
   }
 }
+
+/** 预览版三态开关：0 正常 / 1 加载中 / 2 加载失败（正式版由接口结果决定，不用这个）。 */
+export const SCREEN_STATE: number = 0;

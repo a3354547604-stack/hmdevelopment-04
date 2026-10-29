@@ -8,6 +8,7 @@
 import { router } from '@kit.ArkUI';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
+import { BackBar } from '../components/BackBar';
 import { PrimaryButton } from '../components/CommonViews';
 
 const KEY_LOGGED_IN: string = 'previewLoggedIn';
@@ -19,19 +20,12 @@ struct RegisterPage {
   @State password: string = '';
   @State password2: string = '';
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   build() {
     Column() {
-      Row() {
-        Text('‹ ' + UserCopy.BACK)
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(AppTheme.COLOR_PRIMARY)
-          .onClick(() => {
-            router.back();
-          })
-        Blank()
-      }
-      .width('100%')
-      .height(44)
+      BackBar()
 
       Text(UserCopy.REGISTER_TITLE)
         .fontSize(AppTheme.FONT_TITLE)
@@ -86,7 +80,7 @@ struct RegisterPage {
             this.password2 = v;
           })
 
-        PrimaryButton({
+                PrimaryButton({
           text: UserCopy.BTN_REGISTER_AND_IN,
           canTap: true,
           loading: false,
@@ -115,7 +109,7 @@ struct RegisterPage {
     }
     .width('100%')
     .height('100%')
-    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: this.safeTop })
     .backgroundColor(AppTheme.COLOR_BG)
     .alignItems(HorizontalAlign.Start)
   }

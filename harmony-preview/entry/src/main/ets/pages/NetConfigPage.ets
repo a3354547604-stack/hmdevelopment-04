@@ -14,8 +14,9 @@
 import { router } from '@kit.ArkUI';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
+import { BackBar } from '../components/BackBar';
 import { PrimaryButton } from '../components/CommonViews';
-import { PREVIEW_WIFI } from '../data/PreviewData';
+import { PREVIEW_AP_NAME, PREVIEW_WIFI } from '../data/PreviewData';
 
 /** 想看「连不上」时的提示条长什么样，把它改成 true（只影响第 3 步，不进第 4 步）。 */
 const SHOW_ERROR_HINT: boolean = false;
@@ -72,7 +73,7 @@ struct NetConfigPage {
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
         .width('100%')
-      Text('小盒子的 Wi-Fi：ElderCare-3F2A')
+      Text(UserCopy.NC_AP_LABEL + PREVIEW_AP_NAME)
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.COLOR_PRIMARY)
         .width('100%')
@@ -102,7 +103,7 @@ struct NetConfigPage {
         })
       if (this.showAddr) {
         TextInput({ text: this.addrInput, placeholder: '预览版不使用' })
-          .height(44)
+          .constraintSize({ minHeight: 44 })
           .fontSize(AppTheme.FONT_CAPTION)
           .backgroundColor(AppTheme.COLOR_BG)
           .borderRadius(AppTheme.BTN_RADIUS)
@@ -156,7 +157,7 @@ struct NetConfigPage {
             }
           }
           .width('100%')
-          .height(44)
+          .constraintSize({ minHeight: 44 })
           .padding({ left: 12, right: 12 })
           .backgroundColor(this.ssid === name ? AppTheme.COLOR_BG : AppTheme.COLOR_SURFACE)
           .borderRadius(AppTheme.BTN_RADIUS)
@@ -286,20 +287,12 @@ struct NetConfigPage {
     .alignItems(HorizontalAlign.Start)
   }
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   build() {
     Column() {
-      Row() {
-        Text('‹ ' + UserCopy.BACK)
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(AppTheme.COLOR_PRIMARY)
-          .onClick(() => {
-            router.back();
-          })
-        Blank()
-      }
-      .width('100%')
-      .height(44)
-      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+      BackBar()
 
       Text(UserCopy.NC_TITLE)
         .fontSize(AppTheme.FONT_TITLE)
@@ -332,7 +325,7 @@ struct NetConfigPage {
             Column({ space: 8 }) {
               Text('Wi-Fi 密码不对，请再试一次')
                 .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_LEVEL2)
+                .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
                 .width('100%')
               Text(UserCopy.NC_RETRY_HINT)
                 .fontSize(AppTheme.FONT_CAPTION)
@@ -352,6 +345,7 @@ struct NetConfigPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTop })
     .backgroundColor(AppTheme.COLOR_BG)
     .alignItems(HorizontalAlign.Start)
   }
