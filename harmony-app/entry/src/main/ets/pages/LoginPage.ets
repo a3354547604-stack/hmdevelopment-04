@@ -63,9 +63,6 @@ export struct LoginPage {
           .fontSize(AppTheme.FONT_TITLE + 4)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-        Text(UserCopy.LOGIN_SUBTITLE)
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
       }
       .width('100%')
       .margin({ top: 88, bottom: 40 })

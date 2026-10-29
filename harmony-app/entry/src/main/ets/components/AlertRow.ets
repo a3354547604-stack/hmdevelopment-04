@@ -32,13 +32,9 @@ export struct AlertRow {
   };
 
   build() {
+    // 左侧色条改成整卡的左边框：原先是一个固定 44vp 高的色块，卡片实际约 68vp，
+    // 色条短一截悬在中间，看着像没对齐（预览器实测）。
     Row({ space: 10 }) {
-      Column()
-        .width(4)
-        .height(44)
-        .backgroundColor(AppTheme.levelColor(this.alert.level))
-        .borderRadius(2)
-
       Column({ space: 2 }) {
         Text(UserCopy.alertLine(this.alert.type, this.room, Formatter.fmtClock(this.alert.ts)))
           .fontSize(AppTheme.FONT_BODY)
@@ -64,9 +60,10 @@ export struct AlertRow {
         .fontColor(AppTheme.COLOR_TEXT_HINT)
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+    .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING, top: 10, bottom: 10 })
     .backgroundColor(AppTheme.COLOR_SURFACE)
     .borderRadius(AppTheme.CARD_RADIUS)
+    .border({ width: { left: 4 }, color: AppTheme.levelColor(this.alert.level) })
     .onClick(() => this.onTap(this.alert.id))
   }
 }

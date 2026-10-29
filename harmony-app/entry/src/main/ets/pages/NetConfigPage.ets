@@ -231,9 +231,11 @@ struct NetConfigPage {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             if (this.ssid === item.ssid) {
-              Text('✓')
-                .fontSize(AppTheme.FONT_BODY)
-                .fontColor(AppTheme.COLOR_PRIMARY)
+              Image($r('app.media.ic_ok_check'))
+                .width(AppTheme.FONT_BODY)
+                .height(AppTheme.FONT_BODY)
+                .fillColor(AppTheme.COLOR_PRIMARY)
+                .objectFit(ImageFit.Contain)
             }
           }
           .width('100%')
@@ -331,8 +333,11 @@ struct NetConfigPage {
   @Builder
   stepFour() {
     Column({ space: 10 }) {
-      Text('✅')
-        .fontSize(40)
+      Image($r('app.media.ic_ok_circle'))
+        .width(40)
+        .height(40)
+        .fillColor(AppTheme.COLOR_LEVEL0)
+        .objectFit(ImageFit.Contain)
       Text(UserCopy.NC_STEP4)
         .fontSize(AppTheme.FONT_SECTION)
         .fontWeight(FontWeight.Medium)

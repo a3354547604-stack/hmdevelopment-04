@@ -10,7 +10,8 @@ import { AppTheme } from '../common/AppTheme';
 
 @Component
 export struct SensorCard {
-  @Prop icon: string = '📟';
+  /** 单色 SVG（resources/base/media），由卡片统一用 COLOR_TEXT_SECONDARY 上色。 */
+  @Prop icon: Resource = $r('app.media.ic_sensor_chip');
   @Prop title: string = '';
   @Prop value: string = '--';
   @Prop stateText: string = '';
@@ -21,8 +22,11 @@ export struct SensorCard {
   build() {
     Column({ space: 6 }) {
       Row({ space: 6 }) {
-        Text(this.icon)
-          .fontSize(AppTheme.FONT_BODY)
+        Image(this.icon)
+          .width(AppTheme.FONT_BODY)
+          .height(AppTheme.FONT_BODY)
+          .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .objectFit(ImageFit.Contain)
         Text(this.title)
           .fontSize(AppTheme.FONT_CAPTION)
           .fontColor(AppTheme.COLOR_TEXT_SECONDARY)

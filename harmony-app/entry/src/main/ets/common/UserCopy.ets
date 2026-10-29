@@ -14,7 +14,9 @@
 export class UserCopy {
   // ---------- 通用 ----------
   static readonly APP_NAME: string = '老人守护';
-  static readonly SLOGAN: string = '随时知道爸妈好不好';
+  // 标语与登录副标题目前都不显示：2026-10-29 用户要求去掉「老人守护」下方的小字。
+  // 常量留着是为了以后在别处复用，不要在页面里硬编码这两句话。
+  static readonly SLOGAN: string = '家里有异常，手机会提醒';
   static readonly OK: string = '好的';
   static readonly CANCEL: string = '取消';
   static readonly RETRY: string = '重试';
@@ -92,7 +94,7 @@ export class UserCopy {
 
   // ---------- 登录 / 注册 ----------
   static readonly LOGIN_TITLE: string = '老人守护';
-  static readonly LOGIN_SUBTITLE: string = '随时知道爸妈好不好';
+  static readonly LOGIN_SUBTITLE: string = '家里有异常，手机会提醒';
   static readonly LABEL_PHONE: string = '手机号';
   static readonly LABEL_PASSWORD: string = '密码';
   static readonly LABEL_PASSWORD2: string = '确认密码';

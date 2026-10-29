@@ -36,7 +36,9 @@ export struct AlertListPage {
   private timerId: number = -1;
 
   aboutToAppear(): void {
-    this.state.filterIndex = 1; // 默认停在「未处理」
+    // 默认停在「全部」：只有 2 条未处理时，整页下半屏是空的，看起来像没数据。
+    // 「待处置」仍然一点就到，两个筛片都只有一屏。
+    this.state.filterIndex = 0;
     this.reload();
     this.timerId = setInterval(() => {
       this.reload();
@@ -143,7 +145,7 @@ export struct AlertListPage {
         LoadingView({ hint: UserCopy.LOADING })
       } else if (this.state.items.length === 0) {
         EmptyView({
-          icon: '🌿',
+          icon: $r('app.media.ic_ok_circle'),
           title: UserCopy.ALERT_EMPTY,
           hint: '有情况会自动出现在这里'
         })
