@@ -1,8 +1,8 @@
 # 验收基线报告（tools/test）
 
-- 生成时间：2026-10-19 00:30:29Z
-- 契约：接口契约.md · 160072 B · mtime 2026-10-19 08:16
-- git：54cdd0a
+- 生成时间：2026-10-21 15:52:55Z
+- 契约：接口契约.md · 170226 B · mtime 2026-10-21 23:50
+- git：9212a3a
 - 被测 REST：内置 mock（tools/test/mock_server.py）
 - 环境：python 3.14.4 / docker Docker version 27.5.1, build 9f9e405
 
@@ -19,7 +19,7 @@
 | s07_provision 本地配网/配对（§12 + §13 + §3.9 + §2.7） | 13 | 0 | 0 | 13 |
 | **构建检查** | 2 | 0 | 3 | 5 |
 
-**总计：通过 105 · 失败 0 · 跳过 0**
+**总计：通过 105 · 失败 0 · 跳过 0**（只算 7 个契约套件；构建检查的跳过是环境门，见上一行）
 
 ## 跳过项（已知问题或环境缺失）
 
@@ -37,7 +37,7 @@
 $ /usr/bin/python3 /mnt/c/Users/Administrator/Desktop/HMProgram/tools/test/contract/contract_source.py   # rc=0
 {
   "path": "docs/技术/接口契约.md",
-  "sections": 120,
+  "sections": 121,
   "types": [
     "gas",
     "fall",

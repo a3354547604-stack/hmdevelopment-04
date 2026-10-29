@@ -243,12 +243,37 @@ def handle_event(device: dict[str, Any], body: dict[str, Any], envelope_event: s
     return 0
 
 
+_EVENTS_TOPIC_SUFFIX = "/sys/events/up"
+
+
 def handle_message(device: dict[str, Any], body: dict[str, Any]) -> int:
-    """节点明细（§4.6 `messages/up`）：`content` 是节点 JSON 数组的字符串。"""
+    """设备消息（`device.message`）——两种来源：
+
+    1. §4.6 `messages/up`：`content` 是节点 JSON 数组的字符串；
+    2. IoTDA 的**事件上报**（`$oc/devices/{id}/sys/events/up`）：规则引擎没有独立的
+       `device.event` 资源，事件是以 device.message 推过来的（官方《流转数据》只列
+       device.property / device.message 等），`content` 就是网关发的事件 JSON。
+       不在这里分流，跌倒/门磁/SOS 会在「节点明细」分支被静默丢掉（handled=0 但不报错）。
+    """
     services = _services(body)
     if not services:
         return 0
-    content = services[0].get("content")
+    service = services[0]
+    topic = service.get("topic")
+    if isinstance(topic, str) and topic.endswith(_EVENTS_TOPIC_SUFFIX):
+        payload = service.get("content")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError:
+                log.warning("events content 不是合法 JSON：%r", payload[:120])
+                return 0
+        if not isinstance(payload, dict):
+            return 0
+        # 事件载荷本身就是 `{"services":[{event_type, paras, …}]}`，直接复用事件分支
+        return handle_event(device, payload, None)
+
+    content = service.get("content")
     items: list[Any]
     if isinstance(content, str):
         try:

@@ -111,6 +111,12 @@ def server_time():
     body = ok(
         {
             "utc_epoch": int(now // 1000),
+            # 兼容别名（秒）：RK2206 网关固件的取时解析只认
+            # server_time/epoch/ts/unix 四个键（gw_timesync.c:pick_epoch），
+            # 契约 §6.21 的主字段仍是 utc_epoch；多给一个同值别名让老固件
+            # 不必因为键名不匹配就永久取不到时间。毫秒口径的 ts/server_ts
+            # 会被固件的合理区间挡掉，所以必须给秒值。
+            "epoch": int(now // 1000),
             "utc_epoch_ms": now,
             "iso8601": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "tz": "UTC",

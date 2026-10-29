@@ -119,6 +119,21 @@ def test_sos_event_becomes_alert(client, device):
     assert row["node_sn"] == "M4" and row["status"] == "pending"
 
 
+def test_event_arrives_as_device_message_events_topic(client, device):
+    """事件在 IoTDA 没有独立资源，是以 device.message（topic=…/sys/events/up）推来的。"""
+    event = {"services": [{
+        "service_id": "gateway", "event_type": "alert", "event_time": "20261017T120000Z",
+        "paras": {"type": "fall", "level": 2, "node_sn": "M2", "ts": now_ms(), "event_id": f"{GATEWAY_SN}-fall-msg"}}]}
+    body = {"services": [{"topic": f"$oc/devices/{GATEWAY_SN}/sys/events/up",
+                          "content": json.dumps(event)}]}
+    resp = _post(client, _envelope("device.message", GATEWAY_SN, body))
+    assert resp.status_code == 200
+    assert resp.json()["data"]["handled"] == 1
+    row = db.fetch_one("SELECT type, level, node_sn, status FROM alerts WHERE device_id = :d", {"d": device["id"]})
+    assert row["type"] == "fall" and int(row["level"]) == 2
+    assert row["node_sn"] == "M2" and row["status"] == "pending"
+
+
 def test_node_offline_recover_clears_alert(client, device):
     ts = now_ms()
     _post(client, _envelope("device.event", GATEWAY_SN, {"services": [{

@@ -95,7 +95,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 **期望串口（逐行）**：
 
 ```
-[PROV] enter AP mode ssid=ElderCare-1A2B psk=echub8888 remain=600 url=http://<ap_ip>/
+[PROV] enter AP mode ssid=ElderCare-1A2B psk=（空） remain=600 url=http://<ap_ip>/
 [gw] [PROV] 本地配网服务就绪 http://192.168.x.1/（H5 单页，契约 §12.11）
 ```
 
@@ -131,7 +131,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 3. 松手后立刻能看到配网窗口打开（和 §3 第 2 步之后的期望串口一模一样）：
 
    ```
-   [PROV] enter AP mode ssid=ElderCare-1A2B psk=echub8888 remain=600 url=http://<ap_ip>/
+   [PROV] enter AP mode ssid=ElderCare-1A2B psk=（空） remain=600 url=http://<ap_ip>/
    ```
 
    窗口里**再长按 3 s** 就是退出；不按也会自己走完 `remain` 秒。
@@ -211,7 +211,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
 **第 2 步：手机连热点、打开页面**
 
-- 做什么：手机 Wi-Fi 连 **`ElderCare-XXXX`**（XXXX 是本机 SN 后四位），口令 **`echub8888`**；
+- 做什么：手机 Wi-Fi 连 **`ElderCare-XXXX`**（XXXX 是本机 SN 后四位），无口令（开放网络）；
   连上后浏览器打开**第 1 步日志里那个地址**（常见 `http://192.168.4.1/`，
   个别固件是 `http://192.168.2.1/`）。
 - 看到什么：页面标题「RK2206 网关配网」，顶部状态卡显示
@@ -261,7 +261,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
    ```
    [PROV] ready: sn=M0-3F1A2B ap_ssid=ElderCare-1A2B bound=0 keepalive=600s
-   [PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 10 min（手机连 Wi-Fi「ElderCare-1A2B」，口令 echub8888，浏览器打开配置页，一次填完 Wi-Fi 与云端凭据）
+   [PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 10 min（手机连 Wi-Fi「ElderCare-1A2B」，无口令，浏览器打开配置页，一次填完 Wi-Fi 与云端凭据）
    ```
 
    然后 `[PROV] enter AP mode …` / `[gw] [PROV] 本地配网服务就绪 http://<AP地址>/`，
@@ -300,7 +300,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
    ```
    [PROV] 首次配网：Flash 里没有家庭 Wi-Fi 凭据，已自动开窗 10 min（…）
-   [PROV] enter AP mode ssid=ElderCare-1A2B psk=echub8888 remain=600 url=http://<AP地址>/
+   [PROV] enter AP mode ssid=ElderCare-1A2B psk=（空） remain=600 url=http://<AP地址>/
    ```
 
    手机 Wi-Fi 列表里重新出现 `ElderCare-1A2B`。
@@ -308,7 +308,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 
 ## 4. 用手机调本地 API（3 步）
 
-1. 手机连 SoftAP：Wi-Fi 列表找 `ElderCare-XXXX`，口令 `echub8888`（占位值，见 §5 CAL-16）。
+1. 手机连 SoftAP：Wi-Fi 列表找 `ElderCare-XXXX`，口令 （空口令）（占位值，见 §5 CAL-16）。
    连上后手机会提示"已连接，无法访问互联网"——**正常，别点断开**。
    然后浏览器打开 `http://<第 3 步串口打印的 IP>/`。
    **地址口径：待上板实测确认（地址由板级驱动决定，占位 `192.168.4.1`）**——别照抄 `192.168.4.1`。
@@ -475,7 +475,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
   文档值 空闲 ≈2.3 V / K1 0.01 V / K2 0.55 V / K3 1.00 V / K4 1.65 V；
   **固件判定不依赖这些绝对值**（用「低于基线 300 mV 且持续 50 ms」），
   所以就算这块板子的分压与文档差几十 mV，长按照样能触发；需要标定的只是日志里"这是 K?"的名字与 `keys` 的可读性。
-- **CAL-16**：SoftAP 口令是占位值 `echub8888`（契约要求"值待用户确认、仓库不写死"）。
+- **CAL-16**：SoftAP 口令是占位值 （空口令）（契约要求"值待用户确认、仓库不写死"）。
   要改成你们的现场口令，告我，我改 `gw_config.h` 的 `GW_PROV_AP_PSK` 重编。
 > **下面这段指纹是 2026-10-18 那一次构建的**，只用于说明"怎么判断是不是带配网的固件"。
 > t137 之后固件已重编，**以 `rk2206-gateway/out/build-gateway.evidence.txt` 里的当次值为准**

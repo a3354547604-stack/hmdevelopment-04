@@ -669,7 +669,6 @@ static void test_iotda_payloads(void)
     st.temp_x10 = 245;
     st.humi_x10 = 562;
     st.smoke_mv = 320;
-    st.battery = 255;
     st.alarm_state = 1;
     st.has = GW_ST_HAS_TEMP | GW_ST_HAS_HUMI | GW_ST_HAS_SMOKE;
     strcpy(st.nodes_online, "{\"M1\":true,\"M2\":false,\"M4\":true}");
@@ -690,7 +689,8 @@ static void test_iotda_payloads(void)
         t_ok(jnum(props, "temp", -1) == 24.5, "temp 245 → 24.5（×10 定点）");
         t_ok(jnum(props, "humi", -1) == 56.2, "humi 562 → 56.2");
         t_ok(jnum(props, "smoke", -1) == 320, "smoke 为整数 mV");
-        t_ok(jnum(props, "battery", -1) == 255, "battery 255 = 市电");
+        /* t-r5：电量字段已按用户要求删除（m09352「电量删掉」）——这里反向断言它不再出现 */
+        t_ok(jnum(props, "battery", -1) == -1, "battery 字段已删除（不再上报）");
         t_ok(jnum(props, "alarm_state", -1) == 1, "alarm_state 透传");
         t_ok(jbool(props, "presence", 0) == 1, "presence 是 bool");
         t_ok(strstr(jstr(props, "nodes_online", "?"), "\"M1\":true") != NULL,

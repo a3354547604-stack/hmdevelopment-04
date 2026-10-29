@@ -30,7 +30,7 @@ def test_time_for_gateway_without_token(client):
     body = resp.json()
     assert body["code"] == 0
     data = body["data"]
-    assert set(data) == {"utc_epoch", "utc_epoch_ms", "iso8601", "tz", "server_ts"}
+    assert set(data) == {"utc_epoch", "epoch", "utc_epoch_ms", "iso8601", "tz", "server_ts"}
     assert data["tz"] == "UTC"
     # 秒/毫秒两个字段必须自洽，且与真实时间同秒（网关会直接拿去算 HMACSHA256 时间戳）
     assert data["utc_epoch_ms"] // 1000 == data["utc_epoch"]
