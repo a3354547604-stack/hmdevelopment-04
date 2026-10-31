@@ -236,9 +236,12 @@ export struct AlertListPage {
             .fontSize(AppTheme.FONT_LABEL)
             .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
             .layoutWeight(1)
-          Text(UserCopy.alertCount(this.groupItems(g).length))
-            .fontSize(AppTheme.FONT_LABEL)
-            .fontColor(AppTheme.COLOR_TEXT_HINT)
+          if (this.groupItems(g).length > 1) {
+            // 只有一条时「1 条」是废话，条数只在真正需要比较时才出现
+            Text(UserCopy.alertCount(this.groupItems(g).length))
+              .fontSize(AppTheme.FONT_LABEL)
+              .fontColor(AppTheme.COLOR_TEXT_HINT)
+          }
         }
         .width('100%')
         .padding({ left: 2, right: 2, top: 6, bottom: 2 })
