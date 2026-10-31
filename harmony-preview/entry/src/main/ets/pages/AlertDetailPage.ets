@@ -58,7 +58,7 @@ struct AlertDetailPage {
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
           .layoutWeight(1)
         Text(this.detail.alert.status === 'resolved' ? UserCopy.ALERT_HANDLED_TIP
-          : (this.detail.alert.status === 'pending' ? '还没处理' : '看过了'))
+          : (this.detail.alert.status === 'pending' ? UserCopy.ALERT_PENDING_TIP : UserCopy.ALERT_SEEN_TIP))
           .fontSize(AppTheme.FONT_CAPTION)
           .fontColor(this.detail.alert.status === 'resolved' ? AppTheme.COLOR_LEVEL0_TEXT : AppTheme.COLOR_LEVEL1_TEXT)
       }

@@ -248,7 +248,7 @@ export struct HomePage {
   private latestLine(): string {
     const when: string = Formatter.fmtAgo(this.latest.ts, this.nowMs);
     const room: string = this.roomOfSn(this.latest.node_sn);
-    const state: string = this.latest.status === 'pending' ? '还没处理' : '已处理';
+    const state: string = this.latest.status === 'pending' ? UserCopy.ALERT_PENDING_TIP : UserCopy.ALERT_HANDLED_TIP;
     return when + ' · ' + room + ' · ' + state;
   }
 
