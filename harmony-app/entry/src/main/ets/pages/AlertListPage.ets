@@ -1,10 +1,13 @@
 /**
  * 提醒列表（契约 §6.13 GET /api/alerts）。
  *
- * 界面决策（t150）：
- *  · 标题就叫「提醒」，筛片只留两个：**全部 / 未处理**。三个技术态
- *    （pending/confirmed/resolved）对用户没有意义——他只关心「还有没有要我做的」。
- *  · 一行一条：`14:32 · 厨房 · 燃气浓度偏高`（见 components/AlertRow）。
+ * 界面决策：
+ *  · 筛片只留两个：**全部 / 未处理**。三个技术态（pending/confirmed/resolved）
+ *    对用户没有意义——他只关心「还有没有要我做的」。
+ *  · 顶部摘要卡：还有几条没处理 / 都处理完了，并把「先看这条」直接摆出来；
+ *  · 列表按 今天 / 昨天 / 更早 分组并写条数，行改成两行
+ *    （`燃气浓度偏高` + `厨房 · 10:50 · 还没处理`，见 components/AlertRow）；
+ *  · 列表末尾给「看看这周」入口，页面不是死路；
  *  · 每 10 s 自动刷新 + 下拉刷新：提醒是"等不了"的信息，但不能更密
  *    （契约 §6.6 同样建议 10 s）；进前台立刻拉一次（后台定时器会被系统挂起）。
  */
@@ -12,6 +15,7 @@
 import { router } from '@kit.ArkUI';
 import { AlertListViewModel, AlertListState } from '../viewmodel/AlertViewModel';
 import { AppTheme, LiteralConstants } from '../common/AppTheme';
+import { Formatter } from '../common/Formatter';
 import { UserCopy } from '../common/UserCopy';
 import { AlertRow } from '../components/AlertRow';
 import { SegmentedBar } from '../components/SettingRows';
@@ -21,12 +25,15 @@ import { ServiceHub } from '../service/ServiceHub';
 import { ApiResult } from '../model/Result';
 
 const POLL_INTERVAL_MS: number = 10 * LiteralConstants.MS_PER_SECOND;
+const MS_PER_DAY: number = 24 * 60 * 60 * 1000;
 /** 筛片 ↔ 契约 §6.13 的 status 取值（index 与 SegmentedBar 对齐）。 */
 const STATUS_VALUES: string[] = ['all', 'pending'];
 
 @Component
 export struct AlertListPage {
   @StorageProp('deviceId') deviceId: number = 0;
+  /** 顶栏/首页维护的未处理总数：摘要卡显示的是"全部里的未处理"，不随筛片变。 */
+  @StorageProp('pendingCount') pendingCount: number = 0;
   @StorageProp('foregroundSeq') @Watch('onForeground') foregroundSeq: number = 0;
   @State state: AlertListState = new AlertListState();
   @State refreshing: boolean = false;
@@ -120,8 +127,168 @@ export struct AlertListPage {
     router.pushUrl({ url: 'pages/AlertDetailPage' });
   }
 
+  private openReport(): void {
+    router.pushUrl({ url: 'pages/ReportPage' });
+  }
+
+  /** 今天 00:00 的毫秒数：分组只按自然日切，不按「24 小时前」。 */
+  private todayStart(): number {
+    const d: Date = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  }
+
+  private groupOf(ts: number): number {
+    const t: number = this.todayStart();
+    if (ts >= t) {
+      return 0;
+    } else if (ts >= t - MS_PER_DAY) {
+      return 1;
+    }
+    return 2;
+  }
+
+  private groupLabel(g: number): string {
+    if (g === 0) {
+      return UserCopy.ALERT_GROUP_TODAY;
+    } else if (g === 1) {
+      return UserCopy.ALERT_GROUP_YESTERDAY;
+    }
+    return UserCopy.ALERT_GROUP_EARLIER;
+  }
+
+  private groupItems(g: number): AlertItem[] {
+    const out: AlertItem[] = [];
+    for (let i = 0; i < this.state.items.length; i++) {
+      if (this.groupOf(this.state.items[i].ts) === g) {
+        out.push(this.state.items[i]);
+      }
+    }
+    return out;
+  }
+
+  /** 摘要卡里的「先看这条」：当前列表里第一条未处理；全是已处理就取最新一条。 */
+  private summaryLead(): AlertItem {
+    for (let i = 0; i < this.state.items.length; i++) {
+      if (this.state.items[i].status === 'pending') {
+        return this.state.items[i];
+      }
+    }
+    return this.state.items[0];
+  }
+
+  /** 未处理条数：筛片停在「未处理」时就是本屏条数，否则用首页维护的总数。 */
+  private pendingTotal(): number {
+    if (this.state.filterIndex === 1) {
+      return this.state.items.length;
+    }
+    return this.pendingCount;
+  }
+
+  private summaryHint(): string {
+    const lead: AlertItem = this.summaryLead();
+    const leadWord: string = this.pendingTotal() > 0 ? UserCopy.ALERT_LEAD_NEXT : UserCopy.ALERT_LEAD_LAST;
+    return UserCopy.alertSummaryHint(leadWord, this.roomOf(lead.node_sn),
+      Formatter.fmtWhen(lead.ts, Date.now()), lead.type);
+  }
+
+  @Builder
+  summaryCard() {
+    Row({ space: 10 }) {
+      Column({ space: 3 }) {
+        Text(UserCopy.alertSummaryTitle(this.pendingTotal()))
+          .fontSize(AppTheme.FONT_BODY)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(AppTheme.COLOR_ON_ACCENT)
+          .maxLines(1)
+        Text(this.summaryHint())
+          .fontSize(AppTheme.FONT_LABEL)
+          .fontColor(AppTheme.COLOR_ON_ACCENT_SUBTLE)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+
+      if (this.pendingTotal() > 0) {
+        Text(UserCopy.ALERT_GO_HANDLE + ' ›')
+          .fontSize(AppTheme.FONT_LABEL)
+          .fontColor(AppTheme.COLOR_ON_ACCENT)
+      }
+    }
+    .width('100%')
+    .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING, top: 12, bottom: 12 })
+    .backgroundColor(this.pendingTotal() > 0 ? AppTheme.COLOR_LEVEL2_DEEP : AppTheme.COLOR_LEVEL0_DEEP)
+    .borderRadius(AppTheme.CARD_RADIUS)
+    .accessibilityGroup(true)
+    .accessibilityText(UserCopy.alertSummaryTitle(this.pendingTotal()) + '，' + this.summaryHint())
+    .onClick(() => {
+      this.openDetail(this.summaryLead().id);
+    })
+  }
+
+  /** 一天的集中块：标题 + 该天的条目。空组整块不渲染，不留孤立的分组标题。 */
+  @Builder
+  groupBlock(g: number) {
+    if (this.groupItems(g).length > 0) {
+      ListItem() {
+        Row() {
+          Text(this.groupLabel(g))
+            .fontSize(AppTheme.FONT_LABEL)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+            .layoutWeight(1)
+          Text(UserCopy.alertCount(this.groupItems(g).length))
+            .fontSize(AppTheme.FONT_LABEL)
+            .fontColor(AppTheme.COLOR_TEXT_HINT)
+        }
+        .width('100%')
+        .padding({ left: 2, right: 2, top: 6, bottom: 2 })
+      }
+      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+
+      ForEach(this.groupItems(g), (item: AlertItem) => {
+        ListItem() {
+          AlertRow({
+            alert: item,
+            room: this.roomOf(item.node_sn),
+            onTap: (id: number) => {
+              this.openDetail(id);
+            }
+          })
+        }
+        .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+      }, (item: AlertItem) => `${item.id}-${item.status}`)
+    }
+  }
+
+  /** 列表末尾：给页面一个出口，顺手说明数据窗口。 */
+  @Builder
+  listFooter() {
+    Column({ space: 6 }) {
+      Text(UserCopy.ALERT_FOOTER_REPORT)
+        .fontSize(AppTheme.FONT_LABEL)
+        .fontColor(AppTheme.COLOR_PRIMARY)
+        .onClick(() => {
+          this.openReport();
+        })
+      Text(UserCopy.ALERT_FOOTER_KEEP)
+        .fontSize(AppTheme.FONT_LABEL)
+        .fontColor(AppTheme.COLOR_TEXT_HINT)
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Center)
+    .padding({ top: 10, bottom: 18 })
+  }
+
   build() {
     Column({ space: 8 }) {
+      if (!this.state.loading && this.state.errorText.length === 0 && this.state.items.length > 0) {
+        Column() {
+          this.summaryCard()
+        }
+        .width('100%')
+        .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 8 })
+      }
+
       Column({ space: 8 }) {
         SegmentedBar({
           options: [UserCopy.ALERT_FILTER_ALL, UserCopy.ALERT_FILTER_PENDING],
@@ -139,7 +306,7 @@ export struct AlertListPage {
         })
       }
       .width('100%')
-      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: 8 })
+      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
 
       if (this.state.loading && this.state.items.length === 0) {
         LoadingView({ hint: UserCopy.LOADING })
@@ -162,18 +329,12 @@ export struct AlertListPage {
       } else {
         Refresh({ refreshing: this.refreshing }) {
           List({ space: 8 }) {
-            ForEach(this.state.items, (item: AlertItem) => {
-              ListItem() {
-                AlertRow({
-                  alert: item,
-                  room: this.roomOf(item.node_sn),
-                  onTap: (id: number) => {
-                    this.openDetail(id);
-                  }
-                })
-              }
-              .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
-            }, (item: AlertItem) => `${item.id}-${item.status}`)
+            this.groupBlock(0)
+            this.groupBlock(1)
+            this.groupBlock(2)
+            ListItem() {
+              this.listFooter()
+            }
           }
           .width('100%')
           .layoutWeight(1)

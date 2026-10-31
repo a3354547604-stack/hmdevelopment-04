@@ -1,11 +1,13 @@
 /**
- * 提醒列表行（t150 重做）。
+ * 提醒列表行。
  *
- * 视觉口径来自规范 §3：**一行一条**，说人话 —— `14:32 · 厨房 · 燃气浓度偏高`。
- *  ① 左侧色条 = level（§8.1：0/1/2 → 绿/黄/红），颜色本身就是「急不急」；
- *  ② 未处理（pending）时补一个红点和「还没处理」，而不是技术字段 `push_count`；
- *  ③ **不显示**服务器的 `summary`：那是给运维看的（含 mV 与阈值数字），
- *     给子女看的应该是「燃气浓度偏高」这种一句话。
+ * 视觉口径：**两行一条，先说发生了什么**（原来一行里塞「10:50 · 厨房 · 燃气浓度偏高」，
+ * 时间打头、事件被挤在最后，扫一眼读不出重点）。
+ *  ① 第一行 = 发生了什么（`燃气浓度偏高`），右侧补级别文字（`预警` / `报警`）——
+ *     色条对色弱用户没有信息量，文字是第二重线索；
+ *  ② 第二行 = 在哪 · 什么时候 · 什么状态（`厨房 · 10:50 · 还没处理`）；
+ *  ③ 左侧 4vp 色条仍旧表示级别（§8.1 绿/黄/红），扫一眼就能分出急缓；
+ *  ④ **不显示**服务器的 `summary`：那是给运维看的（含 mV 与阈值数字）。
  */
 
 import { AppTheme } from '../common/AppTheme';
@@ -31,42 +33,71 @@ export struct AlertRow {
   onTap: (id: number) => void = () => {
   };
 
-  /** 读屏用的整句：时间+房间+类型，再补级别与状态（左边框和图标对读屏没有信息量）。 */
+  /** 级别文字：给不看颜色的用户一条文字线索。 */
+  private levelTag(): string {
+    if (this.alert.level >= 2) {
+      return UserCopy.ALERT_LEVEL_ALARM;
+    } else if (this.alert.level >= 1) {
+      return UserCopy.ALERT_LEVEL_WARN;
+    }
+    return '';
+  }
+
+  private statusText(): string {
+    if (this.alert.status === 'pending') {
+      return UserCopy.ALERT_PENDING_TIP;
+    } else if (this.alert.status === 'confirmed') {
+      return UserCopy.ALERT_SEEN_TIP;
+    } else if (this.alert.status === 'resolved') {
+      return UserCopy.ALERT_HANDLED_TIP;
+    }
+    return '';
+  }
+
+  /** 第二行：在哪 · 什么时候 · 什么状态（缺项直接跳过，不留多余的分隔符）。 */
+  private metaLine(): string {
+    const parts: string[] = [];
+    if (this.room.length > 0) {
+      parts.push(this.room);
+    }
+    parts.push(Formatter.fmtWhen(this.alert.ts, Date.now()));
+    const st: string = this.statusText();
+    if (st.length > 0) {
+      parts.push(st);
+    }
+    return parts.join(' · ');
+  }
+
+  /** 读屏用整句：发生什么 + 在哪/何时/什么状态（色条与箭头对读屏没有信息量）。 */
   private a11yLabel(): string {
-    const level: string = AppTheme.levelText(this.alert.level);
-    const status: string = this.alert.status === 'pending' ? '还没处理'
-      : (this.alert.status === 'confirmed' ? UserCopy.ALERT_SEEN_TIP : UserCopy.ALERT_HANDLED_TIP);
-    return UserCopy.alertLine(this.alert.type, this.room, Formatter.fmtWhen(this.alert.ts, Date.now())) +
-      '，' + level + '，' + status;
+    return UserCopy.alertTitle(this.alert.type) + '，' + this.metaLine();
   }
 
   build() {
-    // 左侧色条改成整卡的左边框：原先是一个固定 44vp 高的色块，卡片实际约 68vp，
-    // 色条短一截悬在中间，看着像没对齐（预览器实测）。
     Row({ space: 10 }) {
-      Column({ space: 2 }) {
-        Text(UserCopy.alertLine(this.alert.type, this.room, Formatter.fmtWhen(this.alert.ts, Date.now())))
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+      Column({ space: 3 }) {
+        Row({ space: 6 }) {
+          Text(UserCopy.alertTitle(this.alert.type))
+            .fontSize(AppTheme.FONT_BODY)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+            .layoutWeight(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.levelTag().length > 0) {
+            Text(this.levelTag())
+              .fontSize(AppTheme.FONT_BADGE)
+              .fontColor(AppTheme.levelTextColor(this.alert.level))
+          }
+        }
+        .width('100%')
+
+        Text(this.metaLine())
+          .fontSize(AppTheme.FONT_LABEL)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
-        if (this.alert.status === 'pending') {
-          // 状态文字不再用红色：级别已经由左边框表达，红字会和「报警」抢注意力
-          Text('还没处理')
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-        } else if (this.alert.status === 'confirmed') {
-          // 「看过了」是第三种状态：既没处理、也不是没看到，原来这里什么都不显示，
-          // 用户没法把它和「未处理」「已处理」区分开（预览器实拍：第二行是空的）。
-          Text(UserCopy.ALERT_SEEN_TIP)
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-        } else if (this.alert.status === 'resolved') {
-          Text(UserCopy.ALERT_HANDLED_TIP)
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_TEXT_HINT)
-        }
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)

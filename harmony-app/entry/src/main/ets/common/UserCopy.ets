@@ -89,6 +89,17 @@ export class UserCopy {
   static readonly ALERT_DONE: string = '已记录，谢谢';
   static readonly ALERT_HANDLED_TIP: string = '这件事已经处理过了';
   static readonly ALERT_SEEN_TIP: string = '已经看过了（还没处理）';
+  static readonly ALERT_PENDING_TIP: string = '还没处理';
+  static readonly ALERT_GROUP_TODAY: string = '今天';
+  static readonly ALERT_GROUP_YESTERDAY: string = '昨天';
+  static readonly ALERT_GROUP_EARLIER: string = '更早';
+  static readonly ALERT_LEVEL_WARN: string = '预警';
+  static readonly ALERT_LEVEL_ALARM: string = '报警';
+  static readonly ALERT_LEAD_NEXT: string = '先看这条';
+  static readonly ALERT_LEAD_LAST: string = '最近一条';
+  static readonly ALERT_GO_HANDLE: string = '去处理';
+  static readonly ALERT_FOOTER_KEEP: string = '只显示最近 30 天的提醒';
+  static readonly ALERT_FOOTER_REPORT: string = '看看这周的情况 ›';
 
   // ---------- 报表 ----------
   /** 没有对比基线时别留白，也别让用户自己算百分比。 */
@@ -204,6 +215,10 @@ export class UserCopy {
       UserCopy.ALERT_BTN_HANDLED, UserCopy.ALERT_NOTE_HINT, UserCopy.ALERT_REASON_PICK,
       UserCopy.ALERT_REASON_CONTACT, UserCopy.ALERT_REASON_VISIT, UserCopy.ALERT_REASON_FALSE,
       UserCopy.ALERT_REASON_OTHER, UserCopy.ALERT_DONE, UserCopy.ALERT_HANDLED_TIP,
+      UserCopy.ALERT_PENDING_TIP, UserCopy.ALERT_GROUP_TODAY, UserCopy.ALERT_GROUP_YESTERDAY,
+      UserCopy.ALERT_GROUP_EARLIER, UserCopy.ALERT_LEVEL_WARN, UserCopy.ALERT_LEVEL_ALARM,
+      UserCopy.ALERT_LEAD_NEXT, UserCopy.ALERT_LEAD_LAST, UserCopy.ALERT_GO_HANDLE,
+      UserCopy.ALERT_FOOTER_KEEP, UserCopy.ALERT_FOOTER_REPORT,
       UserCopy.REPORT_TITLE, UserCopy.PERIOD_WEEK, UserCopy.PERIOD_MONTH, UserCopy.REPORT_WALK,
       UserCopy.REPORT_ALERTS, UserCopy.REPORT_TREND, UserCopy.REPORT_NO_BASELINE,
       UserCopy.REPORT_MAX_QUIET,
@@ -270,6 +285,25 @@ export class UserCopy {
   static alertLine(type: string, room: string, clock: string): string {
     const r: string = room.length > 0 ? room : UserCopy.ROOM_PREFIX;
     return clock + ' · ' + r + ' · ' + UserCopy.alertTitle(type);
+  }
+
+  /** 摘要卡标题：`还有 2 条没处理` / `提醒都处理完了`。 */
+  static alertSummaryTitle(pending: number): string {
+    if (pending > 0) {
+      return '还有 ' + pending.toString() + ' 条没处理';
+    }
+    return '提醒都处理完了';
+  }
+
+  /** 摘要卡副行：`先看这条：厨房 · 10:50 · 燃气浓度偏高`。 */
+  static alertSummaryHint(lead: string, room: string, clock: string, type: string): string {
+    const r: string = room.length > 0 ? room : UserCopy.ROOM_PREFIX;
+    return lead + '：' + r + ' · ' + clock + ' · ' + UserCopy.alertTitle(type);
+  }
+
+  /** 分组标题右侧的条数。 */
+  static alertCount(count: number): string {
+    return count.toString() + ' 条';
   }
 
   static gasText(level: number): string {
