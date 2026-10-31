@@ -58,7 +58,10 @@ JS
 mkdir -p "$(dirname "$OUT")"
 {
   echo "HMProgram 应用端（harmony-app）无设备自检日志"
-  echo "生成时间（UTC+8）：$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
+  # 注意：Git Bash 没有 tzdata，`TZ=Asia/Shanghai date` 会静默退回 UTC，
+  # 日志里就会写成「UTC+8」却显示 UTC 时间（差 8 小时）。日志是交付证据，
+  # 所以这里用 epoch +28800 秒自己算，不依赖时区数据库。
+  echo "生成时间（UTC+8）：$(date -u -d "@$(( $(date +%s) + 28800 ))" '+%Y-%m-%d %H:%M:%S')"
   echo "Node：$(node -v)　esbuild：$("$ESBUILD" --version)"
   echo "被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,SessionStore}.ets"
   echo "自检夹具：harmony-app/tools/{selfcheck-mock-transport,selfcheck-mock-data,selfcheck-mock-gateway}.ets（只用于自检，不进产品包）"
