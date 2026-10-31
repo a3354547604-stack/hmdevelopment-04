@@ -140,6 +140,18 @@ export class UserCopy {
   static readonly SEC_NOTIFY: string = '手机提醒';
   static readonly SEC_SECURITY: string = '账号';
   static readonly SEC_ABOUT: string = '关于';
+
+  // —— 我的页：账号、提醒设置与帮助入口 ——
+  /** 账号卡里那行只读的手机号，值由页面传入。 */
+  static readonly ACCOUNT_PHONE: string = '登录手机号';
+  /** 免打扰：夜里不响铃，但提醒照样记下来。 */
+  static readonly NOTIFY_DND: string = '免打扰时段';
+  static readonly NOTIFY_DND_HINT: string = '22:00–07:00 不响铃，提醒只记在 App 里';
+  /** 报警级提醒不受免打扰影响——这是家属最在意的一条。 */
+  static readonly NOTIFY_URGENT: string = '紧急提醒总是响铃';
+  static readonly NOTIFY_URGENT_HINT: string = '报警级提醒不受免打扰影响';
+  static readonly ABOUT_HELP: string = '使用帮助';
+  static readonly HELP_TITLE: string = '使用帮助';
   static readonly BIND_DEVICE: string = '添加设备';
   static readonly BIND_DEVICE_HINT: string = '给守护主机配好家里的 Wi-Fi';
   static readonly CHANGE_PWD: string = '修改密码';
@@ -229,7 +241,8 @@ export class UserCopy {
       UserCopy.REGISTER_TITLE, UserCopy.PHONE_BAD, UserCopy.PWD_BAD, UserCopy.PWD_DIFF,
       UserCopy.PWD_REQUIRED, UserCopy.AUTH_EXPIRED, UserCopy.LOGIN_BAD,
       UserCopy.PROFILE_TITLE, UserCopy.SEC_FAMILY, UserCopy.SEC_DEVICE, UserCopy.SEC_NOTIFY,
-      UserCopy.SEC_SECURITY, UserCopy.SEC_ABOUT, UserCopy.BIND_DEVICE, UserCopy.BIND_DEVICE_HINT,
+      UserCopy.SEC_SECURITY, UserCopy.SEC_ABOUT, UserCopy.ACCOUNT_PHONE,
+      UserCopy.NOTIFY_DND, UserCopy.NOTIFY_URGENT, UserCopy.ABOUT_HELP, UserCopy.BIND_DEVICE, UserCopy.BIND_DEVICE_HINT,
       UserCopy.CHANGE_PWD, UserCopy.CHANGE_PWD_HINT, UserCopy.LOGOUT, UserCopy.NOTIFY_HINT,
       UserCopy.VERSION_LABEL,
       UserCopy.NC_TITLE, UserCopy.NC_AP_LABEL, UserCopy.NC_STEP1, UserCopy.NC_STEP1_BODY, UserCopy.NC_STEP1_TROUBLE,

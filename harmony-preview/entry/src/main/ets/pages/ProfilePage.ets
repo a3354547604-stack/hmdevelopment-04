@@ -30,6 +30,9 @@ export struct ProfilePage {
   @State taps: number = 0;
   @State serverInput: string = '';
   @State notifyOn: boolean = true;
+  /** 免打扰与紧急响铃：只存在本机，正式版还要同步给推送通道。 */
+  @State dndOn: boolean = true;
+  @State urgentOn: boolean = true;
   @State savedTip: string = '';
   /** 无活动时长（分钟）：纯本地加减，用来评审控件排版。 */
   @State noMotion: number = 30;
@@ -227,6 +230,30 @@ export struct ProfilePage {
                 this.savedTip = on ? '有情况时会在 App 里提醒你' : '已关掉手机提醒';
               }
             })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
+            SwitchRow({
+              label: UserCopy.NOTIFY_DND,
+              hint: UserCopy.NOTIFY_DND_HINT,
+              checked: this.dndOn,
+              onToggle: (on: boolean) => {
+                // 免打扰只影响「响不响」；提醒本身照旧记下来，第二天仍能在列表里看到。
+                this.dndOn = on;
+                this.savedTip = on ? '夜里不会响铃了' : '夜里也会响铃';
+              }
+            })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
+            SwitchRow({
+              label: UserCopy.NOTIFY_URGENT,
+              hint: UserCopy.NOTIFY_URGENT_HINT,
+              checked: this.urgentOn,
+              onToggle: (on: boolean) => {
+                // 报警级（燃气/跌倒）默认穿透免打扰：真出事时不能等天亮。
+                this.urgentOn = on;
+                this.savedTip = on ? '报警级提醒会一直响铃' : '报警级提醒也按免打扰处理';
+              }
+            })
           }
           .width('100%')
           .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING, top: 4, bottom: 4 })
@@ -239,6 +266,10 @@ export struct ProfilePage {
         Column({ space: 4 }) {
           this.card(UserCopy.SEC_SECURITY)
           Column() {
+            this.row(UserCopy.ACCOUNT_PHONE, PREVIEW_USERNAME, false, () => {
+            })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
             this.row(UserCopy.CHANGE_PWD, '', true, () => {
               this.savedTip = UserCopy.CHANGE_PWD_HINT;
             })
@@ -267,6 +298,12 @@ export struct ProfilePage {
         Column({ space: 4 }) {
           this.card(UserCopy.SEC_ABOUT)
           Column({ space: 8 }) {
+            this.row(UserCopy.ABOUT_HELP, '', true, () => {
+              router.pushUrl({ url: 'pages/HelpPage' }).catch(() => {
+              });
+            })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
             Row({ space: 8 }) {
               Text(UserCopy.VERSION_LABEL)
                 .fontSize(AppTheme.FONT_BODY)

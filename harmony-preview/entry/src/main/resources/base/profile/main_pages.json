@@ -5,6 +5,7 @@
     "pages/AlertDetailPage",
     "pages/NetConfigPage",
     "pages/ReportPage",
-    "pages/AddNodePage"
+    "pages/AddNodePage",
+    "pages/HelpPage"
   ]
 }
