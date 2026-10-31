@@ -16,7 +16,7 @@ import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
 import { PrimaryButton } from '../components/CommonViews';
 import { SwitchRow } from '../components/SettingRows';
-import { PREVIEW_DEVICE_NAME, PREVIEW_USERNAME } from '../data/PreviewData';
+import { PREVIEW_USERNAME } from '../data/PreviewData';
 
 /** 预览版自己的版本串，一眼能和正式包区分开。 */
 const VERSION: string = '1.0.0-preview';
@@ -193,29 +193,10 @@ export struct ProfilePage {
         }
         .width('100%')
 
-        // 绑定的设备
+        // 设备：不再重复展示守护主机名字（首页地址卡里已经有），只留「添加设备」入口
         Column({ space: 4 }) {
           this.card(UserCopy.SEC_DEVICE)
           Column() {
-            Row({ space: 8 }) {
-              Image($r('app.media.ic_device_box'))
-                .width(AppTheme.ICON_SM)
-                .height(AppTheme.ICON_SM)
-                .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
-                .objectFit(ImageFit.Contain)
-              Column({ space: 2 }) {
-                Text(PREVIEW_DEVICE_NAME)
-                  .fontSize(AppTheme.FONT_BODY)
-                  .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-                Text(UserCopy.BIND_DEVICE_HINT)
-                  .fontSize(AppTheme.FONT_CAPTION)
-                  .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-            }
-            .width('100%')
-
             PrimaryButton({
               text: UserCopy.BIND_DEVICE,
               canTap: true,
@@ -225,7 +206,6 @@ export struct ProfilePage {
                 router.pushUrl({ url: 'pages/NetConfigPage' });
               }
             })
-              .margin({ top: 10 })
           }
           .width('100%')
           .padding(AppTheme.CARD_PADDING)
