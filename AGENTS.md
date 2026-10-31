@@ -87,3 +87,17 @@
 - **并发上限（临时，2026-10-18 夜）**：用户要求「**同时工作的 agent 不能多于 3 个**」（不是限制成员总数；今晚生效，以后可改）。执行手段：**今晚在岗成员只保留 3 人**（architect-op / app-harmony-op / backend-op）——因为调度器会把任何「就绪且无人认领」的任务自动派给空闲成员，只要名册上还有第 4 个人，就无法保证同时在工作者不超过 3 个。被移除的 fw-ws63-op / gw-rk2206-op / verifier-op 名下未完成卡已回共享池；**补人时必须换新名**（被移除的名字不可复用），且补人前先确认排队中的就绪卡数 ≤ 空余名额，否则会瞬间超过 3 个并发。
 - **命令口径（本机实测）**：本机**没有 `pwsh`**（exit 127）——串口抓取等 PowerShell 脚本一律写 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <脚本> <参数>`，任务卡的 verify 命令也按此写。Windows 侧路径在文档里用占位符（`<仓库根>`、`<本机用户>`），不写死真实用户名。
 - **verdict 的绑定口径**：复核结论绑定**被复核提交号（commit）**，不是工作树。同一目录后续新增文件（新的复核报告、日志、快照）**不会**使既有 verdict 失效；但**被复核源码的字节发生变化时必须重新复核**。系统提示「verdict covers a revision that no longer exists」若只源于复核范围目录里新增了报告/日志，在报告里说明即可，不必重做（t15/t18/t26/t40 均属此类）。
+
+## 固件刷写与回滚纪律（强制，2026-10-31 立规）
+
+**起因**：连着几版固件都是「改完就编译、编译完就给用户刷」，没有每次都把当版源码推上去、也没打 tag——真出问题时只能靠人肉回忆哪一版是好的。
+
+每刷一版固件（网关 RK2206 / 汇聚 WS63 / 节点 WS63）**之前**，三件事缺一不许刷：
+
+1. **源码干净且已推**：`git status --porcelain -- <该固件源码目录>` 为空；`git rev-list --left-right --count origin/yixiang...HEAD` 为 `0 0`。
+2. **打 tag 并推 tag**：`git tag -a fw-<gw|hub|node>-<YYYY-MM-DD>-<序号> -m "<镜像 md5 + 一句话说明>"`，随后 `git push origin <tag>`（推送用 Windows 侧 git，凭据在 Windows 凭据管理器里）。
+3. **记账**：`C:\Users\Administrator\Desktop\rk2206-烧录包\烧录说明.txt`（或对应烧录包）写清「tag + 提交号 + 镜像 md5 + 该版已知缺陷」。
+
+**回滚**：`git checkout <tag> -- <源码目录>` → 重新编译 → 与烧录说明里记录的 md5 对账；或直接烧回 tag 里登记的那份镜像。
+
+**已有基线**：`fw-good-2026-10-31`（commit `4dc4a5e`）＝「网关需手动 `uartbaud 9600` 才解析帧」的那一版，可作为兜底回滚点。
