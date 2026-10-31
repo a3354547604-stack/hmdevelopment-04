@@ -100,7 +100,9 @@ export class UserCopy {
   static readonly ALERT_REASON_OTHER: string = '其它情况';
   static readonly ALERT_DONE: string = '已记录，谢谢';
   static readonly ALERT_HANDLED_TIP: string = '已处理';
-  static readonly ALERT_SEEN_TIP: string = '已经看过了（暂未处理）';
+  /** 「看过了但没处理」：对家人来说和「暂未处理」是同一件事，
+   *  详情页只显示「暂未处理」，不再加「已经看过了」的前缀（用户 2026-10-31 要求）。 */
+  static readonly ALERT_SEEN_TIP: string = '暂未处理';
   static readonly ALERT_PENDING_TIP: string = '暂未处理';
   static readonly ALERT_GROUP_TODAY: string = '今天';
   static readonly ALERT_GROUP_YESTERDAY: string = '昨天';
