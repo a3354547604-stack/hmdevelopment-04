@@ -22,6 +22,7 @@ import { SegmentedBar } from '../components/SettingRows';
 import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
 import { DeviceStatus, NodeItem, AlertItem } from '../model/Types';
 import { ServiceHub } from '../service/ServiceHub';
+import { KEY_APP_ACTIVE } from '../service/SessionStore';
 import { ApiResult } from '../model/Result';
 
 const POLL_INTERVAL_MS: number = 10 * LiteralConstants.MS_PER_SECOND;
@@ -35,6 +36,8 @@ export struct AlertListPage {
   /** 顶栏/首页维护的未处理总数：摘要卡显示的是"全部里的未处理"，不随筛片变。 */
   @StorageProp('pendingCount') pendingCount: number = 0;
   @StorageProp('foregroundSeq') @Watch('onForeground') foregroundSeq: number = 0;
+  /** 前后台标志：后台不轮询，回前台立刻补一次。 */
+  @StorageProp(KEY_APP_ACTIVE) @Watch('onAppActive') appActive: boolean = true;
   @State state: AlertListState = new AlertListState();
   @State refreshing: boolean = false;
   /** 节点 SN → 房间名（提醒行要写「厨房」而不是 `M1`）。 */
@@ -47,15 +50,35 @@ export struct AlertListPage {
     // 「待处置」仍然一点就到，两个筛片都只有一屏。
     this.state.filterIndex = 0;
     this.reload();
+    this.startPolling();
+  }
+
+  aboutToDisappear(): void {
+    this.stopPolling();
+  }
+
+  private startPolling(): void {
+    if (this.timerId >= 0) {
+      return;
+    }
     this.timerId = setInterval(() => {
       this.reload();
     }, POLL_INTERVAL_MS);
   }
 
-  aboutToDisappear(): void {
+  private stopPolling(): void {
     if (this.timerId >= 0) {
       clearInterval(this.timerId);
       this.timerId = -1;
+    }
+  }
+
+  onAppActive(): void {
+    if (this.appActive) {
+      this.reload();
+      this.startPolling();
+    } else {
+      this.stopPolling();
     }
   }
 
@@ -119,6 +142,18 @@ export struct AlertListPage {
     }
     this.state = next;
     this.refreshing = false;
+    // 本页也维护「未处理总数」：用户可能一进 App 就停在提醒页，
+    // 这时首页的轮询还没跑过，角标和摘要卡会一直显示 0。
+    // 只在「全部」筛片且没有被截断（items 覆盖了 total）时才写，避免拿一页的数据当总数。
+    if (next.filterIndex === 0 && next.errorText.length === 0 && next.items.length === next.total) {
+      let pending: number = 0;
+      for (let i = 0; i < next.items.length; i++) {
+        if (next.items[i].status === 'pending') {
+          pending = pending + 1;
+        }
+      }
+      AppStorage.setOrCreate<number>('pendingCount', pending);
+    }
   }
 
   private openDetail(id: number): void {

@@ -9,6 +9,7 @@
  */
 import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { KEY_APP_ACTIVE } from '../service/SessionStore';
 import { window } from '@kit.ArkUI';
 import { SafeArea } from '../util/SafeArea';
 import { SessionStore } from '../service/SessionStore';
@@ -49,6 +50,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    // 回前台：页面恢复轮询，并立刻拉一次（契约 §8.2 不许漏报警）
+    AppStorage.setOrCreate<boolean>(KEY_APP_ACTIVE, true);
     // 自增计数：任何页面只要 @StorageProp(KEY_FOREGROUND_SEQ) 就会被动收到通知。
     // 用自增而不是布尔，是因为「第二次回前台」也要能触发（布尔会停在 true 不动）。
     const seq: number = AppStorage.get<number>(KEY_FOREGROUND_SEQ) ?? 0;
@@ -58,5 +61,7 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     hilog.info(DOMAIN, TAG, 'onBackground');
+    // 进后台：页面据此停掉 10 秒轮询（省电省流量），回前台再由 onForeground 拉起
+    AppStorage.setOrCreate<boolean>(KEY_APP_ACTIVE, false);
   }
 }

@@ -28,10 +28,12 @@ export struct ProfilePage {
   @State advanced: boolean = false;
   @State taps: number = 0;
   @State serverInput: string = '';
+  /** 「使用演示数据」开关：读的是 AppConfig.mockMode()，只影响数据来源。 */
   @State mockOn: boolean = true;
-  /** 免打扰与紧急响铃：只存在本机，正式版还要同步给推送通道。 */
-  @State dndOn: boolean = true;
-  @State urgentOn: boolean = true;
+  /** 提醒偏好：先存 AppStorage（切 tab 不丢）；接推送后要同步到服务端偏好。 */
+  @StorageLink('notifyOn') notifyOn: boolean = true;
+  @StorageLink('notifyDnd') dndOn: boolean = true;
+  @StorageLink('notifyUrgent') urgentOn: boolean = true;
   @State savedTip: string = '';
   @State demoBusy: boolean = false;
   /**
@@ -44,6 +46,17 @@ export struct ProfilePage {
   aboutToAppear(): void {
     this.mockOn = RuntimeConfig.mockMode();
     this.serverInput = RuntimeConfig.baseUrl();
+    // 三个提醒开关走 AppStorage：切 tab 回来不该复位成默认值。
+    // 真正的推送偏好要等接推送通道后同步到服务端，这里只是本地记忆。
+    if (AppStorage.get<boolean>('notifyOn') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyOn', true);
+    }
+    if (AppStorage.get<boolean>('notifyDnd') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyDnd', true);
+    }
+    if (AppStorage.get<boolean>('notifyUrgent') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyUrgent', true);
+    }
   }
 
   private onVersionTap(): void {

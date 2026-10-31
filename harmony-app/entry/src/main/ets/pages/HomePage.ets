@@ -22,7 +22,7 @@ import {
   ActivityReport, AlertItem, AlertListResult, DeviceStatus, GatewayProperties, HourlyBucket, NodeItem
 } from '../model/Types';
 import { ServiceHub } from '../service/ServiceHub';
-import { SessionStore } from '../service/SessionStore';
+import { KEY_APP_ACTIVE, SessionStore } from '../service/SessionStore';
 import { ApiResult } from '../model/Result';
 
 const POLL_INTERVAL_MS: number = 10 * LiteralConstants.MS_PER_SECOND;
@@ -31,6 +31,8 @@ const POLL_INTERVAL_MS: number = 10 * LiteralConstants.MS_PER_SECOND;
 export struct HomePage {
   @StorageProp('deviceId') deviceId: number = 0;
   @StorageProp('foregroundSeq') @Watch('onForeground') foregroundSeq: number = 0;
+  /** 前后台标志：后台不轮询（EntryAbility 维护），回前台立刻补一次。 */
+  @StorageProp(KEY_APP_ACTIVE) @Watch('onAppActive') appActive: boolean = true;
   @State state: HomeState = new HomeState();
   @State refreshing: boolean = false;
   @State nowMs: number = Date.now();
@@ -44,16 +46,38 @@ export struct HomePage {
 
   aboutToAppear(): void {
     this.reload();
+    this.startPolling();
+  }
+
+  aboutToDisappear(): void {
+    this.stopPolling();
+  }
+
+  /** 只在 App 前台时跑 10 s 轮询：后台继续跑纯属耗电耗流量。 */
+  private startPolling(): void {
+    if (this.timerId >= 0) {
+      return;
+    }
     this.timerId = setInterval(() => {
       this.nowMs = Date.now();
       this.reload();
     }, POLL_INTERVAL_MS);
   }
 
-  aboutToDisappear(): void {
+  private stopPolling(): void {
     if (this.timerId >= 0) {
       clearInterval(this.timerId);
       this.timerId = -1;
+    }
+  }
+
+  onAppActive(): void {
+    if (this.appActive) {
+      this.nowMs = Date.now();
+      this.reload();
+      this.startPolling();
+    } else {
+      this.stopPolling();
     }
   }
 

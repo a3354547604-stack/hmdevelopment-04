@@ -27,6 +27,12 @@ export const KEY_DEVICE_SN: string = 'deviceSn';
 export const KEY_DEVICE_NAME: string = 'deviceName';
 /** 最近一次进前台的自增序号（EntryAbility 写入，页面监听以触发"回前台必拉 pending"）。 */
 export const KEY_FOREGROUND_SEQ: string = 'foregroundSeq';
+
+/**
+ * 前后台标志：EntryAbility 在 onBackground/onForeground 里维护。
+ * 页面据此暂停/恢复 10 秒轮询——后台每 10 秒拉一次 status 纯属白耗流量和电。
+ */
+export const KEY_APP_ACTIVE: string = 'appActive';
 /** 是否已拉取过设备列表（避免每次进首页都打一次 /devices）。 */
 export const KEY_DEVICE_LOADED: string = 'deviceLoaded';
 /**
