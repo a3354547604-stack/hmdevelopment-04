@@ -178,7 +178,7 @@ export struct ProfilePage {
                 Text(PREVIEW_USERNAME)
                   .fontSize(AppTheme.FONT_BODY)
                   .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-                Text('负责照看家里的小盒子')
+                Text('负责照看家里的守护主机')
                   .fontSize(AppTheme.FONT_CAPTION)
                   .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
               }

@@ -64,6 +64,9 @@ export class AppTheme {
   // ------------------------------------------------------------ 尺寸（vp）
   static readonly PAGE_PADDING: number = 16;
   static readonly CARD_RADIUS: number = 12;
+  /** 田字格里节点格子的高度与圆角（两列并排，尽量方正）。 */
+  static readonly SITE_CELL_HEIGHT: number = 88;
+  static readonly RADIUS_CELL: number = 10;
   static readonly CARD_PADDING: number = 16;
   static readonly CARD_GAP: number = 12;
   static readonly BTN_HEIGHT: number = 48;

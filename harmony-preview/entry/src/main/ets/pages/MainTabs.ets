@@ -68,10 +68,11 @@ export struct MainTabs {
 
   build() {
     Column() {
-      // 顶部条：只说这是谁家的数据，不出现数据源/服务器地址/离线标记；
-      // 右侧补一个在线点——原先这行只放「小盒子」四个字，独占约 40vp 却没有任何信息。
+      // 顶部条：这一行是「App 身份 + 云连接状态」，不重复设备名——
+      // 网关名归首页那张大设备卡（守护主机 / N 个节点 / 上报时间），
+      // 两处都写「守护主机」会让首页出现两个同名标题。
       Row({ space: 8 }) {
-        Text(UserCopy.BOX_NAME)
+        Text(UserCopy.APP_NAME)
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Medium)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)

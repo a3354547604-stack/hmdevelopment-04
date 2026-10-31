@@ -31,7 +31,7 @@ const MS_DAY: number = 86400000;
 /** 演示账号的显示名（手机号打码，预览截图里不会出现完整号码）。 */
 export const PREVIEW_USERNAME: string = '138****0000';
 /** 演示设备名。 */
-export const PREVIEW_DEVICE_NAME: string = '小盒子（客厅）';
+export const PREVIEW_DEVICE_NAME: string = '守护主机（客厅）';
 /** 配网向导第 2 步的「扫到的 Wi-Fi」列表。 */
 export const PREVIEW_WIFI: string[] = ['Home-5G', 'Home-2.4G', 'CMCC-8f2a', 'TP-LINK_2.4G'];
 // 配网热点名：正式版由 GET /api/provision/status 返回（NetConfigPage 读 r.data.ssid），
@@ -54,14 +54,19 @@ export class PreviewData {
   /**
    * 设备实时状态。
    *
-   * 三个节点各挂一个房间，是为了让首页那三张房间卡**同时**看起来是真的：
-   * 房间名走 `location`（用户在服务器上给节点起的名字），不是写死的「厨房/卧室/门厅」。
+   * 一台「守护主机」（网关）下面挂多个节点，家属的设备分散在两个住处：
+   *   家   —— 厨房（燃气）、卧室（有人活动）、客厅（有人活动）
+   *   老家 —— 院子（门磁，故意离线）
+   * 房间名走 `location`、地址走 `site`，都是「用户在服务器上给自己节点起的名字」，
+   * 不在页面里写死；这样首页才能画出「地址 → 房间」两层结构。
    */
   static status(): DeviceStatus {
     const nodes: NodeItem[] = [
-      { sn: 'EC-A1', type: 'gas', location: '厨房', online: true, last_seen: Date.now() - 12000 },
-      { sn: 'EC-A2', type: 'presence', location: '卧室', online: true, last_seen: Date.now() - 30000 },
-      { sn: 'EC-A3', type: 'door', location: '门厅', online: true, last_seen: Date.now() - 45000 }
+      { sn: 'EC-A1', type: 'gas', location: '厨房', site: '家', online: true, last_seen: Date.now() - 12000 },
+      { sn: 'EC-A2', type: 'presence', location: '卧室', site: '家', online: true, last_seen: Date.now() - 30000 },
+      { sn: 'EC-A4', type: 'presence', location: '客厅', site: '家', online: true, last_seen: Date.now() - 60000 },
+      // 老家那台离线：用来演示「某个地址整片掉线」时首页怎么显示（不是网关掉线）
+      { sn: 'EC-A3', type: 'door', location: '院子', site: '老家', online: false, last_seen: Date.now() - 35 * MS_MIN }
     ];
     const properties: GatewayProperties = {
       presence: true,
@@ -128,7 +133,7 @@ export class PreviewData {
       },
       {
         id: 1022, device_id: 1, node_sn: 'EC-A3', type: 'door_left', level: 1,
-        ts: now - 5 * 60 * MS_MIN, status: 'confirmed', push_count: 1, summary: '门厅门开着超过 10 分钟'
+        ts: now - 5 * 60 * MS_MIN, status: 'confirmed', push_count: 1, summary: '老家的院门开着超过 10 分钟'
       },
       {
         id: 1021, device_id: 1, node_sn: 'EC-A2', type: 'fall', level: 2,

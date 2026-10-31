@@ -36,6 +36,12 @@ export interface NodeItem {
   /** `gas` / `fall` / `door` / `presence` / `gateway` */
   type: string;
   location: string;
+  /**
+   * 节点所在的**地址**（「家」「老家」），一个地址下有多个房间。
+   * 契约 §6.7 的节点只有 `location`（房间），没有地址维度；这里先按可选字段接，
+   * 服务端没给时首页统一归到「家」，等契约补上再改成必填。
+   */
+  site?: string;
   online: boolean;
   last_seen: number;
   mac?: string;
