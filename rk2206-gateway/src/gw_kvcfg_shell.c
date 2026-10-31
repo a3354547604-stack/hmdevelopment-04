@@ -27,6 +27,10 @@
 /* dump 子命令要打 256 B 的十六进制（513 字符）+ 提示语 */
 #define GW_KVCFG_SHELL_OUT_MAX (GW_KVCFG_DUMP_HEX_LEN + 256u)
 
+/* t174：`uinfo` 里补打 UART 自愈状态。状态本体在 gw_main.c 的 uart_task 里，
+ * 这里只声明入口，不复制一份计数（两处各存一份必然对不上）。 */
+extern void gw_main_uart_guard_report(void);
+
 static UINT32 gw_kvcfg_shell_cmd(UINT32 argc, const CHAR **argv)
 {
     char line[GW_KVCFG_LINE_MAX];
@@ -105,6 +109,9 @@ static UINT32 gw_uinfo_shell_cmd(UINT32 argc, const CHAR **argv)
     printf("[%s] uart_init_rc=%d (0=成功)  last_write_rc=%d  last_write_len=%d\n", GW_LOG_TAG,
            (int)g_gw_uart_init_rc, (int)g_gw_uart_last_wr, (int)g_gw_uart_last_len);
     printf("[%s] 判读：last_write_rc==last_write_len → 已写入，收不到=接线；rc<=0 → 写失败\n", GW_LOG_TAG);
+    /* t174：自愈状态（开机补初始化做没做、守卫用了几个名额）。判定与计数都在 gw_main.c，
+     * 这里只让它打一行，避免再复制一份状态、两边打架。 */
+    gw_main_uart_guard_report();
     return 0u;
 }
 

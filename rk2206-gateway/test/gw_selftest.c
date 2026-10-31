@@ -27,6 +27,7 @@
 #include "gw_hw_adc.h"
 #include "gw_hw.h"
 #include "gw_scan.h"      /* t166：扫描重试口径与排版（纯逻辑） */
+#include "gw_uart_guard.h" /* t174：UART 自愈判定（纯逻辑，不碰硬件） */
 #include "gw_timesync.h"  /* t168：pick_epoch 键名白名单 + errno 符号名（纯函数，主机可测） */
 #include "cJSON.h"
 
@@ -2849,6 +2850,97 @@ static void test_timesync_diag(void)
          "未知 errno 给 errno=N（不是裸数字、也不是 unknown）");
 }
 
+/* t174：UART 自愈守卫。判定只有「该不该再配一次波特率」，判错会反复丢字节，
+ * 所以每条分支都要有**反向**断言：条件不成立时必须返回 NONE。
+ * 每个反例都刻意让它**只差一个条件**（间隔够了、名额还有），这样把那条判断删掉就必然转红
+ * ——否则「被别的条件顺手挡住」的用例是假绿（本文件曾踩到：frames 反例被 min_gap 挡住，
+ * 删掉 frames 判断仍 556/0）。 */
+static void test_uart_guard(void)
+{
+    gw_uart_guard_t g;
+    gw_uart_stat_t st;
+
+    t_start("t174 UART 自愈守卫：阈值 / 短路 / 上限 / 间隔 / 计数回绕");
+
+    /* ① 首窗口只建基线：开机时 counters 里已经有几万字节，直接判会立刻误开一枪。 */
+    gw_uart_guard_init(&g);
+    st.rx_bytes = 100000u; st.frames = 0u; st.crc_err = 0u; st.at_ms = 10000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NONE && g.heals == 0u,
+         "首个窗口（rx=100000/frames=0）只建基线，不自愈");
+    t_ok(g.armed == 1u && g.prev.rx_bytes == 100000u, "基线落在上一个窗口的计数上");
+
+    /* ② 阈值边界：正好 200 B 不触发（>` 改成 `>=` 立刻转红），201 B 才触发。 */
+    st.rx_bytes = 100200u; st.frames = 0u; st.at_ms = 20000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NONE && g.heals == 0u,
+         "rx 正好涨 200 B（阈值是 >200）→ 不触发");
+    t_ok(g.d_bytes == 200u, "d_bytes=200 被记录");
+    st.rx_bytes = 100401u; st.at_ms = 30000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NO_FRAMES,
+         "rx 涨 201 B 且 frames 增量为 0 → no-frames");
+    t_ok(g.heals == 1u && g.last_heal_ms == 30000u, "自愈计数 1、记录时刻");
+
+    /* ③ 短路反例（专治 M1）：字节涨 4649 B、但有 40 帧在出 → 绝不能判 no-frames。
+     * 这里用**全新守卫**，保证间隔与名额都不限制，只差「有帧」这一个条件。 */
+    gw_uart_guard_init(&g);
+    st.rx_bytes = 0u; st.frames = 0u; st.crc_err = 0u; st.at_ms = 1000u;
+    (void)gw_uart_guard_step(&g, &st);
+    st.rx_bytes = 4649u; st.frames = 40u; st.at_ms = 41000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NONE && g.heals == 0u,
+         "rx 涨 4649 B 但 frames 涨 40 → 不动手（有帧就不判 no-frames）");
+    t_ok(g.d_bytes == 4649u && g.d_frames == 40u, "两个增量都被记录");
+
+    /* ④ CRC 判定：占比不足不动手；占比够 + 间隔够才动手。 */
+    gw_uart_guard_init(&g);
+    st.rx_bytes = 1000u; st.frames = 10u; st.crc_err = 0u; st.at_ms = 1000u;
+    (void)gw_uart_guard_step(&g, &st);
+    st.rx_bytes = 3000u; st.frames = 30u; st.crc_err = 2u; st.at_ms = 41000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NONE && g.heals == 0u,
+         "20 帧 2 错（9% < 20%）→ 不触发");
+    /* 单错也不触发：crc_min_err=2，1 个错即使 1 帧也占 50% 也不该动手 */
+    st.frames = 31u; st.crc_err = 3u; st.at_ms = 42000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NONE && g.heals == 0u,
+         "只涨 1 个 CRC 错（<2）→ 不触发");
+    st.frames = 41u; st.crc_err = 8u; st.at_ms = 82000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_CRC_RISE,
+         "10 帧 5 错（50%）且间隔够 → crc-rise");
+    t_ok(g.heals == 1u && g.last_heal_ms == 82000u, "自愈计数 1（crc-rise）");
+
+    /* ⑤ 间隔反例（专治 M3）：症状照旧成立，只是距上次自愈不足 30 s → 不动手。 */
+    st.frames = 51u; st.crc_err = 13u; st.at_ms = 92000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NONE && g.heals == 1u,
+         "距上次自愈 10 s（<30 s）→ 不触发（防连开三枪）");
+
+    /* ⑥ 名额：第三次之后必须停手（专治 M2）。 */
+    st.frames = 61u; st.crc_err = 18u; st.at_ms = 130000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_CRC_RISE && g.heals == 2u,
+         "间隔够了 → 第二次自愈（2/3）");
+    st.frames = 71u; st.crc_err = 23u; st.at_ms = 170000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_CRC_RISE && g.heals == 3u,
+         "第三次 → 用满 3/3");
+    st.frames = 81u; st.crc_err = 28u; st.at_ms = 210000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NONE && g.heals == 3u,
+         "已达 3 次上限 → 症状仍在但不再动手");
+    t_ok(g.d_crc == 5u, "上限之后增量仍被记录（日志能看出「症状还在」）");
+
+    /* ⑦ 计数器 32 位回绕：0xFFFFFE00(=2^32−512) → 0x00000100 实际涨 256+512 = 768 B，
+     * 不能被算成负值而漏判。 */
+    gw_uart_guard_init(&g);
+    st.rx_bytes = 0xFFFFFE00u; st.frames = 0u; st.crc_err = 0u; st.at_ms = 10000u;
+    (void)gw_uart_guard_step(&g, &st);
+    st.rx_bytes = 0x00000100u; st.at_ms = 20000u;
+    t_ok(gw_uart_guard_step(&g, &st) == GW_UART_GUARD_NO_FRAMES,
+         "rx 回绕（0xFFFFFE00→0x00000100）仍判出 no-frames");
+    t_ok(g.d_bytes == 768u, "回绕差值 = 768 B（256+512，不是巨大的正数、也不是 0）");
+
+    /* ⑧ 文案与空指针：日志与 `uinfo` 打的就是这三个短名。 */
+    t_ok(strcmp(gw_uart_guard_reason_text(GW_UART_GUARD_NO_FRAMES), "no-frames") == 0, "reason no-frames");
+    t_ok(strcmp(gw_uart_guard_reason_text(GW_UART_GUARD_CRC_RISE), "crc-rise") == 0, "reason crc-rise");
+    t_ok(strcmp(gw_uart_guard_reason_text(GW_UART_GUARD_NONE), "none") == 0, "reason none");
+    gw_uart_guard_init(NULL);   /* 不许崩 */
+    t_ok(gw_uart_guard_step(NULL, &st) == GW_UART_GUARD_NONE, "空守卫指针 → NONE（不崩）");
+    t_ok(gw_uart_guard_step(&g, NULL) == GW_UART_GUARD_NONE, "空统计指针 → NONE（不崩）");
+}
+
 int main(void)
 {
     printf("\n==== RK2206 网关离线自测（契约 v1.2）====\n");
@@ -2861,6 +2953,7 @@ int main(void)
     test_scan_policy();              /* t166 扫描重试口径（1 s × 15）+ freq=0 的 raw 排版 */
     test_net_cmd();                  /* t168 `wifi net`：默认网卡三判据（is_default/probe/无射频） */
     test_timesync_diag();            /* t168 取时：utc_epoch 键名 + errno 符号名 */
+    test_uart_guard();               /* t174 UART 自愈：阈值/上限/间隔/回绕 */
     test_key_events();            /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
     test_tick_hb();               /* t141 心跳节拍 + 长按状态机（纯逻辑） */
     test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */

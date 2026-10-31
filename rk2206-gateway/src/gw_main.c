@@ -29,6 +29,7 @@
 #include "gw_net.h"
 #include "gw_store.h"
 #include "gw_kvcfg.h"
+#include "gw_uart_guard.h"   /* t174：UART 自愈判定（纯逻辑，主机有单测） */
 #include "gw_wifi_shell.h"
 #include "gw_hw.h"
 
@@ -913,6 +914,9 @@ static uint8_t  g_rx_ring[16];
 static uint8_t  g_rx_w;
 static uint32_t g_rx_last_print_ms;
 static uint32_t g_rx_frames;
+/* t174：自愈守卫的状态。串口 `uinfo` 也能看到——现场问「自愈过几次」不用翻日志。 */
+static gw_uart_guard_t s_uart_guard;
+static int      s_boot_reinit_done;
 
 static void uart_task(void *arg)
 {
@@ -924,10 +928,23 @@ static void uart_task(void *arg)
     static uint8_t nack[64];   /* t169：异步 uart 写，缓冲必须比函数活得久 */
     uint32_t nack_len;
     uint32_t now;
+    uint32_t t_start;
 
     (void)arg;
+    gw_uart_guard_init(&s_uart_guard);
+    t_start = gw_now_ms();
     for (;;) {
         now = gw_now_ms();
+        /* t174：开机那次 gw_plat_uart0_init() 实测不生效（rx_bytes 涨、frames 恒 0，
+         * 敲一条 `uartbaud 9600` 才正常）。这里延迟 GW_UART_BOOT_REINIT_MS 再配一次，
+         * 走的是与 `uartbaud` 完全同一个函数，用户不用再手敲。 */
+        if (!s_boot_reinit_done &&
+            (uint32_t)(now - t_start) >= GW_UART_BOOT_REINIT_MS) {
+            int rc = gw_plat_uart0_set_baud((unsigned int)GW_UART0_BAUD);
+            s_boot_reinit_done = 1;
+            printf("[UART] boot re-init baud=%u rc=%d\n",
+                   (unsigned)GW_UART0_BAUD, rc);
+        }
         n = gw_plat_uart0_read(rx, sizeof(rx));
         if (n > 0) {
             uint32_t k;
@@ -971,9 +988,40 @@ static void uart_task(void *arg)
                    (unsigned)s_parser.fmt_err,
                    g_rx_ring[(g_rx_w + 0) % 16], g_rx_ring[(g_rx_w + 1) % 16],
                    g_rx_ring[(g_rx_w + 2) % 16], g_rx_ring[(g_rx_w + 3) % 16]);
+            /* t174 自愈：字节在涨却解析不出帧（或 CRC 错涨太快）就再配一次波特率。
+             * 判定本身在 gw_uart_guard.h（纯逻辑、有单测），这里只负责动手 + 打日志。 */
+            {
+                gw_uart_stat_t st;
+                gw_uart_guard_reason_t why;
+
+                st.rx_bytes = g_rx_bytes;
+                st.frames   = g_rx_frames;
+                st.crc_err  = s_parser.crc_err;
+                st.at_ms    = now;
+                why = gw_uart_guard_step(&s_uart_guard, &st);
+                if (why != GW_UART_GUARD_NONE) {
+                    int rc = gw_plat_uart0_set_baud((unsigned int)GW_UART0_BAUD);
+                    printf("[UART] self-heal re-init reason=%s baud=%u bytes+=%u frames+=%u "
+                           "crc_err+=%u rc=%d heals=%u/%u\n",
+                           gw_uart_guard_reason_text(why), (unsigned)GW_UART0_BAUD,
+                           (unsigned)s_uart_guard.d_bytes, (unsigned)s_uart_guard.d_frames,
+                           (unsigned)s_uart_guard.d_crc, rc,
+                           (unsigned)s_uart_guard.heals, (unsigned)s_uart_guard.max_heals);
+                }
+            }
         }
         LOS_Msleep(GW_UART_POLL_MS);
     }
+}
+
+/* t174：给串口 `uinfo` 用的自愈状态快照。现场判断「守卫还有没有额度」看这一行，
+ * 不用回头数日志里有几条 self-heal。 */
+void gw_main_uart_guard_report(void)
+{
+    printf("[UART] guard boot_reinit=%s heals=%u/%u last_heal_ms=%u (0=还没自愈过)\n",
+           s_boot_reinit_done ? "done" : "pending",
+           (unsigned)s_uart_guard.heals, (unsigned)s_uart_guard.max_heals,
+           (unsigned)s_uart_guard.last_heal_ms);
 }
 
 /* ============================== 配网：板级能力注入（t10 / 契约 §12） ============================== */

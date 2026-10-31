@@ -581,3 +581,58 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 - 编译：`bash tools/gw-compile-check.sh` → `RESULT ok=23 err=0`（t137 是 20，新增 `gw_key.c`/`gw_hw.c`/`gw_hw_adc.c`）。
 - 页面：`python3 rk2206-gateway/web/gen-h5-header.py --check`（真源与 `src/gw_h5.h` 一致）+ `node --check`（JS 语法）。
 - 真机只差四件：SoftAP 能不能起来、手机能不能连、现场 Wi-Fi 能不能连上、板载键按下去 ADC 变不变 —— 前三件是 §0 的 J1–J6，第四件是 J7。
+
+## 11. t174：开机自动补齐 UART 初始化 + 自愈守卫（3 步，不用再敲 `uartbaud`）
+
+**为什么加这一节**：2026-10-31 夜 COM19 的日志里 `[UART] rx_bytes` 一直在涨，`frames` 却恒为 0——
+字节收到了，但一帧都没解析出来。PM 手敲一条 `uartbaud 9600` 后立刻 `frames=13`。
+也就是说**开机那次 UART 初始化没有真正把波特率配上**，以前必须人工补一条命令才能通。
+本版固件把这条命令做成了自动的，并且加了「症状重现就自己再配一次」的守卫。
+
+### 11.1 你要做的事（3 步）
+
+1. **烧录**：把 `gateway-Firmware.img` 烧进板子（步骤同本文件 §2 之前的烧录说明；镜像指纹见下）。
+2. **打开串口**：COM19，**115200 8N1**（这是调试串口，不是汇聚那条 9600 的线）。
+3. **上电，然后什么都别敲**，盯 30 秒日志。
+
+### 11.2 应该看到什么（按顺序）
+
+```
+[gw] ...                       ← 开机招牌，各模块 init
+[UART] boot re-init baud=9600 rc=0        ← ① 开机约 1.5 s 后出现（本版新增）
+[UART] rx_bytes=… frames=… crc_err=… fmt_err=… ring=…
+[UART] rx_bytes=… frames=…                ← ② 每 10 s 一条，frames 必须递增
+```
+
+**判据（照这四条对，全中即通过）**
+
+| 判据 | 看到什么 | 说明 |
+|---|---|---|
+| J1 | `[UART] boot re-init baud=9600 rc=0` | 只出现一次；`rc=0` = 驱动接受 |
+| J2 | 后续每 10 s 的 `frames=` **比上一条大** | 关键判据：不敲任何命令也能解析帧 |
+| J3 | `crc_err=` 保持 0，或偶尔 +1 后不再涨 | 波特率对上时 CRC 基本不出错 |
+| J4 | `uinfo` 里多一行 `[UART] guard boot_reinit=done heals=0/3 …` | 守卫状态；`heals=0` 表示一次都没用上 |
+
+### 11.3 如果 J2 不成立（frames 还是 0）
+
+本版会自动补救，日志里会出现（最多 3 次，每次间隔 ≥30 s）：
+
+```
+[UART] self-heal re-init reason=no-frames baud=9600 bytes+=… frames+=0 crc_err+=… rc=0 heals=1/3
+```
+
+- 出现 1–2 次后 `frames` 开始涨 → 修好了，属正常自愈。
+- 出现到 `heals=3/3` 仍然 `frames=0` → **守卫已停手**（防止无限重配刷屏）。这时问题不在初始化，
+  按顺序查：① 汇聚 H1 是否在发（它自己的串口有没有 `[HUB]` 日志）② TX/RX 是否交叉 ③ 两端波特率是否都是 9600。
+- 出现 `reason=crc-rise`（帧在出但 CRC 错占比 ≥20%）→ 波特率有微小偏差或线太长，先短接线、再确认汇聚侧波特率。
+
+### 11.4 别做的事
+
+- 不要再去敲 `uartbaud`：本版已自动做同样的事；重复敲只会多一次重配、丢一小段字节。
+- 不要因为看到 `self-heal re-init` 就重启板子：这条日志是**自愈成功**的信号，不是故障。
+
+### 11.5 本版镜像指纹（只当次，RK2206 镜像跨次不可复现，按「体积 + 提交号」记账）
+
+- `gateway-Firmware.img` = **2097152 B**，md5 `7e2337a8d72ff583d80908ff092b5223`（当次）
+- `liteos.elf` = 1018200 B（可用于「哪个产物变了」的对比）
+- 提交号与 tag 见 `C:\Users\Administrator\Desktop\rk2206-烧录包\烧录说明.txt`
