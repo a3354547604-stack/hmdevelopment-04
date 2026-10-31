@@ -43,7 +43,7 @@ export class AppConfig {
   static readonly ALERT_STATUS_PENDING: string = 'pending';
 
   /** 版本号（「我的」页展示；连点 5 次进高级）。 */
-  static readonly APP_VERSION: string = '1.0.0';
+  static readonly APP_VERSION: string = '0.1';
   /** 进高级需要的连点次数。 */
   static readonly ADVANCED_TAP_COUNT: number = 5;
 
