@@ -56,6 +56,10 @@ export class UserCopy {
   static readonly SENSOR_GAS: string = '燃气';
   static readonly SENSOR_DOOR: string = '门';
   static readonly SENSOR_PRESENCE: string = '有人活动';
+  /** M2 卧室雷达（契约 §2.4.2）：类型名是「跌倒」，不是「门」。 */
+  static readonly SENSOR_FALL: string = '跌倒';
+  static readonly FALL_YES: string = '有人摔倒';
+  static readonly FALL_NO: string = '正常';
   static readonly GAS_OK: string = '正常';
   static readonly GAS_HIGH: string = '有点高';
   static readonly GAS_VERY_HIGH: string = '很高';
@@ -247,6 +251,7 @@ export class UserCopy {
       UserCopy.HOME_TODAY_ALERT, UserCopy.HOME_QUIET, UserCopy.HOME_STILL_MOVING, UserCopy.HOME_WEEK_LINK,
       UserCopy.ROOM_KITCHEN, UserCopy.ROOM_BEDROOM, UserCopy.ROOM_HALL, UserCopy.ROOM_LIVING,
       UserCopy.ROOM_PREFIX, UserCopy.SENSOR_GAS, UserCopy.SENSOR_DOOR, UserCopy.SENSOR_PRESENCE,
+      UserCopy.SENSOR_FALL, UserCopy.FALL_YES, UserCopy.FALL_NO,
       UserCopy.GAS_OK, UserCopy.GAS_HIGH, UserCopy.GAS_VERY_HIGH, UserCopy.DOOR_OPEN,
       UserCopy.DOOR_CLOSED, UserCopy.PRESENCE_YES, UserCopy.PRESENCE_NO, UserCopy.NODE_NORMAL,
       UserCopy.NODE_LOST, UserCopy.ENV_TEMP, UserCopy.ENV_HUMI, UserCopy.NODE_ADD_TITLE,

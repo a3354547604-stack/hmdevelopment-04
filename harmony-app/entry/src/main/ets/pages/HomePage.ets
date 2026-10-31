@@ -280,6 +280,10 @@ export struct HomePage {
     if (type === 'presence') {
       return UserCopy.SENSOR_PRESENCE;
     }
+    // 以前这里直接落到「门」，导致 M2 跌倒雷达在首页被写成「门 · 关着」（2026-10-31 预览实测）
+    if (type === 'fall') {
+      return UserCopy.SENSOR_FALL;
+    }
     return UserCopy.SENSOR_DOOR;
   }
 
@@ -298,6 +302,12 @@ export struct HomePage {
         return LiteralConstants.PLACEHOLDER;
       }
       return p.presence ? UserCopy.PRESENCE_YES : UserCopy.PRESENCE_NO;
+    }
+    if (type === 'fall') {
+      if (p.fall === undefined) {
+        return LiteralConstants.PLACEHOLDER;
+      }
+      return p.fall === 1 ? UserCopy.FALL_YES : UserCopy.FALL_NO;
     }
     if (p.door === undefined) {
       return LiteralConstants.PLACEHOLDER;
@@ -318,6 +328,9 @@ export struct HomePage {
       return AppTheme.COLOR_TEXT_PRIMARY;
     }
     const p: GatewayProperties = this.state.status.properties;
+    if (type === 'fall') {
+      return p.fall === 1 ? AppTheme.COLOR_LEVEL2_TEXT : AppTheme.COLOR_TEXT_PRIMARY;
+    }
     return p.door === true ? AppTheme.COLOR_LEVEL1_TEXT : AppTheme.COLOR_TEXT_SECONDARY;
   }
 
@@ -402,6 +415,9 @@ export struct HomePage {
     }
     if (type === 'presence') {
       return $r('app.media.ic_tab_profile');
+    }
+    if (type === 'fall') {
+      return $r('app.media.ic_status_warning');
     }
     return $r('app.media.ic_sensor_chip');
   }

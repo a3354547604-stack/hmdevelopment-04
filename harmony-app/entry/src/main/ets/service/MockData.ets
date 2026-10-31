@@ -131,6 +131,8 @@ export class MockData {
       'nodes_online': '{"M1":true,"M2":true,"M4":false}',
       'battery': 255,
       'alarm_state': 2,
+      // §2.4.2：跌倒标志。0 = 当前没摔倒；历史上那次跌倒走 alerts，不在这里。
+      'fall': 0,
       // §4.3 第 13/14 项（v1.1）：白名单是 JSON 文本数组、配网状态是枚举字符串
       'bound_nodes': '["M1","M2","M4"]',
       'pair_state': 'sta'
