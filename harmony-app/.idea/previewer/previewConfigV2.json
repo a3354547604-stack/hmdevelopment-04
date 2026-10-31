@@ -1,0 +1,25 @@
+{
+ "1.0.0": {
+  "LastPreviewDevice": {}
+ },
+ "1.0.1": {
+  "profileList": [
+   {
+    "id": "Default",
+    "deviceType": "default",
+    "width": 1080,
+    "height": 2340,
+    "shape": "rect",
+    "dpi": 480,
+    "orientation": "portrait",
+    "language": "zh_CN",
+    "colorMode": "light"
+   }
+  ],
+  "runningProfileList": [
+   "Default"
+  ],
+  "availableProfileList": []
+ },
+ "enableFileOperation": false
+}

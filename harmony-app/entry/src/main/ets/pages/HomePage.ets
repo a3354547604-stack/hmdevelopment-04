@@ -11,7 +11,7 @@
  *    否则用户看到的还是几十分钟前的状态。
  */
 
-import { router } from '@kit.ArkUI';
+import { promptAction, router } from '@kit.ArkUI';
 import { HomeViewModel, HomeState } from '../viewmodel/HomeViewModel';
 import { AppTheme, LiteralConstants } from '../common/AppTheme';
 import { Formatter } from '../common/Formatter';
@@ -22,6 +22,7 @@ import {
   ActivityReport, AlertItem, AlertListResult, DeviceStatus, GatewayProperties, HourlyBucket, NodeItem
 } from '../model/Types';
 import { ServiceHub } from '../service/ServiceHub';
+import { SessionStore } from '../service/SessionStore';
 import { ApiResult } from '../model/Result';
 
 const POLL_INTERVAL_MS: number = 10 * LiteralConstants.MS_PER_SECOND;
@@ -169,7 +170,7 @@ export struct HomePage {
     return Formatter.fmtAgo(this.state.updatedAt, this.nowMs) + '看过';
   }
 
-  /** 网络不好 / 小盒子联系不上：只在真出问题时出现，正常时整条不占空间。 */
+  /** 网络不好 / 守护主机联系不上：只在真出问题时出现，正常时整条不占空间。 */
   private troubleText(): string {
     if (this.state.errorText.length > 0) {
       return UserCopy.HOME_NET_WEAK;
@@ -180,23 +181,53 @@ export struct HomePage {
     return '';
   }
 
-  // ------------------------------------------------------------ 房间卡
-  private nodeOf(type: string): NodeItem | undefined {
-    const nodes: NodeItem[] = this.state.status.nodes;
-    for (let i = 0; i < nodes.length; i++) {
-      if (nodes[i].type === type) {
-        return nodes[i];
-      }
+  // ------------------------------------------------------------ 地址分组
+  // 一台「守护主机」下面挂多个节点，而家属的设备是分散在不同住处的：
+  // 家（厨房 / 卧室 / 客厅）、老家（院子）。所以首页要画「网关 → 地址 → 房间」三层，
+  // 光把房间平铺成几行看不出「哪个房间在哪个住处」。
+  private siteOf(n: NodeItem): string {
+    const s: string | undefined = n.site;
+    if (s !== undefined && s.length > 0) {
+      return s;
     }
-    return undefined;
+    // 契约 §6.7 目前只有 location（房间），没有地址字段；老数据统一归到「家」，
+    // 这样服务端没升级时节点也不会凭空消失。
+    return UserCopy.SITE_DEFAULT;
   }
 
-  private roomName(type: string, fallback: string): string {
-    const n: NodeItem | undefined = this.nodeOf(type);
-    if (n !== undefined && n.location.length > 0) {
-      return n.location;
+  /** 按地址归组，保持节点在接口里的原始顺序（家在前、老家在后）。 */
+  private siteGroups(): SiteGroup[] {
+    const out: SiteGroup[] = [];
+    const nodes: NodeItem[] = this.state.status.nodes;
+    for (let i = 0; i < nodes.length; i++) {
+      const name: string = this.siteOf(nodes[i]);
+      let hit: SiteGroup | undefined = undefined;
+      for (let j = 0; j < out.length; j++) {
+        if (out[j].site === name) {
+          hit = out[j];
+          break;
+        }
+      }
+      if (hit === undefined) {
+        const g: SiteGroup = new SiteGroup();
+        g.site = name;
+        g.nodes.push(nodes[i]);
+        out.push(g);
+      } else {
+        hit.nodes.push(nodes[i]);
+      }
     }
-    return fallback;
+    return out;
+  }
+
+  private onlineOf(g: SiteGroup): number {
+    let n: number = 0;
+    for (let i = 0; i < g.nodes.length; i++) {
+      if (g.nodes[i].online) {
+        n = n + 1;
+      }
+    }
+    return n;
   }
 
   private gasLevel(): number {
@@ -229,11 +260,11 @@ export struct HomePage {
   }
 
   /** 右侧读数；节点掉线时统一显示「联系不上」，比显示旧读数安全。 */
-  private sensorValue(type: string): string {
-    const n: NodeItem | undefined = this.nodeOf(type);
-    if (n === undefined || !n.online) {
+  private sensorValue(n: NodeItem): string {
+    if (!n.online) {
       return UserCopy.NODE_LOST;
     }
+    const type: string = n.type;
     const p: GatewayProperties = this.state.status.properties;
     if (type === 'gas') {
       return UserCopy.gasText(this.gasLevel());
@@ -250,11 +281,11 @@ export struct HomePage {
     return p.door ? UserCopy.DOOR_OPEN : UserCopy.DOOR_CLOSED;
   }
 
-  private sensorColor(type: string): Resource {
-    const n: NodeItem | undefined = this.nodeOf(type);
-    if (n === undefined || !n.online) {
+  private sensorColor(n: NodeItem): Resource {
+    if (!n.online) {
       return AppTheme.COLOR_LEVEL2;
     }
+    const type: string = n.type;
     if (type === 'gas') {
       // 文字压在白色卡面上，必须用深色档：原来的 #E6A23C 白底只有 2.18:1（WCAG AA 要 4.5:1）
       return AppTheme.levelTextColor(this.gasLevel());
@@ -328,39 +359,199 @@ export struct HomePage {
   // 房间行：整宽一行（图标 / 房间名+传感器名 / 右侧读数）。
   // 早前三张卡横排，360vp 宽的屏上每张只剩约 101vp，房间名被挤成省略号、
   // 第三张还被屏幕右缘切掉（预览器实测）；老人也更容易读竖排的整行。
+
+  /** 大设备卡头用：一个网关下面挂几个节点，先报数量再报最近上报时间。 */
+  private deviceCount(): number {
+    return this.state.status.nodes.length;
+  }
+
+  private heartbeatLine(): string {
+    // 优先用本机收到数据的时间：设备自己报的 last_heartbeat 可能是手机端时区换算前的值。
+    const ts: number = this.state.updatedAt > 0 ? this.state.updatedAt : this.state.status.last_heartbeat;
+    return this.deviceCount().toString() + ' 个节点 · ' + Formatter.fmtAgo(ts, this.nowMs) + '上报';
+  }
+
+  /**
+   * 大框：网关（守护主机）自身的信息。首页原来是「三行房间直接铺在卡里」，
+   * 看不出这些房间挂在谁身上；把网关做成卡头，才是「一台盒子带多个节点」。
+   */
   @Builder
-  roomRow(icon: Resource, room: string, sensor: string, value: string, valueColor: Resource) {
+  deviceHeader() {
     Row({ space: 10 }) {
-      Image(icon)
-        .width(AppTheme.ICON_SM)
-        .height(AppTheme.ICON_SM)
-        .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
+      Image($r('app.media.ic_device_box'))
+        .width(AppTheme.ICON_MD)
+        .height(AppTheme.ICON_MD)
+        .fillColor(AppTheme.COLOR_PRIMARY)
         .objectFit(ImageFit.Contain)
       Column({ space: 2 }) {
-        Text(room)
+        Text(this.deviceLabel())
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Medium)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
           .maxLines(1)
-        Text(sensor)
-          .fontSize(AppTheme.FONT_CAPTION)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.heartbeatLine())
+          .fontSize(AppTheme.FONT_LABEL)
           .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
           .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
       }
-      .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+    }
+    .width('100%')
+    .padding({ top: 12, bottom: 12 })
+    .alignItems(VerticalAlign.Center)
+    .accessibilityGroup(true)
+    .accessibilityText(this.deviceLabel() + '，' + this.heartbeatLine())
+  }
 
-      Text(value)
+  private deviceLabel(): string {
+    const name: string = SessionStore.deviceName();
+    return name.length > 0 ? name : UserCopy.BOX_NAME;
+  }
+
+  /** 传感器类型 → 图标：燃气看灶、门磁看门、有人活动看人、其余用通用芯片。 */
+  private nodeIcon(type: string): Resource {
+    if (type === 'gas') {
+      return $r('app.media.ic_room_gas');
+    }
+    if (type === 'door') {
+      return $r('app.media.ic_room_door');
+    }
+    if (type === 'presence') {
+      return $r('app.media.ic_tab_profile');
+    }
+    return $r('app.media.ic_sensor_chip');
+  }
+
+  /** 田字格里的一格节点：房间名 + 传感器 + 读数，两列并排。 */
+  @Builder
+  nodeCell(n: NodeItem) {
+    Column({ space: 2 }) {
+      Row({ space: 6 }) {
+        Image(this.nodeIcon(n.type))
+          .width(AppTheme.ICON_SM)
+          .height(AppTheme.ICON_SM)
+          .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .objectFit(ImageFit.Contain)
+        Text(n.location.length > 0 ? n.location : UserCopy.ROOM_PREFIX)
+          .fontSize(AppTheme.FONT_BODY)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Text(this.sensorName(n.type))
+        .fontSize(AppTheme.FONT_LABEL)
+        .fontColor(AppTheme.COLOR_TEXT_HINT)
+        .maxLines(1)
+        .margin({ top: 2 })
+
+      Text(this.sensorValue(n))
         .fontSize(AppTheme.FONT_BODY)
-        .fontColor(valueColor)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.sensorColor(n))
         .maxLines(1)
     }
     .width('100%')
-    .padding({ top: 10, bottom: 10 })
-    .alignItems(VerticalAlign.Center)
-    // 房间行合成一句：图标只是装饰，房间/传感器/读数才是信息
+    .height(AppTheme.SITE_CELL_HEIGHT)
+    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+    .alignItems(HorizontalAlign.Start)
+    .justifyContent(FlexAlign.Center)
+    // 一格里放三条信息，读屏时合成一句，别拆成图标/房间/传感器三段
+    .backgroundColor(AppTheme.COLOR_BG)
+    .borderRadius(AppTheme.RADIUS_CELL)
     .accessibilityGroup(true)
-    .accessibilityText(room + '，' + sensor + '，' + value)
+    .accessibilityText(n.location + '，' + this.sensorName(n.type) + '，' + this.sensorValue(n))
+  }
+
+  /** 田字格要几行：两列，向上取整；单数时最后一格留空。 */
+  private siteGridHeight(count: number): number {
+    const rows: number = Math.ceil(count / 2);
+    const gaps: number = rows > 1 ? (rows - 1) * 8 : 0;
+    return rows * AppTheme.SITE_CELL_HEIGHT + gaps;
+  }
+
+  /** 地址标题右侧的「＋」：给这个地址加节点。 */
+  @Builder
+  addNodeButton(site: string) {
+    Row() {
+      Image($r('app.media.ic_plus'))
+        .width(AppTheme.ICON_SM)
+        .height(AppTheme.ICON_SM)
+        .fillColor(AppTheme.COLOR_PRIMARY)
+        .objectFit(ImageFit.Contain)
+    }
+    .width(AppTheme.TOUCH_MIN)
+    .height(AppTheme.TOUCH_MIN)
+    .justifyContent(FlexAlign.Center)
+    .margin({ left: 2 })
+    .onClick(() => {
+      this.openAddNode(site);
+    })
+    .accessibilityGroup(true)
+    .accessibilityText(UserCopy.nodeAddA11y(site))
+  }
+
+  /**
+   * 点「＋」后的说明。App 现在没有节点绑定接口（契约 §4.5 的 pair_scan/pair_bind
+   * 只在网关本地页面用），所以这里给操作步骤，不给一个假成功的按钮。
+   */
+  private openAddNode(site: string): void {
+    promptAction.showDialog({
+      title: UserCopy.NODE_ADD_TITLE,
+      message: UserCopy.nodeAddMessage(site),
+      buttons: [{ text: UserCopy.NODE_ADD_OK, color: '#0E7C66' }]
+    }).catch(() => {});
+  }
+
+  /** 一个地址一张卡：标题是「家 / 老家」，右侧是规模与在线数，下面是这个地址的房间行。 */
+  @Builder
+  siteCard(g: SiteGroup) {
+    Column() {
+      Row() {
+        Text(g.site)
+          .fontSize(AppTheme.FONT_SECTION)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+          .layoutWeight(1)
+          .maxLines(1)
+        Text(UserCopy.siteSummary(g.nodes.length, this.onlineOf(g)))
+          .fontSize(AppTheme.FONT_LABEL)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .maxLines(1)
+
+        this.addNodeButton(g.site)
+      }
+      .width('100%')
+      .padding({ top: 12, bottom: 8 })
+      .alignItems(VerticalAlign.Center)
+
+      this.rowDivider()
+
+      Grid() {
+        ForEach(g.nodes, (n: NodeItem) => {
+          GridItem() {
+            this.nodeCell(n)
+          }
+        }, (n: NodeItem) => n.sn)
+      }
+      .columnsTemplate('1fr 1fr')
+      .columnsGap(8)
+      .rowsGap(8)
+      .width('100%')
+      .height(this.siteGridHeight(g.nodes.length))
+      .margin({ top: 10, bottom: 12 })
+    }
+    .width('100%')
+    .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
+    .backgroundColor(AppTheme.COLOR_SURFACE)
+    .borderRadius(AppTheme.CARD_RADIUS)
   }
 
   @Builder
@@ -419,7 +610,7 @@ export struct HomePage {
               .borderRadius(AppTheme.CARD_RADIUS)
               .alignItems(HorizontalAlign.Start)
 
-              // 网络/小盒子异常：只在真有问题时出现
+              // 网络/守护主机异常：只在真有问题时出现
               if (this.troubleText().length > 0) {
                 Text(this.troubleText())
                   .fontSize(AppTheme.FONT_CAPTION)
@@ -428,22 +619,24 @@ export struct HomePage {
                   .padding({ left: 4 })
               }
 
-              // 三个房间：竖排整宽。原先三张卡横排，360vp 屏上每张只剩约 101vp，
-              // 房间名被截成「燃气 …」「有人…」，第三张「门厅」还被屏幕右缘切掉。
+              // 大设备（网关）单独一张卡：它只是「谁带着这些节点」，不占房间行。
               Column() {
-                this.roomRow($r('app.media.ic_room_gas'), this.roomName('gas', UserCopy.ROOM_KITCHEN),
-                  this.sensorName('gas'), this.sensorValue('gas'), this.sensorColor('gas'))
-                this.rowDivider()
-                this.roomRow($r('app.media.ic_room_bed'), this.roomName('presence', UserCopy.ROOM_BEDROOM),
-                  this.sensorName('presence'), this.sensorValue('presence'), this.sensorColor('presence'))
-                this.rowDivider()
-                this.roomRow($r('app.media.ic_room_door'), this.roomName('door', UserCopy.ROOM_HALL),
-                  this.sensorName('door'), this.sensorValue('door'), this.sensorColor('door'))
+                this.deviceHeader()
               }
               .width('100%')
               .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
               .backgroundColor(AppTheme.COLOR_SURFACE)
               .borderRadius(AppTheme.CARD_RADIUS)
+
+              // 一个地址一张卡：家（厨房/卧室/客厅）、老家（院子）。
+              // 平铺成一行行房间会看不出「哪个房间在哪个住处」，老人和家属都要先认地点。
+              Column({ space: 8 }) {
+                ForEach(this.siteGroups(), (g: SiteGroup) => {
+                  this.siteCard(g)
+                }, (g: SiteGroup) => g.site)
+              }
+              .width('100%')
+              .margin({ top: 8 })
 
               // 最近一条提醒：填掉首页下半屏的空白，同时把「最近的异常」顶到一屏内。
               // 只有存在未处理提醒时才出现（id=0 表示没有）。
@@ -611,4 +804,10 @@ class LatestAlert {
   sn: string = '';
   ts: number = 0;
   status: string = '';
+}
+
+/** 首页按「地址」聚合后的分组：家 / 老家……一个地址下挂多个房间节点。 */
+class SiteGroup {
+  site: string = '';
+  nodes: NodeItem[] = [];
 }

@@ -106,6 +106,12 @@ export interface NodeItem {
   /** `gas` / `fall` / `door` / `presence` / `gateway`（契约 §6.7） */
   type: string;
   location: string;
+  /**
+   * 节点所在的**地址**（「家」「老家」），一个地址下有多个房间。
+   * 契约 §6.7 的节点只有 `location`（房间），没有地址维度；这里先按可选字段接，
+   * 服务端没给时首页统一归到「家」，等契约补上再改成必填。
+   */
+  site?: string;
   online: boolean;
   last_seen: number;
   /**
@@ -459,6 +465,7 @@ export function parseNodeItem(o: JsonObject): NodeItem {
     sn: str(o, 'sn', 'data.nodes[]'),
     type: str(o, 'type', 'data.nodes[]'),
     location: optStr(o, 'location') ?? '',
+    site: optStr(o, 'site'),
     online: bool(o, 'online', 'data.nodes[]'),
     last_seen: num(o, 'last_seen', 'data.nodes[]'),
     mac: optStr(o, 'mac'),

@@ -1,0 +1,17 @@
+{
+	"CommonInfo":{
+		"project.ide.version":"26.0.0.851",
+		"current.select.product":"default",
+		"current.select.buildMode":"",
+		"crossplatform.projectType":""
+	},
+	"BuildOptions":{
+		"SELECT_BUILD_PRODUCT":"default",
+		"BUNDLE_NAME":"com.hmprogram.eldercare",
+		"BUILD_PATH":{
+			"OUTPUT_PATH":"C:\\Users\\Administrator\\Desktop\\hmprogram\\harmony-app\\build\\outputs\\default"
+		},
+		"SELECT_BUILD_MODE":""
+	},
+	"CertConfig":{}
+}

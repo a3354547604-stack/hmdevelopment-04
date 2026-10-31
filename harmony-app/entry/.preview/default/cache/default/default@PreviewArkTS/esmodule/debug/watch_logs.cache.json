@@ -1,0 +1,1 @@
+[{"time":"2026-10-26T10:41:17.162Z","category":"etsTransform","level":"warn","msg":"\u001b[33mArkTS:WARN File: C:/Users/Administrator/Desktop/hmprogram/harmony-app/entry/src/main/ets/pages/RegisterPage.ets:18:1\n It's not a recommended way to export struct with '@Entry' decorator, which may cause ACE Engine error in component preview mode.\u001b[39m","type":"plugin_log"}]

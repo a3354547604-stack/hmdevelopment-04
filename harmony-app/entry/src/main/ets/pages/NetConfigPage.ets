@@ -6,7 +6,7 @@
  * 为什么是 4 步而不是把字段堆一页：
  *  · 用户（子女）第一次做这件事时手上拿着手机、家里老人在旁边等，页面越短越好；
  *  · 每一步只问一件事，失败时能明确告诉他是哪一步出了问题（连不上热点 / 选不到 Wi-Fi /
- *    密码不对 / 小盒子联系不上），而不是一句「配网失败」。
+ *    密码不对 / 守护主机联系不上），而不是一句「配网失败」。
  *
  * 网关接口口径（契约 §12，网关固件实际路由）：
  *  · `GET /api/provision/status` → 热点名、剩余秒数、是否在线；
@@ -153,7 +153,7 @@ struct NetConfigPage {
         .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
         .width('100%')
       if (this.apName.length > 0) {
-        Text('小盒子的 Wi-Fi：' + this.apName)
+        Text('守护主机的 Wi-Fi：' + this.apName)
           .fontSize(AppTheme.FONT_BODY)
           .fontColor(AppTheme.COLOR_PRIMARY)
           .width('100%')
@@ -174,7 +174,7 @@ struct NetConfigPage {
       })
         .margin({ top: 6 })
 
-      Text('连不上？手动填小盒子地址')
+      Text('连不上？手动填守护主机地址')
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.COLOR_TEXT_HINT)
         .width('100%')

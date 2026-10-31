@@ -137,17 +137,19 @@ export class MockData {
     };
     // mac 是 §4.3.1 的 v1.1 可选字段（0x21/0x24 原样透传）；M4 故意不给 mac，
     // 复现 CAL-13「读不到时缺省」的情形，防止页面把缺省画成 "undefined"。
+    // `site` 是首页「地址 → 房间」两层分组的维度（契约暂未定义，见 model/Types.ets）：
+    // M1/M2 在「家」，M4 在「老家」，用来演示一台守护主机带两个住处的设备。
     const m1: JsonObject = {
-      'sn': 'M1', 'type': 'gas', 'location': '厨房', 'online': true,
+      'sn': 'M1', 'type': 'gas', 'location': '厨房', 'site': '家', 'online': true,
       'last_seen': ago(0), 'mac': '11:22:33:44:55:01', 'rssi': -62, 'battery': 255
     };
     const m2: JsonObject = {
-      'sn': 'M2', 'type': 'fall', 'location': '卧室', 'online': true,
+      'sn': 'M2', 'type': 'fall', 'location': '卧室', 'site': '家', 'online': true,
       'last_seen': ago(0), 'mac': '11:22:33:44:55:02', 'rssi': -55, 'battery': 255
     };
     // M4 离线示例：验证「节点离线」与「网关在线」是两个独立维度（契约 §8.7）
     const m4: JsonObject = {
-      'sn': 'M4', 'type': 'presence', 'location': '门厅', 'online': false,
+      'sn': 'M4', 'type': 'presence', 'location': '院子', 'site': '老家', 'online': false,
       'last_seen': ago(35), 'rssi': -70, 'battery': 255
     };
     const data: JsonObject = {

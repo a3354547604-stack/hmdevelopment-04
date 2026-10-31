@@ -294,7 +294,7 @@ export struct ProfilePage {
                 Text(SessionStore.username().length > 0 ? SessionStore.username() : '我')
                   .fontSize(AppTheme.FONT_BODY)
                   .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-                Text('负责照看家里的小盒子')
+                Text('负责照看家里的守护主机')
                   .fontSize(AppTheme.FONT_CAPTION)
                   .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
               }
