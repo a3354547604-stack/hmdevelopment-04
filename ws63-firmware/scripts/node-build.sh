@@ -194,6 +194,10 @@ build_one() {
         m1)   own_marker="EC-NODE-ROLE=M1 type=gas" ;;
         m2)   own_marker="EC-NODE-ROLE=M2 type=fall" ;;
         m4)   own_marker="EC-NODE-ROLE=M4 type=door+presence" ;;
+        # m4mod：同一角色、换干簧管接法（t175）。NODE_BUILD_TAG 只由 SN 与 type 拼成，
+        # 不含接法，所以标记串与 m4 逐字相同 —— 产物名不同（NODE_M4MOD.fwpkg），
+        # 刷板后靠串口首行的 mode=module/bare 区分，见 doc/11 §15。
+        m4mod) own_marker="EC-NODE-ROLE=M4 type=door+presence" ;;
         mock) own_marker="EC-NODE-ROLE=M1 type=gas" ;;
         hub)     own_marker="HUB-ROLE=CENTRAL sn=H1 fw=0.1.0 mock=0" ;;
         hubmock) own_marker="HUB-ROLE=CENTRAL sn=H1 fw=0.1.0 mock=1" ;;
@@ -206,10 +210,19 @@ build_one() {
     else
         for n in "${T_NAMES[@]}"; do
             [ "$n" = "$name" ] && continue
+            local m
             case "$n" in
-                m2) other_tags="$other_tags EC-NODE-ROLE=M2 type=fall" ;;
-                m4) other_tags="$other_tags EC-NODE-ROLE=M4 type=door+presence" ;;
+                m2)    m="EC-NODE-ROLE=M2 type=fall" ;;
+                m4)    m="EC-NODE-ROLE=M4 type=door+presence" ;;
+                m4mod) m="EC-NODE-ROLE=M4 type=door+presence" ;;
+                *)     m="" ;;
             esac
+            # 标记串与自己相同的目标不算「混入」：m4 与 m4mod 的标记逐字相同（见上），
+            # 不排除的话 m4mod 会把自己判成「镜像里出现了别的角色标记」。
+            # 用 if 而不是 `[ ... ] &&`, 免得条件不成立时整条链返回 1 触发 set -e。
+            if [ -n "$m" ] && [ "$m" != "$own_marker" ]; then
+                other_tags="$other_tags $m"
+            fi
         done
     fi
 

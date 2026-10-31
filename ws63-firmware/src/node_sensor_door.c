@@ -20,6 +20,12 @@
  * **既不置待发位、也不建 presence 帧**，只在内存里维护状态（`s->occ` = 有无活动，
  * 供 P1 与诊断用），开关仍是 `node_cfg.h` 的 `NODE_PRESENCE_ENABLE`。
  * 与 M2 的 fall payload 用同一个开关：一处改口径，两处（整键不出现 / 整帧不发）一起生效。
+ *
+ * **两种接线同一份驱动（t175）**：`NODE_REED_MODULE=0`（默认）= 裸干簧管 + 内部上拉；
+ * `=1` = LM393 干簧管模块（D0 输出 0~3.3V、3.3V 供电、接 GPIO_03）+ **关内部上拉**。
+ * 两种接法的「高=开」方向一致，所以 reed_raw()/去抖/事件逻辑完全共用，
+ * 差别只在 reed_init_one() 的引脚与上拉两行 —— 见 node_cfg.h §5 的接法说明。
+ * 编译期用 #error 把「模块接法必须关内部上拉」钉死，避免以后有人只改引脚不改上拉。
  */
 #include <string.h>
 
@@ -30,6 +36,17 @@
 
 #include "node_cfg.h"
 #include "node_sensor.h"
+
+/* 模块接法的电平由模块自己给，配内部上拉就是两路驱动对顶（白白多耗电、边沿被抬），
+ * 这是接法级的错，不该靠代码评审发现，直接让它编不过。 */
+#if NODE_REED_MODULE && (NODE_REED_PULL_TYPE != NODE_PIN_PULL_NONE)
+#error "NODE_REED_MODULE=1 必须配 NODE_PIN_PULL_NONE（模块自己给电平，内部上拉会与它顶牛）"
+#endif
+
+/* node_cfg.h 里的上下拉常量是 pin_pull_t 的数值副本（#if 判不了枚举名），
+ * 这里把副本与 SDK 枚举对上：SDK 改枚举值时编译失败，而不是上拉/下拉静默搞反。 */
+typedef char node_pull_value_assert[(PIN_PULL_TYPE_DISABLE == NODE_PIN_PULL_NONE &&
+                                     PIN_PULL_TYPE_UP == NODE_PIN_PULL_UP) ? 1 : -1];
 
 typedef struct {
     pin_t       pin;
@@ -58,7 +75,10 @@ static int g_cur_kind;                   /* take_event 取走的那一条：1=do
 
 static int reed_raw(const reed_t *r)
 {
-    /* 裸干簧管 + 内部上拉：门关=闭合=低，门开=断开=高（引脚表 §6.2 A 方案）。 */
+    /* 「高=开」两种接法都成立：
+     *   裸干簧管 + 内部上拉（NODE_REED_MODULE=0）：门关=闭合=低，门开=断开=高（引脚表 §6.2 A 方案）；
+     *   模块（=1）：有磁铁输出低、无磁铁输出高，与上面同向。
+     * 所以这里不按接法分支，只按 NODE_REED_OPEN_LEVEL 判定。 */
     int lv = (int)uapi_gpio_get_val(r->pin);
 
     return (lv == NODE_REED_OPEN_LEVEL) ? 1 : 0;
@@ -67,7 +87,7 @@ static int reed_raw(const reed_t *r)
 static void reed_init_one(reed_t *r, pin_t pin, uint8_t ch, const char *name)
 {
     (void)uapi_pin_set_mode(pin, PIN_MODE_0);
-    (void)uapi_pin_set_pull(pin, PIN_PULL_TYPE_UP);   /* 干簧管另一端接 GND，靠内部上拉 */
+    (void)uapi_pin_set_pull(pin, (pin_pull_t)NODE_REED_PULL_TYPE);
     (void)uapi_gpio_set_dir(pin, GPIO_DIRECTION_INPUT);
     r->pin = pin;
     r->ch = ch;
@@ -83,7 +103,11 @@ void node_sensor_init(void)
     (void)uapi_gpio_init();
     reed_init_one(&g_reed[0], NODE_REED_DOOR_PIN, NODE_REED_CH_DOOR, "玄关门");
     reed_init_one(&g_reed[1], NODE_REED_WINDOW_PIN, NODE_REED_CH_WINDOW, "阳台门");
-    osal_printk("[M4] reed init: ch0(GPIO_%02d)=%s ch1(GPIO_%02d)=%s hold=%us\r\n",
+    /* 接法打进上电首行：现场分不清「读反了」还是「接法烧错了」时，这一行能直接定位
+     * —— 模块接法却看到 pull=up，就是烧错包了。 */
+    osal_printk("[M4] reed init: mode=%s pull=%s ch0(GPIO_%02d)=%s ch1(GPIO_%02d)=%s hold=%us\r\n",
+        NODE_REED_MODULE ? "module" : "bare",
+        NODE_REED_MODULE ? "none" : "up",
         (int)NODE_REED_DOOR_PIN, g_reed[0].stable ? "OPEN" : "closed",
         (int)NODE_REED_WINDOW_PIN, g_reed[1].stable ? "OPEN" : "closed",
         (unsigned)g_presence_hold_s);

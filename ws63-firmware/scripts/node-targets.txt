@@ -8,6 +8,11 @@
 m1   | -def=NODE_ROLE=1               | node_main.c node_json.c node_link.c node_sensor_gas.c sle_hub.c sle_hub_adv.c
 m2   | -def=NODE_ROLE=2               | node_main.c node_json.c node_link.c node_sensor_radar.c radar_hub.c sle_hub.c sle_hub_adv.c
 m4   | -def=NODE_ROLE=4               | node_main.c node_json.c node_link.c node_sensor_door.c sle_hub.c sle_hub_adv.c
+#   - m4mod = 同一份 M4 驱动、换「接法」（润和 HiHope 板 + LM393 干簧管模块）：
+#     模块是推挽输出，必须关内部上拉（PULL_NONE），玄关门接 GPIO_03（润和 J5-9）。
+#     m4 与 m4mod 的角色标记逐字相同（NODE_BUILD_TAG 不含接法），产物名不同：
+#     NODE_M4.fwpkg / NODE_M4MOD.fwpkg；烧板前看串口首行的 mode= 字段区分。
+m4mod | -def=NODE_ROLE=4,NODE_REED_MODULE=1 | node_main.c node_json.c node_link.c node_sensor_door.c sle_hub.c sle_hub_adv.c
 mock | -def=NODE_ROLE=1,NODE_MOCK=1   | node_main.c node_json.c node_link.c node_sensor_mock.c sle_hub.c sle_hub_adv.c
 #   - 汇聚 H1 是**另一块板上的另一份固件**：SLE Central（只扫描/连接，不广播、不做服务端），
 #     经 UART1（排针 23/24，MODE 1）按契约 §3 的帧与网关说话。它不共用任何 node_* 源文件。

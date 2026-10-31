@@ -17,6 +17,7 @@
  *   主节点（厨房气体）  python3 build.py ws63-liteos-app                        ← 默认 NODE_ROLE_M1
  *   卧室雷达            python3 build.py ws63-liteos-app -def=NODE_ROLE=2
  *   门厅门磁×2          python3 build.py ws63-liteos-app -def=NODE_ROLE=4
+ *   门厅门磁（模块接法）... -def=NODE_ROLE=4,NODE_REED_MODULE=1   ← LM393 干簧管模块，见 §5
  *   无硬件 mock 演示    ... -def=NODE_MOCK=1
  */
 #ifndef NODE_CFG_H
@@ -182,11 +183,51 @@
  * 这不改变字段口径（§2.4.4 的三个字段语义原样保留），只换数据来源；
  * 被删掉的 GPIO_07 因此重新空闲，留给 P1 的窗磁或 PIR 复用。 */
 
-#define NODE_REED_DOOR_PIN      GPIO_00 /* ch0 玄关门：内部上拉，断开=1=开 */
-#define NODE_REED_WINDOW_PIN    GPIO_02 /* ch1 阳台门（§6.1 第 2 行） */
+/* ---- 干簧管的两种接法（编译期二选一，默认 0 = 现有裸干簧管接法）----
+ *
+ * 0 = 裸干簧管（M4 默认）：触点一端接 GND、另一端接 GPIO，靠芯片**内部上拉**；
+ *     门关=闭合=低，门开=断开=高（引脚表 §6.2 A 方案）。
+ * 1 = 干簧管**模块**（LM393 比较器小板，D0/VCC/GND 三线，3.3V 供电）：
+ *     模块把磁铁状态变成 0~3.3V 的数字电平（有磁铁 D0≈0V、无磁铁 3.3V），
+ *     MCU 只读电平，**不需要也不该**再给这个脚挂内部上拉：
+ *     a) 内部上拉是几十 kΩ 到 3V3，与模块自己的输出/上拉并联 —— 稳态只是白耗几十 µA；
+ *        而当模块低驱与内部上拉对顶时，波形被抬起、边沿变缓，是最典型的「偶发误判」来源。
+ *     b) 更根本的是**判据统一**：裸干簧管靠内部上拉才有高电平，模块的电平是它自己给的，
+ *        同一份驱动里两种接法的上拉必须不同，否则两种板子不可能同时正确。
+ *     c) 电平方向与裸干簧管**同向**：模块「有磁铁=低=门关、无磁铁=高=门开」，正好是
+ *        NODE_REED_OPEN_LEVEL=1（高=开），所以判定与去抖逻辑一行都不用改。
+ *     d) 引脚换成 GPIO_03：润和 HiHope_NearLink_DK3863E_V03 的 J6 排针没有 GPIO_00
+ *        （J5-9=GPIO_03/模组脚25、J5-10=GPIO_02、J5-12=GPIO_00），
+ *        依据 `docs/技术笔记/润和WS63-引脚与烧录.md` 的 J5/J6 逐脚表。
+ *     【未核实】这块模块的 D0 具体是推挽还是开集+板上拉（LM393 本身开集输出，便宜模块多带 10k 上拉）。
+ *     若换了「开集且板上不带拉电阻」的模块，PULL_NONE 会让脚浮空 —— 那时的正解是在 D0 上外挂
+ *     10k 到 3V3（见 doc/11 §15.6），而不是把内部上拉改回来。
+ *
+ * 两种接法共用一个驱动、靠 -def 切，而不是 fork 一份驱动文件：fork 出来的第二份没人维护，
+ * 且 node-targets.txt 里多一个源文件就多一份漏改风险。 */
+#ifndef NODE_REED_MODULE
+#define NODE_REED_MODULE        0
+#endif
+
+/* 上下拉取值：写 pin_pull_t 的**数值**（SDK `drivers/chips/ws63/porting/pinctrl/pinctrl_porting.h:67-73`：
+ * DISABLE=0 / DOWN=1 / STRONG_UP=2 / UP=3）。用数值不用枚举名，是因为下面要拿它做 #if 判断，
+ * 而枚举名对预处理器不可见（会被当成 0）。数值与 SDK 枚举的一致性由 node_sensor_door.c
+ * 的编译期断言兜住 —— 哪天 SDK 改了枚举值，编译直接失败，而不是上拉/下拉静默搞反。 */
+#define NODE_PIN_PULL_NONE      0       /* = PIN_PULL_TYPE_DISABLE：不上下拉（接模块自带的输出电平用这个） */
+#define NODE_PIN_PULL_UP        3       /* = PIN_PULL_TYPE_UP：内部上拉（裸干簧管用这个） */
+
+#if NODE_REED_MODULE
+#define NODE_REED_DOOR_PIN      GPIO_03 /* ch0 玄关门：模块 D0 → 润和 J5-9（模组脚25） */
+#define NODE_REED_PULL_TYPE     NODE_PIN_PULL_NONE
+#else
+#define NODE_REED_DOOR_PIN      GPIO_00 /* ch0 玄关门：裸干簧管 + 内部上拉（模块接法下此脚空闲，可留作他用） */
+#define NODE_REED_PULL_TYPE     NODE_PIN_PULL_UP
+#endif
+
+#define NODE_REED_WINDOW_PIN    GPIO_02 /* ch1 阳台门（§6.1 第 2 行）；两种接法都用这个脚 */
 #define NODE_REED_CH_DOOR       0
 #define NODE_REED_CH_WINDOW     1
-#define NODE_REED_OPEN_LEVEL    1       /* 裸干簧管 + 内部上拉：门开=断开=高（§6.2 A 方案） */
+#define NODE_REED_OPEN_LEVEL    1       /* 高=开：裸干簧管断开=高、模块无磁铁=高 —— 两种接法同向（§6.2 A 方案） */
 #define NODE_DEBOUNCE_MS        100     /* 连续同电平 100 ms 才认一次跳变（触点抖动 <10 ms） */
 #define NODE_PRESENCE_HOLD_S    60      /* §2.4.4：持续 60 s 无新触发 → presence=false */
 

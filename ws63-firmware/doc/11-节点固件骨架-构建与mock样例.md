@@ -30,7 +30,7 @@
 # 约定：<仓库根> = 本仓库根目录（WSL 形态 /mnt/c/Users/<本机用户>/Desktop/HMProgram；Windows 形态 C:\Users\<本机用户>\Desktop\HMProgram）
 cd <仓库根>
 
-# ① 秒级编译自检（25 个「目标×文件」组合，约 0.5 s；不用 Docker）
+# ① 秒级编译自检（47 个「目标×文件」组合，约 0.5 s；不用 Docker）
 python3 tools/node-compile-check.py
 
 # ② JSON 层自测 + 用真 JSON 解析器逐帧复检契约（主机无 gcc 时会自动退回 ws63wsl 容器）
@@ -831,3 +831,121 @@ MQ-2 AO → 17 脚 IO09 = ch2；AHT20 仍在 I2C1（IO15/IO16）。
 
 结论：**「节点能收」≠「链路能通」**。本卡只做节点侧；这两处不登记的话，`set co_t1_mv` 到不了 M1。
 等 MQ-7 标定完成、真要下发阈值时，由 PM 给 gw / backend 各开一张卡（本次不擅自扩大改动）。
+
+---
+
+## 15. t175 记录：润和 HiHope_NearLink_DK3863E_V03 适配（M4 门磁「模块接法」，无板验证）
+
+> 任务卡 **t175**。范围：`ws63-firmware/src/node_cfg.h`、`node_sensor_door.c`、`scripts/node-targets.txt`、
+> 本文。**卡面明确要求「只改代码不编译」**（用户在电脑上，构建窗口由 PM 通知），
+> 所以本轮**没有出镜像**：下文凡涉及 `.fwpkg` 体积/md5 的地方都留空，等构建窗口补。
+
+### 15.1 一句话结论
+
+新板 **HiHope_NearLink_DK3863E_V03** 能当 M4 门磁节点用：干簧管**模块**（LM393 小板，D0/VCC/GND）
+接 **GPIO_03（J5-9，模组脚 25）**，烧 `m4mod` 那份固件即可，判定逻辑与老板完全同一份代码。
+**这块板与如般微板最大的差异不在固件、在烧录**：CH340K 的 `DTR#`/`RTS#` 没接到 `POW_EN`，
+「靠 RTS 自动进下载」在这块板上用不了，**必须人工按 S1**（`POWER_ON_C`）。
+依据：【本地文档】`docs/技术笔记/润和WS63-引脚与烧录.md:73`（J5-9=GPIO_03=模组脚25）、
+`:74`（J5-10=GPIO_02）、`:76`（J5-12=GPIO_00）、`:143`（板上只有 S1/S2，无 BOOT 键）、
+`:146`（CH340K 的 DTR#/RTS# 未接 POW_EN ⇒ 必须手按 S1）。
+
+### 15.2 改了什么（4 个文件 + 1 处必要的脚本分支）
+
+| 文件 | 改动 | 为什么 |
+|---|---|---|
+| `src/node_cfg.h` | 新增 `NODE_REED_MODULE`（默认 **0**）；`NODE_PIN_PULL_NONE=0` / `NODE_PIN_PULL_UP=3`；`NODE_REED_DOOR_PIN` 与 `NODE_REED_PULL_TYPE` 按接法二选一（模块=GPIO_03+NONE，裸干簧管=GPIO_00+UP）；文件头用法表加一行模块接法 | 两种接法共用一份驱动，靠 `-def` 切；上拉必须跟着接法变，否则两种板子不可能同时正确 |
+| `src/node_sensor_door.c:43` | `#if NODE_REED_MODULE && (NODE_REED_PULL_TYPE != NODE_PIN_PULL_NONE)` → `#error` | 把「模块接法必须关内部上拉」变成**编译期**约束，而不是靠人记得 |
+| `src/node_sensor_door.c:48` | `typedef char node_pull_value_assert[...]`：断言 `PIN_PULL_TYPE_DISABLE==0`、`PIN_PULL_TYPE_UP==3` | `node_cfg.h` 里的上下拉是 `pin_pull_t` 的**数值副本**（`#if` 判不了枚举名）；SDK 改枚举值时编译失败，而不是上拉/下拉静默搞反 |
+| `src/node_sensor_door.c:90` | `uapi_pin_set_pull(pin, (pin_pull_t)NODE_REED_PULL_TYPE)`（原为硬编码 `PIN_PULL_TYPE_UP`） | 接法决定上拉 |
+| `src/node_sensor_door.c:108` | 首行日志加 `mode=` / `pull=` 两个字段 | 现场分不清「读反了」还是「烧错包」时，这一行直接定位 |
+| `scripts/node-targets.txt:15` | 新增目标 `m4mod` | 让「模块接法」成为一份可复现的产物，而不是靠人记 `-def` |
+| `scripts/node-build.sh:200,217,223` | ①`build_one` 的角色标记 case 增 `m4mod`；②`other_tags` 循环增 `m4mod` 分支并**排除与自己相同的标记** | **必要的联动**：不改的话 `node-build.sh`（无参=全量构建）会在新目标上 `die "目标 m4mod 没有定义角色标记"`；而 m4 与 m4mod 的 `NODE_BUILD_TAG` 逐字相同，不排除自己就会被判成「混入了别的角色」 |
+
+**逐条验收怎么落地的**：
+
+1. `NODE_REED_MODULE` 默认 0 生效；=1 时两路都 `PULL_NONE`、仍按「高=开」判定（`NODE_REED_OPEN_LEVEL` 未动）。
+2. `NODE_M4` 在 `=1` 时用 GPIO_03；`GPIO_02` 两模式都用（阳台门），`GPIO_00` 在模块接法下空闲可留他用。
+3. `node-compile-check` 现在同时覆盖 `m4`（接法 0）与 `m4mod`（接法 1），**47 个组合 0 失败**。
+4. `node-targets.txt` 加了 `m4mod`，编译命令与产物路径见 §15.5。
+5. 文档即本节。
+6. 提交路径限定，只含上面 6 个文件；M1/M2 逻辑、汇聚固件、协议字段一行未动。
+
+### 15.3 两种接法对照
+
+| 项 | 接法 0「裸干簧管」（默认，`m4`） | 接法 1「模块」（`m4mod`） |
+|---|---|---|
+| 玄关门 ch0 | `GPIO_00` | **`GPIO_03`**（润和 J5-9，模组脚 25） |
+| 阳台门 ch1 | `GPIO_02`（J5-10） | `GPIO_02`（J5-10） |
+| 内部上拉 | `PIN_PULL_TYPE_UP`(=3) | **`PIN_PULL_TYPE_DISABLE`(=0)** |
+| 门关电平 | 低（触点闭合拉到 GND） | 低（模块有磁铁 → D0≈0 V） |
+| 门开电平 | 高（断开，靠内部上拉） | 高（无磁铁 → D0=3V3） |
+| 量程/去抖/事件 | `NODE_DEBOUNCE_MS=100`、`NODE_REED_OPEN_LEVEL=1` —— **两种接法共用** | 同左 |
+| 目标 / 产物 | `m4` → `ws63-firmware/out/NODE_M4.fwpkg` | `m4mod` → `ws63-firmware/out/NODE_M4MOD.fwpkg` |
+| 角色标记（镜像内） | `EC-NODE-ROLE=M4 type=door+presence` | **逐字相同**（`NODE_BUILD_TAG` 不含接法）→ 靠首行 `mode=` 区分 |
+
+**为什么模块接法要关内部上拉**（判据都在这一列，不靠猜）：
+模块已经把磁铁状态变成 0~3.3V 的数字电平，MCU 再挂几十 kΩ 到 3V3 的内部上拉，
+稳态只是白耗几十 µA；模块低驱与之对顶时波形被抬起、边沿变缓，是最典型的「偶发误判」来源。
+更根本的是判据统一：裸干簧管的高电平**是内部上拉给的**，模块的高电平**是模块自己给的** ——
+同一份驱动里两者不可能共用同一个上拉值。
+【未核实】这块模块的 D0 到底是推挽还是开集+板上拉（LM393 本身开集输出，便宜模块板多带 10k 上拉）：
+若换到「开集且板上不带拉电阻」的模块，`PULL_NONE` 会让脚浮空，那时的正解是在 D0 外挂 10k 到 3V3（§15.6），
+**不是**把内部上拉改回来。
+
+### 15.4 无板验证（命令与结果，本轮实跑）
+
+| 命令 | 结果 |
+|---|---|
+| `tools/build-lock.sh python3 tools/node-compile-check.py` | **共 47 个（目标 × 文件）编译，失败 0 个**，退出 0；`=== 目标 m4mod（-DNODE_ROLE=4 -DNODE_REED_MODULE=1）===` 下 6 个源文件全 `OK` |
+| `tools/build-lock.sh python3 tools/node-json-check.py` | 通过：`SELFTEST OK` + `ALIAS_OK` +「用 JSON 解析器复检了 10 帧…✅ 全部通过」（本轮未改 JSON 层，回归而已） |
+| `bash -n ws63-firmware/scripts/node-build.sh` | 语法 OK（改了 case/循环两处） |
+| **变异检验 ①**：把模块分支的上拉临时改回 `NODE_PIN_PULL_UP` 再跑编译自检 | **变红**：`node_sensor_door.c:43:2: error: #error "NODE_REED_MODULE=1 必须配 NODE_PIN_PULL_NONE…"`，`共 47 个…失败 1 个`，失败清单 `m4mod/node_sensor_door.c`；改回 `NODE_PIN_PULL_NONE` 后 **47/47 通过** |
+| **变异检验 ②**：把 `other_tags` 里的「排除自身标记」去掉，用从 `node-build.sh` 抽出的那段逻辑跑七个目标 | **m4mod 会自己撞自己**：`m4mod | own=[EC-NODE-ROLE=M4 type=door+presence] | other=[… EC-NODE-ROLE=M4 type=door+presence]` → 构建到角色断言那步必 die；加上排除后 `m4mod`/`m4` 的 `other=` 只剩 `EC-NODE-ROLE=M2 type=fall` |
+| **没有做的**：`node-build.sh m4mod` | **本轮不编镜像**（卡面要求）。所以 `NODE_M4MOD.fwpkg` 的**体积/md5 留空待补**，M4 现有包仍是 10-19 那份 `NODE_M4.fwpkg` 1463592 B（未被本轮改动触碰） |
+
+### 15.5 该目标的编译命令与产物路径
+
+```bash
+# 推荐（走清单 + 角色断言；产物名由清单目标名派生）
+bash ws63-firmware/scripts/node-build.sh m4mod
+#   → ws63-firmware/out/NODE_M4MOD.fwpkg
+#   → 构建日志 ws63-firmware/out/build-m4mod.log
+
+# 等价直编（不经过我们的脚本，产物是 SDK 的通用名）
+cd <SDK>/src && python3 build.py ws63-liteos-app -def=NODE_ROLE=4,NODE_REED_MODULE=1
+#   → <SDK>/src/output/ws63/fwpkg/ws63-liteos-app/ws63-liteos-app_all.fwpkg
+
+# 秒级编译自检（同时覆盖 m4 与 m4mod 两种接法）
+python3 tools/node-compile-check.py
+```
+
+`-def=` 的逗号写法与 `mock` 目标同一套解析（`tools/node-compile-check.py:defs_from_build_args` →
+`-DNODE_ROLE=4 -DNODE_REED_MODULE=1`），构建脚本原样透传给 `build.py`。
+
+### 15.6 接线施工单（用户按这个接；每一步都标了依据）
+
+| 步 | 做什么 | 依据 |
+|---|---|---|
+| 1 | 模块 **VCC → J6-2（3V3）** | 【本地文档】`docs/技术笔记/润和WS63-引脚与烧录.md:44`（J6-2=3.3V，板载 AMS1117-3.3 输出） |
+| 2 | 模块 **GND → J6-4 或 J6-16（GND）** | 同上 `:42`（J6 表）、`:67` 一带（GND 脚） |
+| 3 | 模块 **D0 → J5-9（GPIO_03，模组脚 25）** | 同上 `:73` |
+| 4 | 只用一路时，**阳台门那路 GPIO_02（J5-10）必须接 GND** | 模块接法是 `PULL_NONE`，不接就浮空 → 随机跳变、天天误报「阳台门开」；接 GND 后恒读「门关」，安全默认 |
+| 5 | **别用 5V 给模块供电** | 普通 GPIO 只到 3.63V 绝对最大（【官方文档】硬件用户指南 表2-2/表2-6，记在 `:125`）；5V 供电的模块 D0 会输出 5V 直灌 GPIO |
+| 6 | 烧录：`ws63flash.exe` 选 COMx@**921600** → 工具打印 `Connecting, please reset device...` 时**按 S1** → 烧完自动运行；串口控制台 **115200 8N1** | 同上 `:14`（ROM bootloader 串口协议、默认 921600、复位进下载）、`:143`/`:146`（无 BOOT 键、DTR/RTS 未接 ⇒ 手按 S1） |
+| 7 | 看首行日志确认烧对了包 | `[M4] reed init: mode=module pull=none ch0(GPIO_03)=closed ch1(GPIO_02)=closed hold=60s`（有磁铁=closed；若看到 `mode=bare pull=up` 就是烧成 `m4` 了） |
+
+> 磁铁靠近/离开的顺序取决于模块板上「磁铁=低」的极性（用户实测：有磁铁 D0≈0 V、无磁铁 3.3 V）。
+> 若实测反了（有磁铁读到 OPEN），**先怀疑模块极性而不是改代码**：`NODE_REED_OPEN_LEVEL` 是两种接法共用的
+> 契约口径（§6.2 A 方案），改它会把老板一起改错。
+
+### 15.7 未做 / 待用户实测 / 跨目录待办（**不得写成已验证**）
+
+- **镜像未编**：卡面要求「只改代码不编译」，`NODE_M4MOD.fwpkg` 的体积/md5 待构建窗口补；`node-build.sh m4mod`
+  的 case 分支只做了 `bash -n` + 逻辑抽取验证，**没有真跑过一次构建**。
+- **上板未测**：D0 的实际电平、模块板上有没有自带拉电阻、100 ms 去抖在模块上够不够，全部待用户实测。
+- **`docs/技术/引脚与接线表.md` 仍缺 GPIO_03 一行**（该文件归 PM 维护，不在本卡 inScope）：
+  现在 M4 的模块接法只写在本文与 `docs/技术笔记/润和WS63-引脚与烧录.md`，建议 PM 在引脚表补一行并标注
+  「模块接法（t175）」。
+- **`node-build.sh` 的三处改动不在卡面 inScope 的 4 个文件里**：但不改会让无参全量构建在新目标上 die，
+  属「最小必要联动」；已在本节 §15.2 与提交说明里单独登记，请 PM 追认（或另开卡把它正式纳入）。
