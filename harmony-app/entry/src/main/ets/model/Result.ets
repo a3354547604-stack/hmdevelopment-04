@@ -329,7 +329,7 @@ function detailValueText(data: JsonObject, key: string): string | undefined {
  *  而 `message` 只是**裸表文案**（「参数超出允许范围」）。
  *  旧实现只拼 `message`，于是连真实服务器时用户只看到
  *  「参数超出允许范围（服务器：参数超出允许范围）」——键名与范围全丢；
- *  mock 恰好把明细塞进了 message（见 MockTransport），把这个差异一直掩盖到联调。
+ *  早期离线数据源恰好把明细塞进了 message，把这个差异一直掩盖到联调——现已去掉假数据通路。
  *
  * 只拼**存在**的键（契约 §0.4 同一口径）：缺省不显示空括号、不显示 `undefined`。
  */

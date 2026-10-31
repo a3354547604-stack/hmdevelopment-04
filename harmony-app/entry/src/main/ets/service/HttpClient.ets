@@ -2,7 +2,7 @@
  * HttpClient —— HTTP 传输层（唯一碰 `@kit.NetworkKit` 的地方）。
  *
  * 分层理由：把「怎么发请求」与「请求哪个接口/怎么解析」分开，
- * 于是「换成 mock 实现」或「离线单测」都不需要动业务代码（见 service/ApiPort.ets）。
+ * 于是「换成脚本实现做离线单测」不需要动业务代码（见 service/ApiPort.ets）。
  *
  * 几个刻意的选择：
  *  ① 每次请求 `createHttp()` + `destroy()`：复用 `HttpRequest` 对象在并发下需要自己管队列，

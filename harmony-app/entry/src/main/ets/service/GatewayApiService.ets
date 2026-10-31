@@ -2,7 +2,7 @@
  * GatewayApiService —— 网关本地配网 API 的真实实现（契约 §12 + t143 `/api/scan`）。
  *
  * 与 `HttpApiService` 共用同一套分层：本类只负责「拼 URL / 组请求体 / 解析信封」，
- * 真正发请求的是 `HttpPort`（`NetHttpClient` 或 `MockGatewayTransport`）。
+ * 真正发请求的是 `HttpPort`（`NetHttpClient`）。
  * 于是 mock 模式下 URL 拼接、状态码→文案、字段解析全部照跑，不会出现「mock 绿、真机红」。
  *
  * 几个与云端 §6 不同、必须显式处理的点：

@@ -5,7 +5,7 @@
  *  · 「添加设备」→ 4 步向导（pages/NetConfigPage）；
  *  · 「修改密码」→ 服务器没有改密接口（`server/app/routers/auth.py` 只有
  *    register/login/me），所以这里**如实**说「需要在管理员后台改」，不做假的成功提示；
- *  · 「关于 → 版本号」连点 5 次才展开「高级」：服务器地址、离线演示开关都在里面。
+ *  · 「关于 → 版本号」连点 5 次才展开「高级」：服务器地址在里面。
  *    为什么藏起来：这些是维护项，普通用户看到服务器地址只会以为「要自己搭服务器」。
  */
 
@@ -28,8 +28,6 @@ export struct ProfilePage {
   @State advanced: boolean = false;
   @State taps: number = 0;
   @State serverInput: string = '';
-  /** 「使用演示数据」开关：读的是 AppConfig.mockMode()，只影响数据来源。 */
-  @State mockOn: boolean = true;
   /** 提醒偏好：先存 AppStorage（切 tab 不丢）；接推送后要同步到服务端偏好。 */
   @StorageLink('notifyOn') notifyOn: boolean = true;
   @StorageLink('notifyDnd') dndOn: boolean = true;
@@ -44,7 +42,6 @@ export struct ProfilePage {
   @State noMotionBusy: boolean = false;
 
   aboutToAppear(): void {
-    this.mockOn = RuntimeConfig.mockMode();
     this.serverInput = RuntimeConfig.baseUrl();
     // 三个提醒开关走 AppStorage：切 tab 回来不该复位成默认值。
     // 真正的推送偏好要等接推送通道后同步到服务端，这里只是本地记忆。
@@ -126,7 +123,6 @@ export struct ProfilePage {
 
   private saveAdvanced(): void {
     RuntimeConfig.setBaseUrl(this.serverInput);
-    RuntimeConfig.setMockMode(this.mockOn);
     ServiceHub.invalidate();
     this.serverInput = RuntimeConfig.baseUrl();
     this.savedTip = UserCopy.ADVANCED_SAVED;
@@ -136,13 +132,6 @@ export struct ProfilePage {
     RuntimeConfig.resetBaseUrl();
     ServiceHub.invalidate();
     this.serverInput = RuntimeConfig.baseUrl();
-    this.savedTip = UserCopy.ADVANCED_SAVED;
-  }
-
-  private cycleMock(on: boolean): void {
-    this.mockOn = on;
-    RuntimeConfig.setMockMode(on);
-    ServiceHub.invalidate();
     this.savedTip = UserCopy.ADVANCED_SAVED;
   }
 
@@ -469,12 +458,6 @@ export struct ProfilePage {
                 .onChange((v: string) => {
                   this.serverInput = v;
                 })
-              SwitchRow({
-                label: UserCopy.ADVANCED_MOCK,
-                hint: '打开时不连网，只用离线数据',
-                checked: this.mockOn,
-                onToggle: (on: boolean) => this.cycleMock(on)
-              })
               this.demoRow()
               Divider()
                 .color(AppTheme.COLOR_DIVIDER)

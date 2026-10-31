@@ -33,6 +33,8 @@ struct Index {
   aboutToAppear(): void {
     // PersistentStorage 注册必须在任何读写之前完成，所以放在最外层入口
     SessionStore.initPersistence();
+    // 去掉离线演示时代留下的假令牌：它过不了服务器校验，带着它进主界面会满屏 401
+    SessionStore.dropStaleToken();
     this.loggedIn = SessionStore.hasToken();
   }
 

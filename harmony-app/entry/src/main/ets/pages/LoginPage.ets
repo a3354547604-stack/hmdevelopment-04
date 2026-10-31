@@ -16,7 +16,6 @@ import { AppConfig } from '../common/AppConfig';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
 import { PrimaryButton } from '../components/CommonViews';
-import { ServiceHub } from '../service/ServiceHub';
 
 @Component
 export struct LoginPage {
@@ -159,18 +158,6 @@ export struct LoginPage {
       .padding(AppTheme.CARD_PADDING)
       .backgroundColor(AppTheme.COLOR_SURFACE)
       .borderRadius(AppTheme.CARD_RADIUS)
-
-      // 离线演示提示：只在离线数据模式下出现（现场直接能登录，不用背密码）
-      if (ServiceHub.isMock()) {
-        Column({ space: 2 }) {
-          Text('离线演示：' + AppConfig.DEMO_PHONE + ' / ' + AppConfig.DEMO_PASSWORD)
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-        }
-        .width('100%')
-        .padding({ top: AppTheme.PAGE_PADDING })
-        .alignItems(HorizontalAlign.Start)
-      }
 
       Column({ space: 4 }) {
         Text('装上它，爸妈在家有个照应')

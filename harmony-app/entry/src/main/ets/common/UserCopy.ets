@@ -221,7 +221,6 @@ export class UserCopy {
   // ---------- 维护入口（不参与技术词扫描） ----------
   static readonly ADVANCED_TITLE: string = '高级（维护用）';
   static readonly ADVANCED_SERVER: string = '服务器地址';
-  static readonly ADVANCED_MOCK: string = '使用离线演示数据';
   static readonly ADVANCED_RESET: string = '恢复默认地址';
   static readonly ADVANCED_SAVED: string = '已保存';
   static readonly ADVANCED_HINT: string = '仅维护人员使用；改错了会连不上服务器';

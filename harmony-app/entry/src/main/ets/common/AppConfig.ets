@@ -1,5 +1,5 @@
 /**
- * AppConfig —— 编译期常量（服务器地址、超时、轮询周期、演示账号）。
+ * AppConfig —— 编译期常量（服务器地址、超时、轮询周期）。
  *
  * 为什么服务器地址**写死在这里**（t150）：
  * 用户是独居老人的子女，不是运维。旧版把「服务器地址」暴露在设置页，用户第一反应是
@@ -27,9 +27,6 @@ export class AppConfig {
   /** 配网请求超时（毫秒）。取 3 s 与网关 H5 一致（契约 §12.11）。 */
   static readonly GATEWAY_TIMEOUT_MS: number = 3000;
 
-  /** 是否默认使用离线数据（true = 不发起任何网络请求，仍可完整演示）。 */
-  static readonly MOCK_MODE: boolean = true;
-
   /** 请求超时（毫秒）。短于轮询周期，避免弱网下请求堆积。 */
   static readonly HTTP_TIMEOUT_MS: number = 5000;
 
@@ -46,10 +43,6 @@ export class AppConfig {
   static readonly APP_VERSION: string = '0.1';
   /** 进高级需要的连点次数。 */
   static readonly ADVANCED_TAP_COUNT: number = 5;
-
-  /** 演示账号（只在离线演示数据下显示提示，方便现场直接登录）。 */
-  static readonly DEMO_PHONE: string = '13800000000';
-  static readonly DEMO_PASSWORD: string = 'demo-pass-123';
 
   /**
    * 手机号校验：11 位数字且以 1 开头。

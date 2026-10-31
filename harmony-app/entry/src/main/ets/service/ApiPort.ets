@@ -5,7 +5,7 @@
  * 「mock 数据模式」。如果 mock 是在实现里写 `if (mock) return FAKE`，那么
  * 断言逻辑（状态码/业务码翻译）会被绕开，mock 通过 ≠ 真实链路通过。
  * 定义端口后：
- *  · `HttpApiService`（真实）与 `MockApiService`（离线）实现**同一份签名**；
+ *  · `HttpApiService`（真实网络）实现这份签名，页面/ViewModel 只依赖本接口；
  *  · 页面只依赖端口，切换实现只改 ServiceHub 一处（不是散落的 if）；
  *  · 无设备/无服务器时也能把 5 个页面的加载态/空态/错误态全部走一遍。
  *
