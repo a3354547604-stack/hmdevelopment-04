@@ -360,57 +360,6 @@ export struct HomePage {
   // 早前三张卡横排，360vp 宽的屏上每张只剩约 101vp，房间名被挤成省略号、
   // 第三张还被屏幕右缘切掉（预览器实测）；老人也更容易读竖排的整行。
 
-  /** 大设备卡头用：一个网关下面挂几个节点，先报数量再报最近上报时间。 */
-  private deviceCount(): number {
-    return this.state.status.nodes.length;
-  }
-
-  private heartbeatLine(): string {
-    // 优先用本机收到数据的时间：设备自己报的 last_heartbeat 可能是手机端时区换算前的值。
-    const ts: number = this.state.updatedAt > 0 ? this.state.updatedAt : this.state.status.last_heartbeat;
-    return this.deviceCount().toString() + ' 个节点 · ' + Formatter.fmtAgo(ts, this.nowMs) + '上报';
-  }
-
-  /**
-   * 大框：网关（守护主机）自身的信息。首页原来是「三行房间直接铺在卡里」，
-   * 看不出这些房间挂在谁身上；把网关做成卡头，才是「一台盒子带多个节点」。
-   */
-  @Builder
-  deviceHeader() {
-    Row({ space: 10 }) {
-      Image($r('app.media.ic_device_box'))
-        .width(AppTheme.ICON_MD)
-        .height(AppTheme.ICON_MD)
-        .fillColor(AppTheme.COLOR_PRIMARY)
-        .objectFit(ImageFit.Contain)
-      Column({ space: 2 }) {
-        Text(this.deviceLabel())
-          .fontSize(AppTheme.FONT_BODY)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.heartbeatLine())
-          .fontSize(AppTheme.FONT_LABEL)
-          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-    }
-    .width('100%')
-    .padding({ top: 12, bottom: 12 })
-    .alignItems(VerticalAlign.Center)
-    .accessibilityGroup(true)
-    .accessibilityText(this.deviceLabel() + '，' + this.heartbeatLine())
-  }
-
-  private deviceLabel(): string {
-    const name: string = SessionStore.deviceName();
-    return name.length > 0 ? name : UserCopy.BOX_NAME;
-  }
-
   /** 传感器类型 → 图标：燃气看灶、门磁看门、有人活动看人、其余用通用芯片。 */
   private nodeIcon(type: string): Resource {
     if (type === 'gas') {
@@ -477,25 +426,27 @@ export struct HomePage {
     return rows * AppTheme.SITE_CELL_HEIGHT + gaps;
   }
 
-  /** 地址标题右侧的「＋」：给这个地址加节点。 */
+  /** 田字格末尾的「＋」格：和小框一样大，虚线框表示"这里还能放东西"。 */
   @Builder
-  addNodeButton(site: string) {
-    Row() {
+  addNodeCell(site: string) {
+    Column() {
       Image($r('app.media.ic_plus'))
-        .width(AppTheme.ICON_SM)
-        .height(AppTheme.ICON_SM)
+        .width(AppTheme.ICON_MD)
+        .height(AppTheme.ICON_MD)
         .fillColor(AppTheme.COLOR_PRIMARY)
         .objectFit(ImageFit.Contain)
     }
-    .width(AppTheme.TOUCH_MIN)
-    .height(AppTheme.TOUCH_MIN)
+    .width('100%')
+    .height(AppTheme.SITE_CELL_HEIGHT)
     .justifyContent(FlexAlign.Center)
-    .margin({ left: 2 })
+    .alignItems(HorizontalAlign.Center)
+    .border({ width: 1, color: AppTheme.COLOR_TEXT_HINT, style: BorderStyle.Dashed })
+    .borderRadius(AppTheme.RADIUS_CELL)
+    .accessibilityGroup(true)
+    .accessibilityText(UserCopy.nodeAddA11y(site))
     .onClick(() => {
       this.openAddNode(site);
     })
-    .accessibilityGroup(true)
-    .accessibilityText(UserCopy.nodeAddA11y(site))
   }
 
   /**
@@ -526,7 +477,6 @@ export struct HomePage {
           .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
           .maxLines(1)
 
-        this.addNodeButton(g.site)
       }
       .width('100%')
       .padding({ top: 12, bottom: 8 })
@@ -540,12 +490,15 @@ export struct HomePage {
             this.nodeCell(n)
           }
         }, (n: NodeItem) => n.sn)
+        GridItem() {
+          this.addNodeCell(g.site)
+        }
       }
       .columnsTemplate('1fr 1fr')
       .columnsGap(8)
       .rowsGap(8)
       .width('100%')
-      .height(this.siteGridHeight(g.nodes.length))
+      .height(this.siteGridHeight(g.nodes.length + 1))
       .margin({ top: 10, bottom: 12 })
     }
     .width('100%')
@@ -618,15 +571,6 @@ export struct HomePage {
                   .width('100%')
                   .padding({ left: 4 })
               }
-
-              // 大设备（网关）单独一张卡：它只是「谁带着这些节点」，不占房间行。
-              Column() {
-                this.deviceHeader()
-              }
-              .width('100%')
-              .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
-              .backgroundColor(AppTheme.COLOR_SURFACE)
-              .borderRadius(AppTheme.CARD_RADIUS)
 
               // 一个地址一张卡：家（厨房/卧室/客厅）、老家（院子）。
               // 平铺成一行行房间会看不出「哪个房间在哪个住处」，老人和家属都要先认地点。
