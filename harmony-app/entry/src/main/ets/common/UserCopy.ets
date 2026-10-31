@@ -87,9 +87,9 @@ export class UserCopy {
   static readonly ALERT_REASON_FALSE: string = '是误报';
   static readonly ALERT_REASON_OTHER: string = '其它情况';
   static readonly ALERT_DONE: string = '已记录，谢谢';
-  static readonly ALERT_HANDLED_TIP: string = '这件事已经处理过了';
-  static readonly ALERT_SEEN_TIP: string = '已经看过了（还没处理）';
-  static readonly ALERT_PENDING_TIP: string = '还没处理';
+  static readonly ALERT_HANDLED_TIP: string = '已处理';
+  static readonly ALERT_SEEN_TIP: string = '已经看过了（暂未处理）';
+  static readonly ALERT_PENDING_TIP: string = '暂未处理';
   static readonly ALERT_GROUP_TODAY: string = '今天';
   static readonly ALERT_GROUP_YESTERDAY: string = '昨天';
   static readonly ALERT_GROUP_EARLIER: string = '更早';

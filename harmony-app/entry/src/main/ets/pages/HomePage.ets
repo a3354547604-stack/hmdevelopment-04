@@ -312,7 +312,7 @@ export struct HomePage {
   private latestLine(): string {
     const when: string = Formatter.fmtAgo(this.latest.ts, this.nowMs);
     const room: string = this.roomOfSn(this.latest.sn);
-    let state: string = '还没处理';
+    let state: string = UserCopy.ALERT_PENDING_TIP;
     if (this.latest.status === 'resolved') {
       state = '已处理';
     } else if (this.latest.status === 'confirmed') {

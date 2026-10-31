@@ -161,7 +161,7 @@ struct ReportPage {
             .fontSize(AppTheme.FONT_NUMBER_MD)
             .fontWeight(FontWeight.Medium)
             .fontColor(s.alerts.pending > 0 ? AppTheme.COLOR_LEVEL2 : AppTheme.COLOR_TEXT_PRIMARY)
-          Text('还没处理')
+          Text(UserCopy.ALERT_PENDING_TIP)
             .fontSize(AppTheme.FONT_CAPTION)
             .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
         }
