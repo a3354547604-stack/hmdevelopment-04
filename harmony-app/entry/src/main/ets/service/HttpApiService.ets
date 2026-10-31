@@ -40,8 +40,29 @@ export class HttpApiService implements ApiPort {
   private readonly net: HttpPort;
 
   constructor(base: string, net: HttpPort) {
-    this.base = base;
+    this.base = HttpApiService.withApiPrefix(base);
     this.net = net;
+  }
+
+  /**
+   * 契约 §6.1：Base URL 是 `http://{host}:80/api`。`RuntimeConfig.baseUrl()` 给的是
+   * **主机地址**（末尾不带 `/`、不带 `/api`，用户可以填 IP 或域名），`/api` 这一层
+   * 由这里统一补：调用点都写 `/devices/{id}/status` 这类相对路径。
+   *
+   * 为什么要在这里补而不是在 RuntimeConfig：用户输入的地址要能容忍误带 `/api`
+   * （normalize 会去掉），所以「加回来」只能发生在一处，否则会出现 `/api/api` 或
+   * 整个前缀丢失——2026-10-31 实测后者：URL 变成 `http://host/devices/1/status`，
+   * 真实服务器 404、mock 也报「mock 路由未登记」。
+   */
+  private static withApiPrefix(base: string): string {
+    let b: string = base;
+    while (b.endsWith('/')) {
+      b = b.substring(0, b.length - 1);
+    }
+    if (b.endsWith('/api')) {
+      return b;
+    }
+    return b + '/api';
   }
 
   // ================================================================ 传输与翻译
