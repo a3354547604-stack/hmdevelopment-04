@@ -1,17 +1,18 @@
 HMProgram 应用端（harmony-app）无设备自检日志
-生成时间（UTC+8）：2026-10-20 22:37:29
-Node：v22.22.1　esbuild：0.28.2
-被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,MockTransport,SessionStore}.ets
+生成时间（UTC+8）：2026-10-31 16:28:44
+Node：v24.22.1　esbuild：0.28.2
+被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,SessionStore}.ets
+自检夹具：harmony-app/tools/{selfcheck-mock-transport,selfcheck-mock-data,selfcheck-mock-gateway}.ets（只用于自检，不进产品包）
 ----------------------------------------------------------------------
 PASS  #01  POST /auth/register                    §6.3    code=   0 http=201  user_id=2 username=newuser
 PASS  #02  POST /auth/login                       §6.4    code=   0 http=200  token=mock.jwt… expires_in=604800 user=daughter01#1
 PASS  #03  GET /devices                           §6.5    code=   0 http=200  total=1 first=M0-3F1A2B/role=owner
 PASS  #04  POST /devices/bind                     §6.6    code=   0 http=201  device_id=1 role=owner
-PASS  #05  GET /devices/{id}/status               §6.7    code=   0 http=200  online=true alarm_state=2 nodes=3 pending=3 props=[presence,last_motion_ts,door,window,temp,humi,smoke,lpg,co,nodes_online,battery,alarm_state,bound_nodes,pair_state]
+PASS  #05  GET /devices/{id}/status               §6.7    code=   0 http=200  online=true alarm_state=2 nodes=3 pending=3 props=[presence,last_motion_ts,door,window,temp,humi,smoke,lpg,co,nodes_online,battery,alarm_state,fall,bound_nodes,pair_state]
 PASS  #06  GET /devices/{id}/readings             §6.8    code=   0 http=200  total=12 first_payload_keys=smoke+temp+humi+adc_mv+warmup
 PASS  #07  GET /devices/{id}/settings             §6.9    code=   0 http=200  source=local keys=21
-PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1792507050281
-PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1792507050402-7 accepted=no_motion_min timeout_s=10
+PASS  #08  PUT /devices/{id}/settings             §6.10   code=   0 http=200  source=local no_motion_min=45 updated_at=1793464125851
+PASS  #09  POST /devices/{id}/config              §6.11   code=   0 http=200  command_id=cmd-1793464125976-7 accepted=no_motion_min timeout_s=10
 PASS  #10  POST /devices/{id}/demo                §6.12   code=   0 http=200  event=gas accepted=demo_trigger
 PASS  #11  GET /alerts                            §6.13   code=   0 http=200  total=4 first=#101/gas/lv2
 PASS  #12  GET /alerts/{id}                       §6.14   code=   0 http=200  alert=#101/confirmed dispositions=0 before=5 after=5
@@ -47,8 +48,8 @@ PASS  #41  §9.2 1602 预检失败（auth / not_found 分母文案）  §12.4   
 PASS  #42  §9.2 1600/1603/1605 降级文案               §9.2    code=1600 http=409  1600='网关不在配网模式' 1603='网关正忙（扫描或连接未结束）' 1605='汇聚离线，网关无法下发'
 PASS  #43  配网地址容错（补 http:// / 去尾斜杠与 /api）         CAL-12  code=   0 http=200  '192.168.2.1/'→http://192.168.2.1 'http://192.168.4.1/api'→http://192.168.4.1 'https://gw.local'→https://gw.local ''→http://192.168.2.1
 PASS  #44  手机号校验只收 11 位数字                         t150    code=   0 http=200  '13800000000'→ok '1380000000'→no '138000000001'→no '1380000000a'→no ''→no ' 13800000000'→no
-PASS  #45  主界文案无技术词（规范 §3）                        t150    code=   0 http=200  检查 113 条主界文案 × 12 个禁词，命中 0 条
-PASS  #46  服务器地址可改可复位 + 离线开关                      t150    code=   0 http=200  默认=http://123.206.99.28 改后=http://10.0.0.9:3000 customFlag=true 复位=http://123.206.99.28 mock关=false
+PASS  #45  主界文案无技术词（规范 §3）                        t150    code=   0 http=200  检查 143 条主界文案 × 12 个禁词，命中 0 条
+PASS  #46  服务器地址可改可复位                             t150    code=   0 http=200  默认=http://123.206.99.28 改后=http://10.0.0.9:3000 customFlag=true 复位=http://123.206.99.28
 PASS  #47  登录/退出触发界面重建（authSeq）                   t150    code=   0 http=200  authSeq 5→7（登录+1、退出+1） clearedUser=''
 PASS  #48  无活动时长 5/120 边界与非法值（t153）               §8.5    code=   0 http=200  clamp 4→5 121→120 30→30 5→5 120→120 NaN→30; step 120+→120 5-→5 30+→35; 范围 5–120 步长 5 默认 30
 PASS  #49  无活动时长只提交该键且离线立即生效（t153）                §6.10   code=   0 http=200  PUT items 键数=1 body={"items":{"no_motion_min":90}} → 再查（GET）items.no_motion_min=90
@@ -57,7 +58,7 @@ PASS  #50  越界值被 1002 拒、上限 120 可提交（t153）           §6.
 合计 50 项，通过 50 项，失败 0 项
 说明：本自检跑的是「真实 HttpApiService + Mock 传输层」，证明 URL 拼接/鉴权头/错误码翻译/契约字段解析可跑通；不代表真实服务器可用。
 ----------------------------------------------------------------------
-结论：以上为「真实 HttpApiService + Mock 传输层」的运行结果。
+结论：以上为「真实 HttpApiService + 自检夹具传输层」的运行结果。
       它证明 URL 拼接 / Authorization 头 / 错误码翻译 / 契约字段解析在无服务器时可用；
       不代表 server/ 真实接口可用（需 server 就绪后按 README 复跑）。
 自检退出码：0（0 = 全部通过；非 0 = 有失败项，此时本脚本也以该码退出）

@@ -15,7 +15,8 @@ cd harmony-app
 # ① 编译（含"门禁自证"）→ 产出 HAP + 构建日志
 bash tools/build-hap.sh
 
-# ② 无设备自检：真实 HttpApiService + Mock 传输层，逐条跑 18 个接口
+# ② 无设备自检：真实 HttpApiService + tools/ 里的自检夹具传输层，逐条跑 50 项
+#    夹具（selfcheck-mock-*.ets）只在自检时用，不进产品包
 bash tools/run-selfcheck.sh
 
 # ③ 预览图（设计预览，非真机截图）+ 内容校验

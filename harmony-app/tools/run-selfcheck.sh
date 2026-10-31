@@ -29,6 +29,10 @@ rm -rf "$WORK"
 mkdir -p "$WORK/node_modules/@kit.NetworkKit" "$WORK/ets" "$WORK/tools"
 cp -r "$REPO/entry/src/main/ets/." "$WORK/ets/"
 cp "$REPO/tools/selfcheck-entry.ts" "$WORK/tools/"
+# 自检夹具：假传输层与假数据只属于自检，**不进产品包**（entry/src/main/ets 里没有它们）
+cp "$REPO/tools/selfcheck-mock-transport.ets" "$WORK/tools/"
+cp "$REPO/tools/selfcheck-mock-data.ets" "$WORK/tools/"
+cp "$REPO/tools/selfcheck-mock-gateway.ets" "$WORK/tools/"
 
 # 桩：只导出 mock 模式永远走不到的 NetHttpClient，`http.createHttp()` 给个占位对象，
 # 一旦被真正调用就抛错——避免"以为测了真实传输层"的假象。
@@ -47,6 +51,7 @@ JS
   --bundle --platform=node --format=cjs --target=node18 \
   --resolve-extensions=.ets,.ts,.js \
   --loader:.ets=ts \
+  --banner:js='globalThis.$r = function (name) { return name; };' \
   --log-level=warning \
   --outfile="$WORK/selfcheck.cjs" || { echo "esbuild 打包失败" >&2; exit 1; }
 
@@ -55,7 +60,8 @@ mkdir -p "$(dirname "$OUT")"
   echo "HMProgram 应用端（harmony-app）无设备自检日志"
   echo "生成时间（UTC+8）：$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')"
   echo "Node：$(node -v)　esbuild：$("$ESBUILD" --version)"
-  echo "被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,MockTransport,SessionStore}.ets"
+  echo "被测代码：harmony-app/entry/src/main/ets/service/{HttpApiService,SessionStore}.ets"
+  echo "自检夹具：harmony-app/tools/{selfcheck-mock-transport,selfcheck-mock-data,selfcheck-mock-gateway}.ets（只用于自检，不进产品包）"
   echo "----------------------------------------------------------------------"
 } > "$OUT"
 
@@ -66,7 +72,7 @@ SC_EXIT="${PIPESTATUS[0]}"
 
 {
   echo "----------------------------------------------------------------------"
-  echo "结论：以上为「真实 HttpApiService + Mock 传输层」的运行结果。"
+  echo "结论：以上为「真实 HttpApiService + 自检夹具传输层」的运行结果。"
   echo "      它证明 URL 拼接 / Authorization 头 / 错误码翻译 / 契约字段解析在无服务器时可用；"
   echo "      不代表 server/ 真实接口可用（需 server 就绪后按 README 复跑）。"
   echo "自检退出码：$SC_EXIT（0 = 全部通过；非 0 = 有失败项，此时本脚本也以该码退出）"

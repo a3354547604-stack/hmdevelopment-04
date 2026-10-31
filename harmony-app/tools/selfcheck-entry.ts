@@ -13,7 +13,7 @@
  */
 
 import { HttpApiService } from '../ets/service/HttpApiService';
-import { MockTransport } from '../ets/service/MockTransport';
+import { MockTransport } from './selfcheck-mock-transport';
 import { SessionStore } from '../ets/service/SessionStore';
 import { ApiResult, NETWORK_ERROR_CODE } from '../ets/model/Result';
 import {
@@ -28,7 +28,7 @@ import {
 import { HttpPort, HttpRequest, HttpResponse } from '../ets/service/HttpClient';
 import { Formatter } from '../ets/common/Formatter';
 import { GatewayApiService, normalizeGatewayUrl } from '../ets/service/GatewayApiService';
-import { MockGatewayTransport } from '../ets/service/MockGatewayTransport';
+import { MockGatewayTransport } from './selfcheck-mock-gateway';
 import { ProvisionStatus, ScanCache, WifiResult, WifiSubmit } from '../ets/model/ProvisionTypes';
 import { AppConfig } from '../ets/common/AppConfig';
 import { RuntimeConfig } from '../ets/common/RuntimeConfig';
@@ -668,17 +668,14 @@ class Runner {
     const isCustom: boolean = RuntimeConfig.isCustomBaseUrl();
     RuntimeConfig.resetBaseUrl();
     const back: string = RuntimeConfig.baseUrl();
-    const mockDefault: boolean = RuntimeConfig.mockMode();
-    RuntimeConfig.setMockMode(false);
-    const mockOff: boolean = RuntimeConfig.mockMode();
-    RuntimeConfig.setMockMode(mockDefault);
+    // 2026-11-01 起 App 不再有离线/在线双模式（假数据通路已删），这条只验地址可改可复位。
     this.cases.push({
-      seq: 46, name: '服务器地址可改可复位 + 离线开关', contract: 't150',
+      seq: 46, name: '服务器地址可改可复位', contract: 't150',
       // 注意：baseUrl() 是「主机根」形式（拼接时再加 /api），所以与常量比较要先归一化。
       ok: def === RuntimeConfig.normalize(AppConfig.SERVER_BASE_URL) && custom.indexOf('10.0.0.9') >= 0
-        && isCustom && back === def && mockOff === false,
+        && isCustom && back === def,
       code: 0, httpStatus: 200,
-      detail: `默认=${def} 改后=${custom} customFlag=${isCustom} 复位=${back} mock关=${mockOff}`
+      detail: `默认=${def} 改后=${custom} customFlag=${isCustom} 复位=${back}`
     });
 
     // #47 登录态切换要触发页面重建（否则退出登录后仍停在首页）
