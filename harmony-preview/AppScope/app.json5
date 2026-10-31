@@ -11,8 +11,8 @@
   "app": {
     "bundleName": "com.hmprogram.eldercare.preview",
     "vendor": "HMProgram",
-    "versionCode": 1000000,
-    "versionName": "1.0.0-preview",
+    "versionCode": 100000,
+    "versionName": "0.1-preview",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }
