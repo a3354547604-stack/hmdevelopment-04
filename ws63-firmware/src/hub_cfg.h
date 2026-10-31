@@ -123,16 +123,26 @@
  * 而 hub_poll_schedule() 只对 READY 发 poll → 一个节点都轮询不到。
  */
 /**
- * 台架测试钩子（t59）：没有网关时把白名单预置成一个 SN（默认 "" = 关闭）。
+ * 台架测试钩子（t59，t173 改为多 SN 列表）
  *
  * 白名单只由网关的 0x22 PAIR_BIND 填充，所以"汇聚 + 节点"两块板的台架上，
  * 汇聚永远连不上任何节点，也就测不到写 CCCD 那一步。启用它只替换"网关下发配对"
  * 这一次交互，其余（连接/交换信息/服务发现/写 CCCD/首帧确认/轮询）都是真路径。
- * **默认必须留空**：留空时 hub_client.c 里那段整体被预处理掉，镜像与不带钩子完全一致。
- * 何时启用：只在没有网关的台架上做订阅链路实测时临时改成 "M1"/"M2"/"M4"。
+ * **默认必须留空**（`HUB_TEST_PREBIND_SN_LIST ""`）：留空时 hub_client.c 里那段整体被预处理掉，
+ * 镜像与不带钩子完全一致。
+ *
+ * t173：从「单个 SN」改成**逗号分隔的列表**。原因很实际 —— 台架上要同时挂
+ * M1（温湿度+气体）和 M2（雷达）两块节点，单 SN 钩子只能连上一块，另一块永远进不了
+ * 白名单，"1 汇聚 + 3 节点"的闭环就没法在无网关台架上跑。
+ * 写法：`"M1,M2"` / `"M1,M2,M4"`；空格与多余逗号会被忽略（`" M1 , M2 "` 等价于 `"M1,M2"`）。
+ * 非法项（SN 不认识、太长）只打 WARN 跳过，不影响其它项，也不会崩。
+ * 解析在 hub_client.c 的 hub_prebind_next() —— 拆成纯函数是为了让 tools/hub-selftest.py
+ * 能把它抠出来单独编跑（真行为断言，不是 grep 源码）。
  */
 #define HUB_TEST_PREBIND_ON     1
-#define HUB_TEST_PREBIND_SN     "M2"
+#define HUB_TEST_PREBIND_SN_LIST "M1,M2"
+/* 列表最多生效几项：手滑粘一整串时不静默全绑，打一次 WARN 后停。4 = 一个汇聚要挂的节点量级。 */
+#define HUB_TEST_PREBIND_SN_MAX  4u
 
 #define HUB_CCCD_STATUS_REJECTED 0x4u    /* 本机拒绝：唯一值得重试的 cfm 状态（见上文第 2 条） */
 #define HUB_SUB_CONFIRM_MS       1500u   /* 写完 CCCD 后等"首帧"的窗口 */

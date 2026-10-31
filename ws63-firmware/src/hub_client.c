@@ -1733,26 +1733,101 @@ static void hub_register_cbks(void)
 }
 
 #if HUB_TEST_PREBIND_ON
-/* 测试钩子（t59）：把白名单预置成 HUB_TEST_PREBIND_SN。
+/* 测试钩子（t59，t173 改为多 SN 列表）：把白名单预置成 HUB_TEST_PREBIND_SN_LIST 里的每个 SN。
  *
  * 为什么需要它：白名单**只**由网关的 0x22 PAIR_BIND 填充（契约 §3.4），
  * 所以"汇聚 + 节点"两块板的台架在没有网关时，汇聚永远连不上任何节点 ——
  * 连不上就测不到 CCCD 这一步。这个钩子只替换"网关下发配对"这一次交互，
  * 之后的连接 / 交换信息 / 服务发现 / 写 CCCD / 首帧确认 / 轮询全是真路径。
  *
- * 默认 HUB_TEST_PREBIND_SN = ""（关闭），镜像与不带钩子的完全一致；
- * 上板时**临时**把它改成 "M1" 再编（做法与证据见 doc/12 的 t59 记录）。
- * 代码内注释说明何时启用：只在没有网关的台架上做订阅链路实测时启用。 */
+ * 为什么 t173 改成列表：台架上要 M1 + M2 **同时**在线，单 SN 只能连一块。
+ * 上板时按需改 `HUB_TEST_PREBIND_SN_LIST`（如 "M1,M2,M4"）再编；正式版把
+ * HUB_TEST_PREBIND_ON 关掉，这段连符号都不存在。
+ */
+/* 从逗号列表里取下一个 SN（纯函数：只吃指针，不碰全局状态）。
+ * 拆出来的理由：tools/hub-selftest.py 会把这个函数体抠出来单独编跑，
+ * 用 "M1,M2,M4" / " M1 , M2 " / "" / 超长项 等用例验证它——比 grep 源码可靠得多。
+ *
+ * 返回值：0 = 没有更多项；>0 = 本次 token 长度；-1 = 这个 token 太长（已被跳完，不会死循环）。
+ * 约定：不论返回什么，*p 总是指向"本 token 之后"（',' 或 '\0'），因此调用方可以直接续取。 */
+static int hub_prebind_next(const char **p, char *out, size_t cap)
+{
+    const char *s;
+    size_t n = 0;
+    int over = 0;
+
+    if (p == NULL || out == NULL || cap == 0u) {
+        return -1;
+    }
+    s = (*p == NULL) ? "" : *p;
+    while (*s == ',' || *s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') {
+        s++;                            /* 分隔符与前导空白：手写列表最容易漏的就是空格 */
+    }
+    if (*s == '\0') {
+        *p = s;
+        return 0;
+    }
+    while (*s != '\0' && *s != ',') {
+        if (*s != ' ' && *s != '\t' && *s != '\r' && *s != '\n') {
+            if (n + 1u < cap) {
+                out[n++] = *s;
+            } else {
+                over = 1;               /* 装不下：先记下来，但继续走完这个 token */
+            }
+        }
+        s++;
+    }
+    out[n] = '\0';
+    *p = s;
+    return (over != 0) ? -1 : (int)n;
+}
+
+static int hub_prebind_apply(const char *list, int64_t now)
+{
+    const char *p = list;
+    char sn[HUB_SN_LEN];
+    int idx = 0;
+    int added = 0;
+
+    for (;;) {
+        uint8_t mac[HUB_MAC_BYTES] = {0};
+        int len = hub_prebind_next(&p, sn, sizeof(sn));
+
+        if (len == 0) {
+            break;
+        }
+        idx++;
+        if (idx > (int)HUB_TEST_PREBIND_SN_MAX) {
+            HUB_LOG("WARN: test prebind list has more than %d entries, rest ignored",
+                (int)HUB_TEST_PREBIND_SN_MAX);
+            break;
+        }
+        if (len < 0) {
+            HUB_LOG("WARN: test prebind sn too long (max %d), ignored", (int)sizeof(sn) - 1);
+            continue;
+        }
+        if (hub_adv_mac_from_sn(sn, mac) != 0) {
+            HUB_LOG("WARN: test prebind sn=%s invalid, ignored", sn);
+            continue;
+        }
+        HUB_LOG("WARN: TEST HOOK prebind %s (no gateway on this bench)", sn);
+        (void)hub_wl_add(&g_agg, sn, mac, now);
+        added++;
+    }
+    return added;
+}
+
 static void hub_test_prebind(int64_t now)
 {
-    uint8_t mac[HUB_MAC_BYTES] = {0};
+    int added = hub_prebind_apply(HUB_TEST_PREBIND_SN_LIST, now);
 
-    if (hub_adv_mac_from_sn(HUB_TEST_PREBIND_SN, mac) != 0) {
-        HUB_LOG("WARN: test prebind sn=%s invalid, ignored", HUB_TEST_PREBIND_SN);
-        return;
+    if (added == 0) {
+        /* 空列表 / 全都不合法：只打 WARN 就返回，主流程照常起（没有白名单 = 没有节点要连，
+         * 与「钩子关闭」的运行态一致）。台架上看到这行就说明列表写错了。 */
+        HUB_LOG("WARN: TEST HOOK prebind list \"%s\" bound 0 node", HUB_TEST_PREBIND_SN_LIST);
+    } else {
+        HUB_LOG("WARN: TEST HOOK prebind done: %d node(s) whitelisted", added);
     }
-    HUB_LOG("WARN: TEST HOOK prebind %s (no gateway on this bench)", HUB_TEST_PREBIND_SN);
-    (void)hub_wl_add(&g_agg, HUB_TEST_PREBIND_SN, mac, now);
 }
 #endif /* HUB_TEST_PREBIND_ON */
 

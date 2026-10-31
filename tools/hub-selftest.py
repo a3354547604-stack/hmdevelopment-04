@@ -857,7 +857,230 @@ def check_uart_tx_path():
     return bad
 
 
-BOARD_UPLINK_RE = re.compile(r"\[GLINK\] -> 0x01 sn=(\S+) seq=(\d+) len=(\d+) body=(.*)$")
+PREBIND_CASE_SRC = r"""
+/* t173 断言台架：hub_prebind_next() / hub_prebind_apply() 从 hub_client.c **原样抠出**编译，
+ * 链接真实的 hub_agg.c / hub_adv.c，验证「列表里每个 SN 都真的进了白名单」。
+ * 为什么不用 grep：grep 只能证明"写了循环"，证明不了 M1、M2 两个 SN 都在白名单里，
+ * 更证明不了 "M1,,M2" / 超长项 / 超过上限这些边界不会崩。 */
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "hub_adv.h"
+#include "hub_agg.h"
+#include "hub_cfg.h"
+
+#define HUB_LOG(fmt, ...) do { printf("      log| " fmt "\n", ##__VA_ARGS__); } while (0)
+
+static hub_agg_t g_agg;
+static int g_bad;
+
+/* ---- 以下两段与 ws63-firmware/src/hub_client.c 逐字相同（由本脚本从源文件抠出） ---- */
+__EXTRACTED__
+
+static void case_tokens(const char *list, const char *const *want, int nwant)
+{
+    const char *p = list;
+    char sn[16];
+    int i = 0;
+    int len = 1;
+
+    while (len > 0) {
+        len = hub_prebind_next(&p, sn, sizeof(sn));
+        if (len > 0) {
+            if (i >= nwant) {
+                printf("  FAIL  列表 \"%s\" 多出第 %d 项 \"%s\"\n", list, i + 1, sn);
+                g_bad++;
+                break;
+            }
+            if (strcmp(sn, want[i]) != 0) {
+                printf("  FAIL  列表 \"%s\" 第 %d 项是 \"%s\"，期望 \"%s\"\n",
+                    list, i + 1, sn, want[i]);
+                g_bad++;
+            }
+            i++;
+        }
+    }
+    if (i != nwant) {
+        printf("  FAIL  列表 \"%s\" 取到 %d 项，期望 %d 项\n", list, i, nwant);
+        g_bad++;
+    }
+}
+
+static void case_too_long(void)
+{
+    const char *p = "ABCDEFGHIJ,M1";        /* 10 字符 > HUB_SN_LEN-1 */
+    char sn[HUB_SN_LEN];
+    int len = hub_prebind_next(&p, sn, sizeof(sn));
+
+    if (len != -1) {
+        printf("  FAIL  超长 SN 没有返回 -1（返回 %d）\n", len);
+        g_bad++;
+    }
+    /* 关键：超长项必须被**消费掉**，否则同一个 token 会被反复取出 → 上板死循环 */
+    len = hub_prebind_next(&p, sn, sizeof(sn));
+    if (len <= 0 || strcmp(sn, "M1") != 0) {
+        printf("  FAIL  超长项之后没能继续取到 M1（len=%d sn=\"%s\"）\n", len, sn);
+        g_bad++;
+    }
+}
+
+static void case_whitelist(const char *list, int expect_n, const char *const *want, int nwant)
+{
+    int added;
+    int i;
+
+    hub_wl_clear(&g_agg);
+    added = hub_prebind_apply(list, 0);
+    if (added != expect_n || hub_wl_count(&g_agg) != expect_n) {
+        printf("  FAIL  列表 \"%s\"：apply 返回 %d、白名单 %d 项，期望 %d 项\n",
+            list, added, hub_wl_count(&g_agg), expect_n);
+        g_bad++;
+    }
+    for (i = 0; i < nwant; i++) {
+        if (hub_wl_index(&g_agg, want[i]) < 0) {
+            printf("  FAIL  列表 \"%s\" 的 %s 没进白名单\n", list, want[i]);
+            g_bad++;
+        }
+    }
+}
+
+int main(void)
+{
+    static const char *const k_default[] = {__DEFAULT_WANT__};
+    static const char *const k_m1m2[] = {"M1", "M2"};
+    static const char *const k_m1m2m4[] = {"M1", "M2", "M4"};
+    static const char *const k_m1[] = {"M1"};
+
+    hub_agg_init(&g_agg, "H1", 0);
+    printf("  默认 HUB_TEST_PREBIND_SN_LIST=\"%s\"（上限 %u 项）\n",
+        HUB_TEST_PREBIND_SN_LIST, (unsigned)HUB_TEST_PREBIND_SN_MAX);
+
+    /* 1) 头文件里的默认列表（t173 的核心：M1+M2 必须都在） */
+    case_tokens(HUB_TEST_PREBIND_SN_LIST, k_default, __DEFAULT_N__);
+    /* 2) 边界写法：空格、多余逗号、空列表、更长列表 */
+    case_tokens("M1,M2", k_m1m2, 2);
+    case_tokens("M1,M2,M4", k_m1m2m4, 3);
+    case_tokens(" M1 , M2 ", k_m1m2, 2);
+    case_tokens("M1,,M2", k_m1m2, 2);
+    case_tokens("", k_m1m2, 0);
+    case_tokens(",,,", k_m1m2, 0);
+    case_too_long();
+
+    /* 3) 端到端：真的进白名单（"能解析"不算过） */
+    case_whitelist(HUB_TEST_PREBIND_SN_LIST, __DEFAULT_N__, k_default, __DEFAULT_N__);
+    case_whitelist("M1,ZZ", 1, k_m1, 1);    /* 非法 SN：只 WARN 跳过，不崩、不挡 M1 */
+    case_whitelist("", 0, k_m1, 0);         /* 空列表：0 项，不崩 */
+
+    /* 4) 超过上限的部分不再绑定（防止手滑粘一整串） */
+    hub_wl_clear(&g_agg);
+    if (hub_prebind_apply("M1,M2,M4,H1,A1", 0) != (int)HUB_TEST_PREBIND_SN_MAX) {
+        printf("  FAIL  超过 HUB_TEST_PREBIND_SN_MAX 时应当只绑 %u 个\n",
+            (unsigned)HUB_TEST_PREBIND_SN_MAX);
+        g_bad++;
+    }
+
+    if (g_bad == 0) {
+        printf("  PASS  多 SN 列表：默认列表解析=期望序列，且全部进入白名单"
+               "（含非法 SN / 空列表 / 超长项 / 超上限用例）\n");
+    }
+    return (g_bad == 0) ? 0 : 1;
+}
+"""
+
+
+def check_prebind_list(cc):
+    """t173：`HUB_TEST_PREBIND_SN_LIST` 多 SN 列表必须**真的**让每个 SN 进白名单。
+
+    旧钩子只认一个 SN（`HUB_TEST_PREBIND_SN "M2"`），M1 永远连不上，
+    "1 汇聚 + 3 节点"在无网关台架上跑不起来。这条断言分三层：
+      1) 头文件：ON 默认 1、列表默认是多 SN、旧单 SN 宏已删；
+      2) 源码：hub_test_prebind() 走的是 hub_prebind_apply(列表) 而不是单发一次；
+      3) 行为：把两个函数抠出来编译运行，用真实 hub_agg/hub_adv 验白名单项数。
+    """
+    print("\n== 台架预绑定多 SN（t173）==")
+    cfg_path = os.path.join(SRC, "hub_cfg.h")
+    cli_path = os.path.join(SRC, "hub_client.c")
+    for path in (cfg_path, cli_path):
+        if not os.path.isfile(path):
+            print("  FAIL  没有 %s" % path)
+            return 1
+    with open(cfg_path, encoding="utf-8") as f:
+        cfg_raw = f.read()
+    with open(cli_path, encoding="utf-8") as f:
+        cli_raw = f.read()
+    cli = _strip_comments(cli_raw)
+    bad = 0
+
+    m_on = re.search(r"#define\s+HUB_TEST_PREBIND_ON\s+(\S+)", cfg_raw)
+    if m_on is None or m_on.group(1).strip() != "1":
+        print("  FAIL  HUB_TEST_PREBIND_ON 默认必须是 1（台架阶段），现在是 %s"
+              % (m_on.group(1) if m_on else "未定义"))
+        bad += 1
+    m_list = re.search(r'#define\s+HUB_TEST_PREBIND_SN_LIST\s+"([^"]*)"', cfg_raw)
+    if m_list is None:
+        print("  FAIL  hub_cfg.h 里没有 HUB_TEST_PREBIND_SN_LIST —— 钩子还是单 SN 形态")
+        return bad + 1
+    default_list = m_list.group(1)
+    default_items = [s.strip() for s in default_list.split(",")]
+    if len(default_items) < 2 or any(not s for s in default_items):
+        print("  FAIL  默认列表 \"%s\" 不是「至少两个有效 SN」—— M1+M2 同时在线的目标没达成"
+              % default_list)
+        bad += 1
+    for sn in ("M1", "M2"):
+        if sn not in default_items:
+            print("  FAIL  默认列表 \"%s\" 里没有 %s" % (default_list, sn))
+            bad += 1
+    if re.search(r"#define\s+HUB_TEST_PREBIND_SN\s", cfg_raw):
+        print("  FAIL  hub_cfg.h 还留着旧的单 SN 宏 HUB_TEST_PREBIND_SN —— 两个宏并存迟早有人改错一个")
+        bad += 1
+    if re.search(r"\bHUB_TEST_PREBIND_SN\b(?!_)", cli):
+        print("  FAIL  hub_client.c 还在引用旧的单 SN 宏 HUB_TEST_PREBIND_SN")
+        bad += 1
+
+    hook = _func_body(cli, "hub_test_prebind")
+    if hook is None:
+        print("  FAIL  找不到 hub_test_prebind()")
+        return bad + 1
+    if "hub_prebind_apply(" not in hook:
+        print("  FAIL  hub_test_prebind() 没有走 hub_prebind_apply(列表) —— 还是一根 SN 的写法")
+        bad += 1
+    apply_body = _func_body(cli, "hub_prebind_apply")
+    if apply_body is None:
+        print("  FAIL  找不到 hub_prebind_apply()")
+        return bad + 1
+    if "hub_prebind_next(" not in apply_body or "hub_wl_add(" not in apply_body:
+        print("  FAIL  hub_prebind_apply() 里没有「逐个取 + hub_wl_add」—— 列表不会被逐个绑定")
+        bad += 1
+    if "for (;;)" not in apply_body:
+        print("  FAIL  hub_prebind_apply() 不是循环 —— 只可能绑一个 SN")
+        bad += 1
+
+    next_f = _func_body(cli, "hub_prebind_next")
+    if next_f is None:
+        print("  FAIL  找不到 hub_prebind_next()（列表解析必须能单测，不能只写在 prebind 里）")
+        return bad + 1
+
+    src = (PREBIND_CASE_SRC
+           .replace("__EXTRACTED__", "static int " + next_f + "\n\nstatic int " + apply_body + "\n")
+           .replace("__DEFAULT_WANT__", ", ".join('"%s"' % s for s in default_items))
+           .replace("__DEFAULT_N__", str(len(default_items))))
+    with tempfile.TemporaryDirectory() as td:
+        exe, err = _compile_one(cc, "prebind", src, ["hub_agg.c", "hub_json.c", "hub_adv.c"], td)
+        if exe is None:
+            print("  FAIL  多 SN 用例台架：" + err)
+            return bad + 1
+        rp = subprocess.run([exe], capture_output=True, text=True)
+    print(rp.stdout, end="")
+    if rp.stderr.strip():
+        print(rp.stderr, file=sys.stderr)
+    if rp.returncode != 0:
+        bad += 1
+    return bad
+
+
+
 BOARD_NODE_TX_RE = re.compile(r"\[(\S+)\] tx (\d+) bytes: (\{.*\})\s*$")
 BOARD_TS_RE = re.compile(r'"ts":(\d+)')
 BOARD_STAT_KEYS = {
@@ -868,6 +1091,9 @@ BOARD_STAT_KEYS = {
     "ev_off": r"ev_off=(\d+)",
 }
 BOARD_STAT_TX_RE = re.compile(r"tx\(ok=(\d+) err=(\d+) short=(\d+) param=(\d+)\)")
+
+
+BOARD_UPLINK_RE = re.compile(r"\[GLINK\] -> 0x01 sn=(\S+) seq=(\d+) len=(\d+) body=(.*)$")
 
 
 def _board_parse_stat(text):
@@ -1115,9 +1341,10 @@ def main():
     upfail = check_uplink_forward(cc)
     pffail = check_pump_forwards()
     txfail = check_uart_tx_path()
+    pbfail = check_prebind_list(cc)
     blfail = check_board_log(board_log, node_log)
     total_bad = ((1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail + ssfail
-                 + pafail + upfail + pffail + txfail + blfail)
+                 + pafail + upfail + pffail + txfail + pbfail + blfail)
     print("\n==== hub-selftest 总判定：%s ====" % ("PASS" if total_bad == 0 else "FAIL"))
     print("日志：ws63-firmware/out/hub-selftest.log；mock 聚合证据：ws63-firmware/out/hub-mock-agg.log")
     return 0 if total_bad == 0 else 1
