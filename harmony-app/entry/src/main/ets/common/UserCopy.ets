@@ -136,7 +136,7 @@ export class UserCopy {
   // ---------- 我的 ----------
   static readonly PROFILE_TITLE: string = '我的';
   static readonly SEC_FAMILY: string = '家人';
-  static readonly SEC_DEVICE: string = '绑定的设备';
+  static readonly SEC_DEVICE: string = '设备';
   static readonly SEC_NOTIFY: string = '手机提醒';
   static readonly SEC_SECURITY: string = '账号';
   static readonly SEC_ABOUT: string = '关于';
