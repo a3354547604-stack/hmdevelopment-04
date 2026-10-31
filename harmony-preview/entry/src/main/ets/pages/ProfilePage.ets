@@ -19,7 +19,7 @@ import { SwitchRow } from '../components/SettingRows';
 import { PREVIEW_USERNAME } from '../data/PreviewData';
 
 /** 预览版自己的版本串，一眼能和正式包区分开。 */
-const VERSION: string = '1.0.0-preview';
+const VERSION: string = '0.1-preview';
 /** 连点几次展开高级区。 */
 const ADVANCED_TAP_COUNT: number = 5;
 const KEY_LOGGED_IN: string = 'previewLoggedIn';
