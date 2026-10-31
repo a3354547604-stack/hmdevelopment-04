@@ -194,7 +194,7 @@ export struct HomePage {
     return Formatter.fmtAgo(this.state.updatedAt, this.nowMs) + '看过';
   }
 
-  /** 网络不好 / 守护主机联系不上：只在真出问题时出现，正常时整条不占空间。 */
+  /** 网络不好 / 主机联系不上：只在真出问题时出现，正常时整条不占空间。 */
   private troubleText(): string {
     if (this.state.errorText.length > 0) {
       return UserCopy.HOME_NET_WEAK;
@@ -206,7 +206,7 @@ export struct HomePage {
   }
 
   // ------------------------------------------------------------ 地址分组
-  // 一台「守护主机」下面挂多个节点，而家属的设备是分散在不同住处的：
+  // 一台「主机」下面挂多个节点，而家属的设备是分散在不同住处的：
   // 家（厨房 / 卧室 / 客厅）、老家（院子）。所以首页要画「网关 → 地址 → 房间」三层，
   // 光把房间平铺成几行看不出「哪个房间在哪个住处」。
   private siteOf(n: NodeItem): string {
@@ -425,7 +425,7 @@ export struct HomePage {
     .padding({ top: 6, bottom: 6 })
   }
 
-  /** 节点详情：只读展示，不给「删除/重命名」——那些要走守护主机本地页面。 */
+  /** 节点详情：只读展示，不给「删除/重命名」——那些要走主机本地页面。 */
   @Builder
   nodeSheet() {
     Column({ space: 2 }) {
@@ -689,7 +689,7 @@ export struct HomePage {
               .borderRadius(AppTheme.CARD_RADIUS)
               .alignItems(HorizontalAlign.Start)
 
-              // 网络/守护主机异常：只在真有问题时出现
+              // 网络/主机异常：只在真有问题时出现
               if (this.troubleText().length > 0) {
                 Text(this.troubleText())
                   .fontSize(AppTheme.FONT_CAPTION)
