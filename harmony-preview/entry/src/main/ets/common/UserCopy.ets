@@ -337,8 +337,6 @@ export class UserCopy {
   static readonly ADD_NODE_LIST_HINT: string = '列表里没有？确认节点已通电、离手机近一些，再点「重新搜索」';
   static readonly ADD_NODE_CONNECT: string = '连接';
   static readonly ADD_NODE_KEEP_NEAR: string = '别走远，让节点靠近手机';
-  static readonly ADD_NODE_SITE_TITLE: string = '这个节点放在哪个地点？';
-  static readonly ADD_NODE_SITE_HINT: string = '配好后它会出现在首页对应地点下面的格子里';
   static readonly ADD_NODE_DONE: string = '完成';
   static readonly ADD_NODE_RSSI_STRONG: string = '信号强';
   static readonly ADD_NODE_RSSI_MIDDLE: string = '信号中';
@@ -354,6 +352,11 @@ export class UserCopy {
 
   static addConnectedTitle(name: string): string {
     return '已连上 ' + name;
+  }
+
+  /** 连上后的归位说明：地点是点＋时所在的地址，不用再选。 */
+  static addNodePlaceHint(site: string): string {
+    return '会出现在「' + site + '」下面的格子里';
   }
 
   static nodeAddedToast(site: string, name: string): string {

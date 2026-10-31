@@ -5,7 +5,7 @@
  * 「搜到附近待配对的节点 → 选中 → 连上 → 放到哪个地点」，写成对话步骤
  * 等于把 App 该做的事推给用户（还要用户自己回首页下拉刷新确认）。
  *
- * 四个状态：搜索中 → 发现列表 → 连接中 → 归位（选地点）→ 完成回首页。
+ * 四个状态：搜索中 → 发现列表 → 连接中 → 连上（直接归到点进来的那个地址）→ 完成回首页。
  * 预览版没有蓝牙权限也没有真实设备，扫描结果用 `mockDevices()` 模拟；
  * 正式版的扫描/配对接口待接（见 harmony-app 同名文件里的说明）。
  */
@@ -42,7 +42,6 @@ export struct AddNodePage {
   @State devices: NearbyNode[] = [];
   @State picked: NearbyNode = new NearbyNode();
   @State site: string = UserCopy.SITE_HOME;
-  private siteOptions: string[] = [UserCopy.SITE_HOME, UserCopy.SITE_HOMETOWN];
   private scanTimer: number = -1;
   private connectTimer: number = -1;
 
@@ -289,8 +288,12 @@ export struct AddNodePage {
     .justifyContent(FlexAlign.Center)
   }
 
+  /**
+   * 连上之后直接告诉用户「会放到哪儿」，不再让选地点：
+   * ＋是从某个地址的格子里点进来的，地点已经确定了，再问一遍等于让用户重答刚答过的问题。
+   */
   @Builder
-  siteView() {
+  doneView() {
     Column({ space: 12 }) {
       Row({ space: 8 }) {
         Image($r('app.media.ic_ok_circle'))
@@ -298,67 +301,24 @@ export struct AddNodePage {
           .height(AppTheme.ICON_MD)
           .fillColor(AppTheme.COLOR_LEVEL0)
           .objectFit(ImageFit.Contain)
-        Text(UserCopy.addConnectedTitle(this.picked.name))
-          .fontSize(AppTheme.FONT_BODY)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        Column({ space: 2 }) {
+          Text(UserCopy.addConnectedTitle(this.picked.name))
+            .fontSize(AppTheme.FONT_BODY)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+          Text(UserCopy.addNodePlaceHint(this.site))
+            .fontSize(AppTheme.FONT_LABEL)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
       }
       .width('100%')
       .padding(AppTheme.CARD_PADDING)
       .backgroundColor(AppTheme.COLOR_SURFACE)
       .borderRadius(AppTheme.CARD_RADIUS)
-
-      Text(UserCopy.ADD_NODE_SITE_TITLE)
-        .fontSize(AppTheme.FONT_LABEL)
-        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-        .width('100%')
-        .padding({ top: 4 })
-
-      Column() {
-        ForEach(this.siteOptions, (s: string, index: number) => {
-          Row({ space: 8 }) {
-            Image($r('app.media.ic_family'))
-              .width(AppTheme.ICON_SM)
-              .height(AppTheme.ICON_SM)
-              .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
-              .objectFit(ImageFit.Contain)
-            Text(s)
-              .fontSize(AppTheme.FONT_BODY)
-              .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-              .layoutWeight(1)
-            if (this.site === s) {
-              Image($r('app.media.ic_ok_check'))
-                .width(AppTheme.ICON_SM)
-                .height(AppTheme.ICON_SM)
-                .fillColor(AppTheme.COLOR_PRIMARY)
-                .objectFit(ImageFit.Contain)
-            }
-          }
-          .width('100%')
-          .height(AppTheme.BTN_HEIGHT)
-          .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING })
-          .accessibilityGroup(true)
-          .accessibilitySelected(this.site === s)
-          .accessibilityText(s)
-          .onClick(() => {
-            this.site = s;
-          })
-          if (index < this.siteOptions.length - 1) {
-            Divider()
-              .strokeWidth(AppTheme.LINE_WIDTH)
-              .color(AppTheme.COLOR_DIVIDER)
-          }
-        }, (s: string) => s)
-      }
-      .width('100%')
-      .backgroundColor(AppTheme.COLOR_SURFACE)
-      .borderRadius(AppTheme.CARD_RADIUS)
-
-      Text(UserCopy.ADD_NODE_SITE_HINT)
-        .fontSize(AppTheme.FONT_LABEL)
-        .fontColor(AppTheme.COLOR_TEXT_HINT)
-        .lineHeight(20)
-        .width('100%')
+      .accessibilityGroup(true)
+      .accessibilityText(UserCopy.addConnectedTitle(this.picked.name) + '，' + UserCopy.addNodePlaceHint(this.site))
 
       Blank()
 
@@ -388,7 +348,7 @@ export struct AddNodePage {
       } else if (this.step === STEP_CONNECTING) {
         this.connectingView()
       } else {
-        this.siteView()
+        this.doneView()
       }
     }
     .width('100%')
