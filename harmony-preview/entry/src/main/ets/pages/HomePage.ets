@@ -329,14 +329,16 @@ export struct HomePage {
       Image($r('app.media.ic_plus'))
         .width(AppTheme.ICON_MD)
         .height(AppTheme.ICON_MD)
-        .fillColor(AppTheme.COLOR_PRIMARY)
+        // 占位格不该比真节点抢眼：主色＋深灰虚线会让它看着像可点的按钮，
+        // 这里用最淡的提示色，只留"还能放东西"的暗示。
+        .fillColor(AppTheme.COLOR_TEXT_HINT)
         .objectFit(ImageFit.Contain)
     }
     .width('100%')
     .height(AppTheme.SITE_CELL_HEIGHT)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
-    .border({ width: 1, color: AppTheme.COLOR_TEXT_HINT, style: BorderStyle.Dashed })
+    .border({ width: 1, color: AppTheme.COLOR_DIVIDER, style: BorderStyle.Dashed })
     .borderRadius(AppTheme.RADIUS_CELL)
     .accessibilityGroup(true)
     .accessibilityText(UserCopy.nodeAddA11y(site))
