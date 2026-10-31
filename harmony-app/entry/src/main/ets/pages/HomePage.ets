@@ -385,6 +385,14 @@ export struct HomePage {
   // 第三张还被屏幕右缘切掉（预览器实测）；老人也更容易读竖排的整行。
 
   /** 传感器类型 → 图标：燃气看灶、门磁看门、有人活动看人、其余用通用芯片。 */
+  /** 半模态贴底，需要吃掉手势条高度（预览器里读不到，恒 0）。 */
+  @StorageProp('safeBottom') safeBottom: number = 0;
+  /** 节点详情半模态：点某一格时把该节点塞进 sheet 再打开。 */
+  @State sheetOn: boolean = false;
+  @State sheet: NodeSheetInfo = new NodeSheetInfo();
+  /** 正在按下的节点 SN：只用来给那一格换底色，做出「按下去」的反馈。 */
+  @State pressedSn: string = '';
+
   private nodeIcon(type: string): Resource {
     if (type === 'gas') {
       return $r('app.media.ic_room_gas');
@@ -399,6 +407,90 @@ export struct HomePage {
   }
 
   /** 田字格里的一格节点：房间名 + 传感器 + 读数，两列并排。 */
+  /** 半模态里的一行：左边标签、右边值。 */
+  @Builder
+  sheetRow(label: string, value: string, valueColor: Resource) {
+    Row({ space: 8 }) {
+      Text(label)
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .layoutWeight(1)
+      Text(value)
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(valueColor)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .width('100%')
+    .padding({ top: 6, bottom: 6 })
+  }
+
+  /** 节点详情：只读展示，不给「删除/重命名」——那些要走守护主机本地页面。 */
+  @Builder
+  nodeSheet() {
+    Column({ space: 2 }) {
+      this.sheetRow(UserCopy.NODE_TYPE_LABEL, this.sensorName(this.sheet.type), AppTheme.COLOR_TEXT_PRIMARY)
+      this.sheetRow(UserCopy.NODE_STATE_LABEL,
+        this.sheet.online ? UserCopy.NODE_ONLINE : UserCopy.NODE_LOST,
+        this.sheet.online ? AppTheme.COLOR_LEVEL0_TEXT : AppTheme.COLOR_LEVEL2_TEXT)
+      this.sheetRow(UserCopy.NODE_LAST_LABEL, Formatter.fmtAgo(this.sheet.lastSeen, this.nowMs),
+        AppTheme.COLOR_TEXT_PRIMARY)
+      if (this.sheet.rssi < 0) {
+        this.sheetRow(UserCopy.NODE_SIGNAL_LABEL, this.rssiText(this.sheet.rssi), AppTheme.COLOR_TEXT_PRIMARY)
+      }
+      if (this.sheet.battery >= 0) {
+        this.sheetRow(UserCopy.NODE_BATTERY_LABEL, this.batteryText(this.sheet.battery), AppTheme.COLOR_TEXT_PRIMARY)
+      }
+      Text(UserCopy.NODE_SHEET_HINT)
+        .fontSize(AppTheme.FONT_LABEL)
+        .fontColor(AppTheme.COLOR_TEXT_HINT)
+        .width('100%')
+        .margin({ top: 8, bottom: 12 })
+      PrimaryButton({
+        text: UserCopy.NODE_SHEET_OK,
+        canTap: true,
+        loading: false,
+        onTap: () => {
+          this.sheetOn = false;
+        }
+      })
+    }
+    .width('100%')
+    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, bottom: 16 + this.safeBottom })
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  private openNode(n: NodeItem): void {
+    const info: NodeSheetInfo = new NodeSheetInfo();
+    info.sn = n.sn;
+    info.location = n.location;
+    info.type = n.type;
+    info.online = n.online;
+    info.lastSeen = n.last_seen;
+    info.rssi = n.rssi !== undefined ? n.rssi : -1;
+    info.battery = n.battery !== undefined ? n.battery : -1;
+    this.sheet = info;
+    this.sheetOn = true;
+  }
+
+  /** 信号强弱：阈值和配网页保持一致（-55 / -70）。 */
+  private rssiText(rssi: number): string {
+    if (rssi >= -55) {
+      return UserCopy.ADD_NODE_RSSI_STRONG;
+    } else if (rssi >= -70) {
+      return UserCopy.ADD_NODE_RSSI_MIDDLE;
+    }
+    return UserCopy.ADD_NODE_RSSI_WEAK;
+  }
+
+  /** 契约里 255 表示外接电源（不是「电量 255%」），别直接印出来。 */
+  private batteryText(battery: number): string {
+    if (battery > 100) {
+      return UserCopy.NODE_POWERED;
+    }
+    return battery.toString() + '%';
+  }
+
   @Builder
   nodeCell(n: NodeItem) {
     Column({ space: 2 }) {
@@ -441,7 +533,18 @@ export struct HomePage {
     .borderRadius(AppTheme.RADIUS_CELL)
     .accessibilityGroup(true)
     .accessibilityText(n.location + '，' + this.sensorName(n.type) + '，' + this.sensorValue(n))
-  }
+    // 按下换底色：小框整块可点，不换色的话用户不知道点没点中
+    .backgroundColor(this.pressedSn === n.sn ? AppTheme.COLOR_DIVIDER : AppTheme.COLOR_BG)
+    .borderRadius(AppTheme.RADIUS_CELL)
+    .accessibilityGroup(true)
+    .accessibilityText(n.location + '，' + this.sensorName(n.type) + '，' + this.sensorValue(n))
+    .onTouch((e: TouchEvent) => {
+      this.pressedSn = e.type === TouchType.Down || e.type === TouchType.Move ? n.sn : '';
+    })
+    .onClick(() => {
+      this.pressedSn = '';
+      this.openNode(n);
+    })  }
 
   /** 田字格要几行：两列，向上取整；单数时最后一格留空。 */
   private siteGridHeight(count: number): number {
@@ -712,6 +815,10 @@ export struct HomePage {
     .width('100%')
     .height('100%')
     .backgroundColor(AppTheme.COLOR_BG)
+    .bindSheet($$this.sheetOn, this.nodeSheet(), {
+      height: SheetSize.FIT_CONTENT,
+      title: { title: this.sheet.location }
+    })
   }
 
   @Builder
@@ -777,4 +884,17 @@ class LatestAlert {
 class SiteGroup {
   site: string = '';
   nodes: NodeItem[] = [];
+}
+
+/** 节点详情半模态的数据：直接摊平，省一个 @State 对象数组。 */
+class NodeSheetInfo {
+  sn: string = '';
+  location: string = '';
+  type: string = '';
+  online: boolean = false;
+  lastSeen: number = 0;
+  /** -1 表示接口没给（不是「信号 -1 dBm」）。 */
+  rssi: number = -1;
+  /** -1 表示接口没给；>100 是契约里的「外接电源」。 */
+  battery: number = -1;
 }
