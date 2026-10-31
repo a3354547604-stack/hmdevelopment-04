@@ -11,7 +11,7 @@
  *    否则用户看到的还是几十分钟前的状态。
  */
 
-import { promptAction, router } from '@kit.ArkUI';
+import { router } from '@kit.ArkUI';
 import { HomeViewModel, HomeState } from '../viewmodel/HomeViewModel';
 import { AppTheme, LiteralConstants } from '../common/AppTheme';
 import { Formatter } from '../common/Formatter';
@@ -452,15 +452,12 @@ export struct HomePage {
   }
 
   /**
-   * 点「＋」后的说明。App 现在没有节点绑定接口（契约 §4.5 的 pair_scan/pair_bind
-   * 只在网关本地页面用），所以这里给操作步骤，不给一个假成功的按钮。
+   * 点「＋」进添加节点页：搜索 → 选中 → 连接 → 选地点，和蓝牙添加设备一个路子。
+   * 起始地址通过 AppStorage 带过去（router 的 params 在预览器/真机上取参不一致）。
    */
   private openAddNode(site: string): void {
-    promptAction.showDialog({
-      title: UserCopy.NODE_ADD_TITLE,
-      message: UserCopy.nodeAddMessage(site),
-      buttons: [{ text: UserCopy.NODE_ADD_OK, color: '#0E7C66' }]
-    }).catch(() => {});
+    AppStorage.setOrCreate<string>('addNodeSite', site);
+    router.pushUrl({ url: 'pages/AddNodePage' }).catch(() => {});
   }
 
   /** 一个地址一张卡：标题是「家 / 老家」，右侧是规模与在线数，下面是这个地址的房间行。 */

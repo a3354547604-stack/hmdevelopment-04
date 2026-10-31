@@ -209,7 +209,8 @@ export class UserCopy {
       UserCopy.ROOM_PREFIX, UserCopy.SENSOR_GAS, UserCopy.SENSOR_DOOR, UserCopy.SENSOR_PRESENCE,
       UserCopy.GAS_OK, UserCopy.GAS_HIGH, UserCopy.GAS_VERY_HIGH, UserCopy.DOOR_OPEN,
       UserCopy.DOOR_CLOSED, UserCopy.PRESENCE_YES, UserCopy.PRESENCE_NO, UserCopy.NODE_NORMAL,
-      UserCopy.NODE_LOST, UserCopy.ENV_TEMP, UserCopy.ENV_HUMI, UserCopy.NODE_ADD_TITLE, UserCopy.NODE_ADD_OK,
+      UserCopy.NODE_LOST, UserCopy.ENV_TEMP, UserCopy.ENV_HUMI, UserCopy.NODE_ADD_TITLE,
+      UserCopy.ADD_NODE_SCANNING, UserCopy.ADD_NODE_EMPTY, UserCopy.ADD_NODE_DONE,
       UserCopy.ALERT_FILTER_ALL, UserCopy.ALERT_FILTER_PENDING, UserCopy.ALERT_EMPTY,
       UserCopy.ALERT_LIST_TITLE, UserCopy.ALERT_DETAIL_TITLE, UserCopy.ALERT_BTN_KNOW,
       UserCopy.ALERT_BTN_HANDLED, UserCopy.ALERT_NOTE_HINT, UserCopy.ALERT_REASON_PICK,
@@ -321,16 +322,42 @@ export class UserCopy {
   }
 
   static readonly NODE_ADD_TITLE: string = '添加节点';
-  static readonly NODE_ADD_OK: string = '知道了';
 
   /** 「＋」按钮的读屏文案：说清是往哪个地址加。 */
   static nodeAddA11y(site: string): string {
     return '在' + site + '添加节点';
   }
 
-  /** 加节点的线下三步：App 侧还没有绑定接口，先把要做的事说清楚。 */
-  static nodeAddMessage(site: string): string {
-    return '① 把节点放到「' + site + '」并通电；② 长按守护主机的配对键 3 秒，指示灯快闪；③ 回到首页下拉刷新，节点会出现在这里。';
+  // —— 添加节点页（蓝牙配对流程：搜索 → 选中 → 连接 → 归位）——
+  static readonly ADD_NODE_SCANNING: string = '正在搜索附近节点…';
+  static readonly ADD_NODE_SCAN_HINT: string =
+    '让节点通电，指示灯快闪就说明它在等人配（长按 3 秒可重新进入配对）';
+  static readonly ADD_NODE_RESCAN: string = '重新搜索';
+  static readonly ADD_NODE_EMPTY: string = '附近没有发现节点';
+  static readonly ADD_NODE_LIST_HINT: string = '列表里没有？确认节点已通电、离手机近一些，再点「重新搜索」';
+  static readonly ADD_NODE_CONNECT: string = '连接';
+  static readonly ADD_NODE_KEEP_NEAR: string = '别走远，让节点靠近手机';
+  static readonly ADD_NODE_SITE_TITLE: string = '这个节点放在哪个地点？';
+  static readonly ADD_NODE_SITE_HINT: string = '配好后它会出现在首页对应地点下面的格子里';
+  static readonly ADD_NODE_DONE: string = '完成';
+  static readonly ADD_NODE_RSSI_STRONG: string = '信号强';
+  static readonly ADD_NODE_RSSI_MIDDLE: string = '信号中';
+  static readonly ADD_NODE_RSSI_WEAK: string = '信号弱';
+
+  static addFoundTitle(count: number): string {
+    return '发现 ' + count.toString() + ' 个可添加的节点';
+  }
+
+  static addConnectingTitle(name: string): string {
+    return '正在连接 ' + name + '…';
+  }
+
+  static addConnectedTitle(name: string): string {
+    return '已连上 ' + name;
+  }
+
+  static nodeAddedToast(site: string, name: string): string {
+    return '已把 ' + name + ' 放到「' + site + '」';
   }
 
   static fmtBatteryText(v: number): string {
