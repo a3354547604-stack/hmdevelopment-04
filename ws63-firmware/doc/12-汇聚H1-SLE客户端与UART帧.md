@@ -286,7 +286,7 @@ python3 tools/node-compile-check.py    # 41 个（目标 × 文件）编译，�
 
 白名单**只**由网关的 `0x22 PAIR_BIND` 填充（契约 §3.4）。两板台架上没有网关时汇聚
 永远连不上任何节点，也就走不到写 CCCD 那一步。因此加了默认关闭的
-`HUB_TEST_PREBIND_ON / HUB_TEST_PREBIND_SN`（`ws63-firmware/src/hub_cfg.h`），
+`HUB_TEST_PREBIND_ON / HUB_TEST_PREBIND_SN_LIST`（`ws63-firmware/src/hub_cfg.h`），
 它**只替换「网关下发配对」这一次交互**。
 
 **默认关闭时镜像与「没有钩子」逐位一致（实测）**：
@@ -624,7 +624,7 @@ t70 修的两条 P0 缺陷（§11、§12）在主机侧只能证到「代码是�
 ### 14.2 台架、镜像来源与「钩子」的边界
 
 - 板 A = **COM15 汇聚**；板 B = **COM14 节点（`out/NODE_M1.fwpkg`，含当前 `sle_hub.c`）**；两块板各跑 260 s（> 卡面要求的 180 s）。
-- 本台架**没有网关**：契约 §3.4 的白名单只由网关 0x22 帧填充，没有网关 ⇒ 汇聚永远连不上节点。因此用 `hub_cfg.h` 的 t59 测试钩子**临时**编一份台架镜像（`HUB_TEST_PREBIND_ON 1` + `HUB_TEST_PREBIND_SN "M1"`）：
+- 本台架**没有网关**：契约 §3.4 的白名单只由网关 0x22 帧填充，没有网关 ⇒ 汇聚永远连不上节点。因此用 `hub_cfg.h` 的 t59 测试钩子**临时**编一份台架镜像（`HUB_TEST_PREBIND_ON 1` + `HUB_TEST_PREBIND_SN_LIST "M1"`，多 SN 版本用 `"M1,M2"`）：
   - 台架镜像（含钩子）= 1474344 B / `sha256 bc370b489b991b85ca3736cf3b16a1835771a61b75ff93058b9a9f60e83441d3`；
   - 编完立刻 `git checkout -- ws63-firmware/src/hub_cfg.h` 还原（钩子回 `0`/`""`），再**重新构建生产镜像**并烧回 COM15：
     `out/HUB_HUB.fwpkg` = 1474152 B / `sha256 6abfcbe54f0008d92c8e562c16fb7c67761aa28ae0a3ec740e5084679471c02f`，与 22:0x 那次生产构建**逐位相同**（`REBUILD_RC=0`，`.fwpkg` 可复现的又一例）。
