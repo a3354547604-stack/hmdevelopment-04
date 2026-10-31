@@ -195,7 +195,7 @@ export struct ProfilePage {
                 Text(PREVIEW_USERNAME)
                   .fontSize(AppTheme.FONT_BODY)
                   .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-                Text('负责照看家里的守护主机')
+                Text('负责照看家里的主机')
                   .fontSize(AppTheme.FONT_CAPTION)
                   .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
               }
@@ -210,7 +210,7 @@ export struct ProfilePage {
         }
         .width('100%')
 
-        // 设备：不再重复展示守护主机名字（首页地址卡里已经有），只留「添加设备」入口
+        // 设备：不再重复展示主机名字（首页地址卡里已经有），只留「添加设备」入口
         Column({ space: 4 }) {
           this.card(UserCopy.SEC_DEVICE)
           Column() {

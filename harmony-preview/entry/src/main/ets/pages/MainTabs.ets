@@ -69,8 +69,8 @@ export struct MainTabs {
   build() {
     Column() {
       // 顶部条：这一行是「App 身份 + 云连接状态」，不重复设备名——
-      // 网关名归首页那张大设备卡（守护主机 / N 个节点 / 上报时间），
-      // 两处都写「守护主机」会让首页出现两个同名标题。
+      // 网关名归首页那张大设备卡（主机 / N 个节点 / 上报时间），
+      // 两处都写「主机」会让首页出现两个同名标题。
       Row({ space: 8 }) {
         Text(UserCopy.APP_NAME)
           .fontSize(AppTheme.FONT_BODY)

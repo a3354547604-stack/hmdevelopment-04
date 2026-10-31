@@ -2,7 +2,7 @@
  * 「使用帮助」页（预览版）。
  *
  * 为什么单独做一页：这些内容原本一句都没有，家人第一次用只会靠问。
- * 只写产品**现在真的会做的事**（点「已处理」不再催、数据在守护主机上、
+ * 只写产品**现在真的会做的事**（点「已处理」不再催、数据在主机上、
  * 不采集画面和声音），不写「即将上线」这类占位承诺。
  *
  * 与正式版逐字相同（纯静态文案，没有数据依赖）。
@@ -31,30 +31,20 @@ export struct HelpPage {
 
   private entries(): HelpEntry[] {
     const list: HelpEntry[] = [];
-    list.push(new HelpEntry('提醒太多怎么办',
-      '在「提醒」页点开一条，看完点「已处理」，这条就不会再催。\n' +
-      '只想知道有没有事，看首页最上面的那句话就够了。'));
-    list.push(new HelpEntry('想知道这周的情况',
-      '首页最下面点「看看这周」，能按天看活动次数、提醒条数和最长没动静时长。\n' +
-      '白天 06:00–22:00 之外不算「没动静」，夜里睡觉本来就不动。'));
-    list.push(new HelpEntry('怎么添加新节点',
-      '把节点放到要监测的房间并通电，等指示灯闪。\n' +
-      '在首页对应的地址卡最后一格点虚线＋，靠近节点等它连上就行。'));
-    list.push(new HelpEntry('提醒会发到哪',
-      '只发到已登录的家人手机。\n' +
-      '关掉「有情况时在手机上提醒我」之后，提醒只在 App 里显示。'));
-    list.push(new HelpEntry('我的数据存在哪',
-      '传感数据存在家里的守护主机上，不上传云端。\n' +
-      '换手机登录同一个账号，看到的是同一份数据。'));
+    list.push(new HelpEntry(UserCopy.HELP_Q_ALERT_TITLE, UserCopy.HELP_Q_ALERT_BODY));
+    list.push(new HelpEntry(UserCopy.HELP_Q_WEEK_TITLE, UserCopy.HELP_Q_WEEK_BODY));
+    list.push(new HelpEntry(UserCopy.HELP_Q_ADD_TITLE, UserCopy.HELP_Q_ADD_BODY));
+    list.push(new HelpEntry(UserCopy.HELP_Q_PUSH_TITLE, UserCopy.HELP_Q_PUSH_BODY));
+    list.push(new HelpEntry(UserCopy.HELP_Q_NOPUSH_TITLE, UserCopy.HELP_Q_NOPUSH_BODY));
+    list.push(new HelpEntry(UserCopy.HELP_Q_DATA_TITLE, UserCopy.HELP_Q_DATA_BODY));
+    list.push(new HelpEntry(UserCopy.HELP_Q_PHONE_TITLE, UserCopy.HELP_Q_PHONE_BODY));
     return list;
   }
 
   private privacy(): HelpEntry[] {
     const list: HelpEntry[] = [];
-    list.push(new HelpEntry('只采集必要的状态',
-      '有人活动、门开关、燃气浓度这几项。不采集画面，也不采集声音。'));
-    list.push(new HelpEntry('只有家人能看到',
-      '只有绑定这台守护主机的家人账号能查看数据。'));
+    list.push(new HelpEntry(UserCopy.HELP_Q_PRIV1_TITLE, UserCopy.HELP_Q_PRIV1_BODY));
+    list.push(new HelpEntry(UserCopy.HELP_Q_PRIV2_TITLE, UserCopy.HELP_Q_PRIV2_BODY));
     return list;
   }
 
@@ -95,7 +85,7 @@ export struct HelpPage {
             this.entryCard(e)
           }, (e: HelpEntry) => e.title)
 
-          Text('隐私说明')
+          Text(UserCopy.HELP_SEC_PRIVACY)
             .fontSize(AppTheme.FONT_LABEL)
             .fontColor(AppTheme.COLOR_TEXT_HINT)
             .width('100%')

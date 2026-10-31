@@ -31,7 +31,6 @@ const MS_DAY: number = 86400000;
 /** 演示账号的显示名（手机号打码，预览截图里不会出现完整号码）。 */
 export const PREVIEW_USERNAME: string = '138****0000';
 /** 演示设备名。 */
-export const PREVIEW_DEVICE_NAME: string = '守护主机（客厅）';
 /** 配网向导第 2 步的「扫到的 Wi-Fi」列表。 */
 export const PREVIEW_WIFI: string[] = ['Home-5G', 'Home-2.4G', 'CMCC-8f2a', 'TP-LINK_2.4G'];
 // 配网热点名：正式版由 GET /api/provision/status 返回（NetConfigPage 读 r.data.ssid），
@@ -54,7 +53,7 @@ export class PreviewData {
   /**
    * 设备实时状态。
    *
-   * 一台「守护主机」（网关）下面挂多个节点，家属的设备分散在两个住处：
+   * 一台「主机」（网关）下面挂多个节点，家属的设备分散在两个住处：
    *   家   —— 厨房（燃气）、卧室（有人活动）、客厅（有人活动）
    *   老家 —— 院子（门磁，故意离线）
    * 房间名走 `location`、地址走 `site`，都是「用户在服务器上给自己节点起的名字」，
