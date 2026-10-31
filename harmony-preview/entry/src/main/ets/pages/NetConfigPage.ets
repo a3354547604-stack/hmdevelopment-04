@@ -34,6 +34,15 @@ struct NetConfigPage {
   @State hidden: boolean = false;
   @State showAddr: boolean = false;
   @State addrInput: string = '';
+  /** 模拟「网关连 Wi-Fi」的停顿：必须能取消，否则离开页面后定时器还会往已销毁的组件写 step。 */
+  private connectTimer: number = -1;
+
+  aboutToDisappear(): void {
+    if (this.connectTimer >= 0) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = -1;
+    }
+  }
 
   private targetSsid(): string {
     return this.manual ? this.manualSsid : this.ssid;
@@ -216,7 +225,13 @@ struct NetConfigPage {
           this.step = 3;
           // 预览版没有「网关正在连 Wi-Fi」这个真实过程，用一次定时器模拟它的停顿，
           // 否则第 3 步一帧都看不到，评审时就不知道这屏长什么样。
-          setTimeout(() => {
+          // 先清掉上一次的定时器：连点两下「下一步」不该让 step 跳两次。
+          if (this.connectTimer >= 0) {
+            clearTimeout(this.connectTimer);
+            this.connectTimer = -1;
+          }
+          this.connectTimer = setTimeout(() => {
+            this.connectTimer = -1;
             if (!SHOW_ERROR_HINT) {
               this.step = 4;
             }

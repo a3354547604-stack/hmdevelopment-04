@@ -29,13 +29,27 @@ export struct ProfilePage {
   @State advanced: boolean = false;
   @State taps: number = 0;
   @State serverInput: string = '';
-  @State notifyOn: boolean = true;
-  /** 免打扰与紧急响铃：只存在本机，正式版还要同步给推送通道。 */
-  @State dndOn: boolean = true;
-  @State urgentOn: boolean = true;
+  /** 提醒偏好：先存 AppStorage（切 tab 不丢）；接推送后要同步到服务端偏好。 */
+  @StorageLink('notifyOn') notifyOn: boolean = true;
+  @StorageLink('notifyDnd') dndOn: boolean = true;
+  @StorageLink('notifyUrgent') urgentOn: boolean = true;
   @State savedTip: string = '';
   /** 无活动时长（分钟）：纯本地加减，用来评审控件排版。 */
   @State noMotion: number = 30;
+
+  aboutToAppear(): void {
+    // 首次进页面把默认值写进 AppStorage，@StorageLink 才有初值可用；
+    // 否则开关第一次点开时会被 undefined 覆盖成 false。
+    if (AppStorage.get<boolean>('notifyOn') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyOn', true);
+    }
+    if (AppStorage.get<boolean>('notifyDnd') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyDnd', true);
+    }
+    if (AppStorage.get<boolean>('notifyUrgent') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyUrgent', true);
+    }
+  }
 
   private onVersionTap(): void {
     this.taps = this.taps + 1;
