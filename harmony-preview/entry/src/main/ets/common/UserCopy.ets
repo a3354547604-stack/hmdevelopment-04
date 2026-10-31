@@ -68,6 +68,15 @@ export class UserCopy {
   static readonly NODE_LOST: string = '联系不上';
   /** 顶栏那个点只说「设备在不在线」，不要写成「正常」——首页可能同时有未处理提醒 */
   static readonly NODE_ONLINE: string = '在线';
+  // ---- 节点详情（半模态）：点小框看这一台的状态 ----
+  static readonly NODE_TYPE_LABEL: string = '类型';
+  static readonly NODE_STATE_LABEL: string = '状态';
+  static readonly NODE_LAST_LABEL: string = '最近上报';
+  static readonly NODE_SIGNAL_LABEL: string = '信号';
+  static readonly NODE_BATTERY_LABEL: string = '电量';
+  static readonly NODE_POWERED: string = '外接电源';
+  static readonly NODE_SHEET_HINT: string = '信号和电量由节点每次上报时带上。';
+  static readonly NODE_SHEET_OK: string = '知道了';
 
   static readonly ENV_TEMP: string = '屋里温度';
   static readonly ENV_HUMI: string = '屋里湿度';
@@ -222,6 +231,7 @@ export class UserCopy {
       UserCopy.GAS_OK, UserCopy.GAS_HIGH, UserCopy.GAS_VERY_HIGH, UserCopy.DOOR_OPEN,
       UserCopy.DOOR_CLOSED, UserCopy.PRESENCE_YES, UserCopy.PRESENCE_NO, UserCopy.NODE_NORMAL,
       UserCopy.NODE_LOST, UserCopy.ENV_TEMP, UserCopy.ENV_HUMI, UserCopy.NODE_ADD_TITLE,
+      UserCopy.NODE_TYPE_LABEL, UserCopy.NODE_STATE_LABEL, UserCopy.NODE_SIGNAL_LABEL,
       UserCopy.ADD_NODE_SCANNING, UserCopy.ADD_NODE_EMPTY, UserCopy.ADD_NODE_DONE,
       UserCopy.ALERT_FILTER_ALL, UserCopy.ALERT_FILTER_PENDING, UserCopy.ALERT_EMPTY,
       UserCopy.ALERT_LIST_TITLE, UserCopy.ALERT_DETAIL_TITLE, UserCopy.ALERT_BTN_KNOW,

@@ -62,11 +62,11 @@ export class PreviewData {
    */
   static status(): DeviceStatus {
     const nodes: NodeItem[] = [
-      { sn: 'EC-A1', type: 'gas', location: '厨房', site: '家', online: true, last_seen: Date.now() - 12000 },
-      { sn: 'EC-A2', type: 'presence', location: '卧室', site: '家', online: true, last_seen: Date.now() - 30000 },
-      { sn: 'EC-A4', type: 'presence', location: '客厅', site: '家', online: true, last_seen: Date.now() - 60000 },
+      { sn: 'EC-A1', type: 'gas', location: '厨房', site: '家', online: true, last_seen: Date.now() - 12000, rssi: -52, battery: 88 },
+      { sn: 'EC-A2', type: 'presence', location: '卧室', site: '家', online: true, last_seen: Date.now() - 30000, rssi: -61, battery: 76 },
+      { sn: 'EC-A4', type: 'presence', location: '客厅', site: '家', online: true, last_seen: Date.now() - 60000, rssi: -67, battery: 64 },
       // 老家那台离线：用来演示「某个地址整片掉线」时首页怎么显示（不是网关掉线）
-      { sn: 'EC-A3', type: 'door', location: '院子', site: '老家', online: false, last_seen: Date.now() - 35 * MS_MIN }
+      { sn: 'EC-A3', type: 'door', location: '院子', site: '老家', online: false, last_seen: Date.now() - 35 * MS_MIN, rssi: -79, battery: 18 }
     ];
     const properties: GatewayProperties = {
       presence: true,
