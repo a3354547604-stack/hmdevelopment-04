@@ -837,3 +837,110 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 > RK2206 镜像**跨次不可复现**（`__TIME__` 等 10 个字节差异，见 §12.6），所以上面 md5 只用于"确认你刷的是这一版"，
 > 不以哈希作防伪。
 
+
+## 14. t190：`resident set timeout` 无限刷的根因与修复（本版镜像按这一节验）
+
+> 一句话：**这条日志不是"连不上 Wi-Fi"，是 SDK 里一个没有失败出口的死循环被我们自己打开了。**
+> 触发它的是 t189 照抄厂商 `config_network.c:688` 加的那一行 `FlashSetResidentFlag(1)`。
+> 本版把那行改成**清 0（解除）**，并保证永不置 1。
+
+### 14.1 那条日志到底是谁打的（反汇编链，`device/rockchip/hardware/libhardware.a`）
+
+```
+FlashSuspend() / FlashResume()            (libhardware.flash.o)
+    if (*(uint32_t *)(g_flash + 28) != 0) WifiResidentSet(1 / 0);
+        WifiResidentSet(int on)            (libhardware.wifi.o)   —— 薄封装，只有一句 bl
+            wifi_resident_set(int on)      (libhardware.wifi_api_internal.o)
+                if (g_resident == on) return 0;          ← 唯一的早退，g_resident 只在**成功**时写
+                cmd = on ? 17 : 19;   r9 = 3;            ← 重试计数
+              loop:
+                rc = BcoreDevSendCmd(g_bcoreDev, 0, cmd, 0);
+                if (rc == -16) { "bb is busy now"; LOS_TaskDelay(1000); if (--r9) goto loop; "resident set error (%d)"; r9 = 3; goto loop; }
+                if (OsalSemWait(g_bcoreDev + 8, 1000) != 0) {
+                    "[wifi_api_internal:E]resident set timeout";      ← 现场刷屏那行
+                    goto loop;                                        ← b.n 2e：原地重发，**没有 return**
+                }
+```
+
+- 字符串表：`.rodata.wifi_resident_set.str1.1` 偏移 `0x00`=`bb is busy now`、`0x30`=`resident set error (%d)`、`0x69`=`resident set timeout`。
+- 关键在 `b.n 2e` 这个无条件回跳：**无论超时多少次、不管周围在干什么，函数都不返回**。所以一旦掉进去，调用它的那个线程（可能是任意一个触发 Flash 操作的线程）就永久钉死，日志无限刷。
+- `BcoreDevSendCmd()`（`libhardware.bcore_device.o`）自己也有一个 `beq 12` 的自循环：命令通道 busy（返回 -16）时它也会原地重发，所以两层都不会把错误返回给上层。
+
+### 14.2 为什么说「是我们自己打开的」
+
+| 事实 | 出处 |
+|---|---|
+| `FlashSetResidentFlag(flag)` **只把这一个字节存进 flash 上下文（`ctx+28`），不写 Flash、不调 resident** | `libhardware.flash.o` `.text.FlashSetResidentFlag`（ToyMutex 保护下 `str` 到 `[r0,#28]`） |
+| 这个 `ctx+28` 就是 `FlashSuspend/FlashResume` 里那个判断条件 | 上面两处 `ldr r3,[g_flash,#28]; cbz r3, skip` |
+| 它是 RAM 位，上电默认 0 | 没有对应 Flash 写入路径；`FlashInit()` 也不读它 |
+| t188 那版镜像（`8866ef4`）**没有**这行 → 现场只会 `连接 15200 ms 无结果`，从不出现 `resident set timeout` | 用户 2026-11-01 20:28 的 COM19 日志 |
+| t189 那版（`f0f85cd`）加了 `FlashSetResidentFlag(1)` → 现场立刻变成无限刷 | 用户 2026-11-01 21:0x 的 COM19 日志 |
+
+⇒ 结论：**置 1 之后，之后任何一次 Flash 挂起/恢复（KV 写入、`gwkv set`、设置落盘、OTA 记账…）都会去发 resident 命令**；
+而 B 核在这个状态下不应答，于是 `wifi_resident_set` 无限重发，同时 **Flash 互斥锁被这个线程一直持有**，
+Wi-Fi 侧需要落盘的那一步就被卡住——表现就是"连到一半没下文"。
+
+### 14.3 本版改了什么
+
+只动 3 个文件（都不改界面、不改命令、不改配网状态机语义）：
+
+| 文件 | 改动 |
+|---|---|
+| `rk2206-gateway/src/gw_net.c` | `FlashSetResidentFlag(1)` → **`FlashSetResidentFlag(0)`**（每次上电做一次解除），并打印 `[NET] 已解除 Flash 常驻钩子（FlashSetResidentFlag(0)）…`；函数头写清反汇编证据链 |
+| `rk2206-gateway/src/gw_net.h` | `gw_net_sta_plan_t.resident` 语义反转：`1` = 本次上电还没**解除**过（要做一次 `FlashSetResidentFlag(0)`），注释带完整证据 |
+| `rk2206-gateway/test/gw_selftest.c` | `test_sta_plan()` 的断言文案/语义同步到"解除"口径 |
+
+`GW_BOOT_CONNECT=0`（开机不自动联网）与 `GW_WATCHDOG_ENABLE=1`（看门狗）都**没动**。
+
+### 14.4 刷完后照这三行判
+
+| 你看到的 | 含义 |
+|---|---|
+| `[NET] 已解除 Flash 常驻钩子（FlashSetResidentFlag(0)）：避免 resident set 命令把线程钉死在驱动里` | 新固件 + 修复生效（每次上电**只出现一次**） |
+| 日志里**再也搜不到** `resident set timeout` | 死循环已被拆掉（`grep -c "resident set timeout"` 应为 0） |
+| `[NET] STA 已连接 ssid=<你的热点名>` 紧跟 `[NET] 联网成功 IP=192.168.137.x` | Wi-Fi 真的连上了（PC 热点网段） |
+
+退一步（至少这一版必须做到）：**不再无限刷 `resident set timeout`，且 `wifi show` 里的 `STA：` 状态能正常变化、`wifi off` 不卡**。
+
+### 14.5 「`ip=192.168.2.10 gw=192.168.2.1 mask=255.255.255.0` 从哪来」
+
+反汇编 `rk_wifi_set_mode()`（`libhardware.rk_wifi_api.o`）的函数体顺序是：
+
+```
+VendorGet(SSID) → printf("Connect to (SSID=%s)") → wifi_set_mode_internal() → printf(netif setup 前的行)
+→ malloc/memset/memcpy 填 netif 参数 → netifapi_netif_add(...) → printf("[wifi_api:D]netif setup ...")
+→ printf("[wifi_api:D]ip=%d.%d.%d.%d gw=… mask=…")   ← 就是这一行
+```
+
+结论（都能点到行）：
+
+1. 这行 `ip=… gw=… mask=…` 打的是**刚传给 `netifapi_netif_add()` 的那组静态地址**，不是 DHCP 结果、也不是"当前实际拿到"的地址；
+2. 同一个函数里 `cmp r5,#3`（mode 是否等于 3=AP）后面那段 `itett/strne` 会**在非 AP 模式下把 ip/mask/gw 全部清 0**；STA 走的就是这条 ⇒ **STA 模式下不可能打印出 192.168.2.10**；
+3. 我们自己的 SoftAP 地址是 `192.168.5.1`（适配层 `wifi_hotspot.c` 的 `IP_AP_ADDR2 5` / `GW_AP_ADDR2 5`），也不是 192.168.2.x；
+4. `libhardware.a` 全库**没有任何 192.168 的立即数常量**（`grep "#0xa8c0"` 为空），所以它也不是驱动里写死的默认值。
+
+⇒ 这一行是**某次"以 AP 模式创建 netif"时传进去的静态地址**（多半来自 vendor 区里存的 AP 配置，或更早一次 AP 模式的调用残留），
+**不是 STA 连上过 192.168.2.x 热点的证据**。因此：**不需要清 vendor 分区**，也不算 Flash 被写脏。
+
+要一次钉死它，下次开机把这三处一起回传即可（都在同一段日志里）：
+`[wifi_api:D]netif setup ...` 前后各 5 行、`wifi show` 的整段输出、以及我们新加的 `[NET] 已解除 Flash 常驻钩子` 那行。
+
+### 14.6 本版镜像指纹（只当次；正式口径 = 体积 + 提交号）
+
+| 项 | 值 |
+|---|---|
+| 体积 | `2097152` B（恒） |
+| md5（当次） | `fcbd2d73d421caf68f3a61c372a6fc21` |
+| sha256（当次） | `0e474875c7aaaf2377ccfdb0cc2bb258bb230274e819df3c44b2491b61d154c9` |
+| liteos.elf | `1018620` B |
+| SDK rev | `35339be8fb6b59871eed793fdce0472352398d94` |
+| 锚点（`grep -a -o -F` 计数） | `已解除 Flash 常驻钩子`=1、`FlashSetResidentFlag(0)`=1、`不占适配层全局锁`=1、`STA 已连接 ssid=`=1、`[WDT] 已启动`=1 |
+
+> RK2206 镜像跨次不可复现（`__TIME__` 派生 10 字节差异，见 §12.6），md5 只用于"确认你刷的是这一版"。
+
+### 14.7 如果还连不上（按这个顺序回传，一次就够）
+
+1. 开机 30 秒内的完整串口日志（从 `[WDT] 已启动` 到第一次 `wifi scan` 之前）；
+2. `wifi show`、`wifi scan`、`wifi net` 三条命令各自的输出；
+3. `grep -c "resident set timeout"` 的结果（应为 0）；
+4. 若出现 `[NET] STA 已连接 ssid=…` 但仍无 IP，回传紧跟其后的 20 行（DHCP 阶段）。

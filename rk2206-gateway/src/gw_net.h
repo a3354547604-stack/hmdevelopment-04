@@ -155,7 +155,7 @@ static inline const char *gw_net_off_path_text(gw_net_off_path_t p)
  * 返回 0 = 已装/已就绪；-1 = 找不到 wlan0（射频还没起来）。 */
 int gw_net_install_default_iface(void);
 
-/* ---------------------------------------------------------------- t189：STA 发起顺序
+/* ---------------------------------------------------------------- t189/t190：STA 发起顺序
  *
  * 为什么要有这段纯逻辑：厂商每一条联网样例走的都是 config_network.c:638 的
  * SetWifiModeOn()，顺序是
@@ -167,14 +167,27 @@ int gw_net_install_default_iface(void);
  * 不应答，wifi_send_cmd 就进「等 3 s → wifi_recovery_process() → 无限重发」，那把锁
  * 从此不释放，Scan/DisableWifi/SetWifiModeOff 全部跟着卡死（现场＝只能断电）。
  *
- * 所以板上按下面这个 plan 执行，且把 connect 换到 lz 层的 WifiConnect()（不占那把锁）：
+ * t190 现场（t189 镜像 f0f85cd）又抓到一个更硬的坑：**照抄厂商那行
+ * FlashSetResidentFlag(1) 会把自己钉死**。反汇编证据（libhardware.a）：
+ *   FlashSetResidentFlag(flag)  只把这一个字节存进 flash 上下文（不碰 Flash 本身）；
+ *   FlashSuspend()/FlashResume() 里 `if (*(ctx+28)) WifiResidentSet(1/0)` ——
+ *     也就是**这个标志位是"每次 Flash 挂起/恢复都去调 Wi-Fi resident 命令"的开关**；
+ *   wifi_resident_set() 发 cmd 17(on)/19(off)，等 1000 tick 拿不到应答就
+ *     `printf("resident set timeout") → LOS_TaskDelay(1000) → 重发`，重试计数用完
+ *     之后**再从头计 3 次继续**（`b.n 2e`），**没有任何失败出口**；
+ *     唯一的早退是 `if (g_resident == on) return 0` —— 而 g_resident 只在成功时写。
+ * ⇒ 现场「resident set timeout 无限刷」= 我们把它置成 1 之后，任何一次 Flash 挂起
+ *    （KV 写入、设置落盘…）都会掉进那个死循环，调用线程永不返回。
+ * ⇒ 结论：**不要置 1**；并且上电后主动解除一次（防止 Flash 里/别人留下的 1）。
+ *
+ * 板上按下面这个 plan 执行，且把 connect 换到 lz 层的 WifiConnect()（不占那把锁）：
  *   enable   = 射频没开时才先 EnableWifi（判据是适配层 IsWifiActive()，不是我们的缓存位）
- *   resident = 本次上电还没置过 FlashSetResidentFlag(1) 时置一次
+ *   resident = 本次上电还没**解除**过 Flash 常驻钩子 → 做一次 FlashSetResidentFlag(0)
  *   connect  = 恒为 1（这条序列的本体）
  */
 typedef struct {
     uint8_t enable;
-    uint8_t resident;
+    uint8_t resident;   /* t190：语义反转——1 = 需要 disarm（置 0），不是置 1 */
     uint8_t connect;
 } gw_net_sta_plan_t;
 

@@ -22,7 +22,7 @@
 #include "gw_scan.h"          /* 扫描重试口径与排版（t166：厂商 SetWifiScan 同序） */
 #include "config_network.h"  /* SetWifiModeOff：`wifi off` 复位射频用（SDK 板级） */
 #include "lz_hardware/wifi.h" /* t188：WifiDisconnect(reasonCode)——先软断开，避免再进 recovery */
-#include "lz_hardware/flash.h" /* t189：FlashSetResidentFlag(1)——与厂商 SetWifiModeOn 对齐 */
+#include "lz_hardware/flash.h" /* t189/t190：只用 FlashSetResidentFlag(0) 解除常驻钩子，永不置 1 */
 
 #include "lwip/ip_addr.h"
 #include "lwip/netif.h"
@@ -42,7 +42,9 @@ static uint8_t  s_wifi_on = 0;      /* EnableWifi 只调一次：重复调用在
 static uint8_t  s_sta_pending = 0;  /* 1 = 正在连（sta_poll 有效） */
 static uint32_t s_sta_polls = 0;    /* 第几次轮询：用于"别在 0.3 s 就判认证失败" */
 static char     s_sta_ssid[GW_PROV_SSID_MAX + 1];
-/* t189：FlashSetResidentFlag(1) 只在本次上电置一次（它是写 Flash，不是写 RAM）。 */
+/* t190：s_resident_set = 1 表示"本次上电已经】解除**过 Flash 常驻钩子"（做过一次
+ * FlashSetResidentFlag(0)）。注意它只写 RAM（libhardware flash.o 里存进 ctx+28），
+ * 不碰 Flash；t189 的注释把它当成"写 Flash"是错的。 */
 static uint8_t  s_resident_set = 0;
 
 /* t189：EnableWifi 的"已开"判据改成问适配层（IsWifiActive），不再只靠我们自己的记账位。
@@ -821,15 +823,27 @@ int gw_net_ap_ip(char *out, uint32_t cap)
  *   FlashInit → VendorGet(SSID/PSK) → EnableWifi → FlashSetResidentFlag(1)
  *   → SetWifiScan()（本 SDK 里 WIFI_SCAN_ON=0，整个函数体是空的）
  *   → WifiConnect(ssid, psk) → 轮询 GetLinkedInfo → SetLocalWifiGw()
- * 我们原来走 AddDeviceConfig + ConnectTo，差别有两处：
- *   ① 少了 FlashSetResidentFlag(1)：驱动被告知"wifi 常驻"，厂商每条联网样例都置它；
- *   ② 致命的一处——ConnectTo（wifi_device.c:322-340）**持着 g_wifiMutex 调 WifiConnect**。
- *      WifiConnect 里一旦固件不应答，wifi_send_cmd 就是「等 3 s → wifi_recovery_process()
- *      → 原样重发」的死循环（反汇编 .text.wifi_send_cmd 的 b2..d2），于是那把全局锁永远
- *      不释放：Scan()/DisableWifi()/SetWifiModeOff() 全部阻塞在同一个 mutex 上，
- *      现场的表现就是「wifi scan 也卡、wifi off 也卡、只能断电」。
+ * 我们原来走 AddDeviceConfig + ConnectTo，致命的一处是：
+ *   ConnectTo（wifi_device.c:322-340）**持着 g_wifiMutex 调 WifiConnect**。
+ *   WifiConnect 里一旦固件不应答，wifi_send_cmd 就是「等 3 s → wifi_recovery_process()
+ *   → 原样重发」的死循环（反汇编 .text.wifi_send_cmd 的 b2..d2），于是那把全局锁永远
+ *   不释放：Scan()/DisableWifi()/SetWifiModeOff() 全部阻塞在同一个 mutex 上，
+ *   现场的表现就是「wifi scan 也卡、wifi off 也卡、只能断电」。
  * 直接调 lz 层的 WifiConnect() 不占那把锁：最坏情况也只卡住 gwConn 这一个任务，
  * shell 与 `wifi off` 仍然有响应。
+ *
+ * t190：**厂商那行 FlashSetResidentFlag(1) 不能照抄**（t189 照抄后现场 resident 死循环）。
+ *   libhardware.a 反汇编：
+ *     FlashSetResidentFlag(flag) 只是把 flag 存进 flash 上下文（ctx+28），不碰 Flash；
+ *     FlashSuspend()/FlashResume() 里 `if (*(ctx+28)) WifiResidentSet(1 / 0)` —— 这个标志位
+ *       就是「每次 Flash 挂起/恢复都去发 Wi-Fi resident 命令」的开关；
+ *     WifiResidentSet → wifi_resident_set：发 cmd 17(on)/19(off)，等 1000 tick 无应答就
+ *       printf("resident set timeout") → LOS_TaskDelay(1000) → 重发；3 次用完后 `b.n 2e`
+ *       重置计数**继续重发**，函数里没有任何失败返回路径（唯一早退是 `g_resident == on`，
+ *       而 g_resident 只在成功时写）。⇒ 一旦置 1，任何一次 Flash 挂起（KV 写入、设置落盘）
+ *       都可能把当时那个线程**永久**钉在驱动里，日志就是无限刷 resident set timeout。
+ *   ⇒ 所以这里反过来做：上电后**主动解除**一次（FlashSetResidentFlag(0)，防御 Flash/别人留下的 1），
+ *     自己永不置 1。我们不依赖"flash 挂起时把 wifi 挂起"这个特性（t188 镜像没置也没问题）。
  *
  * 顺序由 gw_net_sta_plan()（gw_net.h，纯逻辑）算出来，主机侧有断言覆盖。 */
 int gw_net_sta_start(const char *ssid, const char *psk)
@@ -849,8 +863,12 @@ int gw_net_sta_start(const char *ssid, const char *psk)
         return -1;      /* 射频都没开：不往邮箱里塞命令，否则就是"等 3 s → recovery → 重发" */
     }
     if (plan.resident != 0u) {
-        FlashSetResidentFlag(1);
+        /* t190：解除（不是置位）。置 1 会让 FlashSuspend/FlashResume 去发 resident 命令，
+         * 而那条命令在固件不应答时**永不返回**（见函数头注释的反汇编）。 */
+        FlashSetResidentFlag(0);
         s_resident_set = 1u;
+        printf("[NET] 已解除 Flash 常驻钩子（FlashSetResidentFlag(0)）：避免 resident set "
+               "命令把线程钉死在驱动里\n");
     }
     if (WifiConnect((unsigned char *)ssid, (unsigned char *)psk) != LZ_HARDWARE_SUCCESS) {
         s_sta_pending = 0u;

@@ -610,19 +610,21 @@ static void test_wdt_and_backoff(void)
          "两条路的日志名分开（现场一眼看出走的是哪条）");
 }
 
-/* t189：STA 发起顺序（厂商 SetWifiModeOn 同序，纯逻辑部分）。
+/* t189/t190：STA 发起顺序（厂商 SetWifiModeOn 同序，纯逻辑部分）。
  * 断言要点：射频已开时**不再** EnableWifi（重复调用在部分固件返回 BUSY，会让整次连接白跑）；
- * resident flag 每次上电只置一次（它是写 Flash）；WifiConnect 无论前两步怎么算都必发。 */
+ * resident 每次上电只做一次，且动作是**解除**（FlashSetResidentFlag(0)）——置 1 会让
+ * FlashSuspend/FlashResume 掉进 wifi_resident_set 的死循环（t190 现场证据）；
+ * WifiConnect 无论前两步怎么算都必发。 */
 static void test_sta_plan(void)
 {
     gw_net_sta_plan_t p;
     int a, r;
 
-    t_start("t189 STA 发起顺序：按需 EnableWifi → resident(1) → WifiConnect");
+    t_start("t189/t190 STA 发起顺序：按需 EnableWifi → 解除 resident 钩子(0) → WifiConnect");
 
     gw_net_sta_plan(1, 0, &p);
     t_ok(p.enable == 0u, "射频已开 → 不重复 EnableWifi");
-    t_ok(p.resident == 1u, "本次上电未置过 → 需要 FlashSetResidentFlag(1)");
+    t_ok(p.resident == 1u, "本次上电未解除过 → 需要 FlashSetResidentFlag(0)（不是置 1）");
     t_ok(p.connect == 1u, "connect 恒发");
 
     gw_net_sta_plan(0, 0, &p);
@@ -631,11 +633,11 @@ static void test_sta_plan(void)
 
     gw_net_sta_plan(1, 1, &p);
     t_ok(p.enable == 0u && p.resident == 0u && p.connect == 1u,
-         "已开且已置过 resident → 只剩 WifiConnect（不写 Flash）");
+         "已开且已解除过 resident → 只剩 WifiConnect（不重复解钩子）");
 
     gw_net_sta_plan(0, 1, &p);
     t_ok(p.enable == 1u && p.resident == 0u && p.connect == 1u,
-         "只补 EnableWifi，不重复写 Flash");
+         "只补 EnableWifi，不重复解钩子");
 
     for (a = 0; a <= 1; a++) {
         for (r = 0; r <= 1; r++) {
