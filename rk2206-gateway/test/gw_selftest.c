@@ -610,6 +610,44 @@ static void test_wdt_and_backoff(void)
          "两条路的日志名分开（现场一眼看出走的是哪条）");
 }
 
+/* t189：STA 发起顺序（厂商 SetWifiModeOn 同序，纯逻辑部分）。
+ * 断言要点：射频已开时**不再** EnableWifi（重复调用在部分固件返回 BUSY，会让整次连接白跑）；
+ * resident flag 每次上电只置一次（它是写 Flash）；WifiConnect 无论前两步怎么算都必发。 */
+static void test_sta_plan(void)
+{
+    gw_net_sta_plan_t p;
+    int a, r;
+
+    t_start("t189 STA 发起顺序：按需 EnableWifi → resident(1) → WifiConnect");
+
+    gw_net_sta_plan(1, 0, &p);
+    t_ok(p.enable == 0u, "射频已开 → 不重复 EnableWifi");
+    t_ok(p.resident == 1u, "本次上电未置过 → 需要 FlashSetResidentFlag(1)");
+    t_ok(p.connect == 1u, "connect 恒发");
+
+    gw_net_sta_plan(0, 0, &p);
+    t_ok(p.enable == 1u && p.resident == 1u && p.connect == 1u,
+         "射频没开 → 三步全做（先 EnableWifi，避免把命令塞进没有 B 核的邮箱）");
+
+    gw_net_sta_plan(1, 1, &p);
+    t_ok(p.enable == 0u && p.resident == 0u && p.connect == 1u,
+         "已开且已置过 resident → 只剩 WifiConnect（不写 Flash）");
+
+    gw_net_sta_plan(0, 1, &p);
+    t_ok(p.enable == 1u && p.resident == 0u && p.connect == 1u,
+         "只补 EnableWifi，不重复写 Flash");
+
+    for (a = 0; a <= 1; a++) {
+        for (r = 0; r <= 1; r++) {
+            gw_net_sta_plan(a, r, &p);
+            t_ok(p.connect == 1u, "任何组合下都必须发起连接（connect 恒 1）");
+        }
+    }
+
+    gw_net_sta_plan(1, 1, NULL);   /* 空指针不得崩 */
+    t_ok(1, "plan 传 NULL 不崩（防御性写法）");
+}
+
 static void test_parser_garbage_flood(void)
 {
     static uint8_t chunk[512];
@@ -3199,6 +3237,7 @@ int main(void)
     test_hw_adc();                   /* t140 ADC 链路：幂等复用 / 已初始化 / 读失败留痕 */
     test_parser();
     test_wdt_and_backoff();          /* t188：看门狗口径 + 退避 + off 分支 */
+    test_sta_plan();                 /* t189：STA 发起顺序（不必扫、不重复 EnableWifi） */
     test_parser_garbage_flood();     /* t183：200 KB 垃圾流不断言越界/不失步 */
     test_json_depth_guard();          /* t183：cJSON 递归深度预检 */
     test_crypto_auth();

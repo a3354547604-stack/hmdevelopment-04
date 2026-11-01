@@ -155,4 +155,37 @@ static inline const char *gw_net_off_path_text(gw_net_off_path_t p)
  * 返回 0 = 已装/已就绪；-1 = 找不到 wlan0（射频还没起来）。 */
 int gw_net_install_default_iface(void);
 
+/* ---------------------------------------------------------------- t189：STA 发起顺序
+ *
+ * 为什么要有这段纯逻辑：厂商每一条联网样例走的都是 config_network.c:638 的
+ * SetWifiModeOn()，顺序是
+ *   FlashInit → VendorGet(SSID/PSK) → EnableWifi → FlashSetResidentFlag(1)
+ *   → SetWifiScan()（本 SDK 的 WIFI_SCAN_ON=0，函数体是空的）→ WifiConnect(ssid,psk)
+ *   → 轮询 GetLinkedInfo → SetLocalWifiGw()
+ * 我们原来走 wifi_lite 的 AddDeviceConfig + ConnectTo，差的不只是"少一步扫描"，
+ * 而是 ConnectTo 会**持着适配层的全局 mutex 调 WifiConnect**；WifiConnect 里固件一旦
+ * 不应答，wifi_send_cmd 就进「等 3 s → wifi_recovery_process() → 无限重发」，那把锁
+ * 从此不释放，Scan/DisableWifi/SetWifiModeOff 全部跟着卡死（现场＝只能断电）。
+ *
+ * 所以板上按下面这个 plan 执行，且把 connect 换到 lz 层的 WifiConnect()（不占那把锁）：
+ *   enable   = 射频没开时才先 EnableWifi（判据是适配层 IsWifiActive()，不是我们的缓存位）
+ *   resident = 本次上电还没置过 FlashSetResidentFlag(1) 时置一次
+ *   connect  = 恒为 1（这条序列的本体）
+ */
+typedef struct {
+    uint8_t enable;
+    uint8_t resident;
+    uint8_t connect;
+} gw_net_sta_plan_t;
+
+static inline void gw_net_sta_plan(int radio_active, int resident_done, gw_net_sta_plan_t *p)
+{
+    if (p == NULL) {
+        return;
+    }
+    p->enable = (radio_active != 0) ? 0u : 1u;
+    p->resident = (resident_done != 0) ? 0u : 1u;
+    p->connect = 1u;
+}
+
 #endif /* GW_NET_H */

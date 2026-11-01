@@ -22,6 +22,7 @@
 #include "gw_scan.h"          /* 扫描重试口径与排版（t166：厂商 SetWifiScan 同序） */
 #include "config_network.h"  /* SetWifiModeOff：`wifi off` 复位射频用（SDK 板级） */
 #include "lz_hardware/wifi.h" /* t188：WifiDisconnect(reasonCode)——先软断开，避免再进 recovery */
+#include "lz_hardware/flash.h" /* t189：FlashSetResidentFlag(1)——与厂商 SetWifiModeOn 对齐 */
 
 #include "lwip/ip_addr.h"
 #include "lwip/netif.h"
@@ -41,14 +42,25 @@ static uint8_t  s_wifi_on = 0;      /* EnableWifi 只调一次：重复调用在
 static uint8_t  s_sta_pending = 0;  /* 1 = 正在连（sta_poll 有效） */
 static uint32_t s_sta_polls = 0;    /* 第几次轮询：用于"别在 0.3 s 就判认证失败" */
 static char     s_sta_ssid[GW_PROV_SSID_MAX + 1];
+/* t189：FlashSetResidentFlag(1) 只在本次上电置一次（它是写 Flash，不是写 RAM）。 */
+static uint8_t  s_resident_set = 0;
 
+/* t189：EnableWifi 的"已开"判据改成问适配层（IsWifiActive），不再只靠我们自己的记账位。
+ *
+ * 为什么：s_wifi_on 只是我们的缓存，真值在 wifi_device.c 的 g_staStatus 里。只要有一条
+ * 路径把射频关了却没清缓存（厂商 SetWifiModeOff、AP 起停、驱动进 recovery），这里就会以为
+ * "已开"、跳过 EnableWifi，接着把 WifiConnect 发进一个没有 B 核的邮箱——wifi_send_cmd
+ * 等 3 s 拿不到应答就 wifi_recovery_process() 并无条件重发，永远不返回（反汇编
+ * libhardware.wifi_api_internal.o 的 :b2-:d2）。 */
 static int net_wifi_on(void)
 {
-    if (s_wifi_on != 0u) {
+    if (IsWifiActive() == WIFI_STATE_AVALIABLE) {
+        s_wifi_on = 1u;
         return 0;
     }
+    s_wifi_on = 0u;             /* 缓存与真值不一致时以真值为准 */
     if (EnableWifi() != WIFI_SUCCESS) {
-        printf("[NET] ⚠ EnableWifi 失败\n");
+        printf("[NET] ⚠ EnableWifi 失败（射频仍未开）\n");
         return -1;
     }
     s_wifi_on = 1u;
@@ -300,6 +312,20 @@ int gw_net_radio_off(void)
      * 为什么改顺序：SetWifiModeOff() 直接进驱动，卡进 recovery 之后它自己也会跟着卡；
      * WifiDisconnect(0) 走的是正常的断开流程（有超时/事件路径），能成功就不必硬关。
      * 字段口径不变：无论走哪条路，都等价于"射频已关"，调用方（wifi off / 配网收尾）不用区分。 */
+    /* t189：已经 stuck（worker 还卡在 wifi_send_cmd 的重发循环里）时**不要**再碰任何 wifi 接口：
+     * 底层 g_mboxMutex 被那个 worker 占着，这里的 WifiDisconnect/SetWifiModeOff 会跟着一起卡，
+     * 连 shell 都回不来（现场就是"wifi off 也没反应"）。只清我们的状态，并明确告诉现场怎么办。 */
+    if (s_conn_state == GW_CONN_STUCK) {
+        s_wifi_on = 0u;
+        s_sta_pending = 0u;
+        s_sta_polls = 0u;
+        s_conn_state = GW_CONN_IDLE;
+        s_conn_reason[0] = '\0';
+        printf("[NET] 驱动仍在 recovery：跳过 WifiDisconnect/SetWifiModeOff（两者都会卡在同一个邮箱锁上），"
+               "本机状态已清；请断电重启\n");
+        return 0;
+    }
+
     unsigned int rc_disc = WifiDisconnect(0);
     gw_net_off_path_t path = gw_net_off_pick((rc_disc == (unsigned int)WIFI_SUCCESS) ? 0 : -1);
     WifiErrorCode rc_off = (WifiErrorCode)0;
@@ -789,41 +815,49 @@ int gw_net_ap_ip(char *out, uint32_t cap)
 
 /* ----------------------------------------------------------------- STA */
 
+/* t189：发起连接改成**厂商同一顺序**，并且绕开 wifi_lite 的 ConnectTo。
+ *
+ * 厂商 config_network.c:638 的 SetWifiModeOn() 是：
+ *   FlashInit → VendorGet(SSID/PSK) → EnableWifi → FlashSetResidentFlag(1)
+ *   → SetWifiScan()（本 SDK 里 WIFI_SCAN_ON=0，整个函数体是空的）
+ *   → WifiConnect(ssid, psk) → 轮询 GetLinkedInfo → SetLocalWifiGw()
+ * 我们原来走 AddDeviceConfig + ConnectTo，差别有两处：
+ *   ① 少了 FlashSetResidentFlag(1)：驱动被告知"wifi 常驻"，厂商每条联网样例都置它；
+ *   ② 致命的一处——ConnectTo（wifi_device.c:322-340）**持着 g_wifiMutex 调 WifiConnect**。
+ *      WifiConnect 里一旦固件不应答，wifi_send_cmd 就是「等 3 s → wifi_recovery_process()
+ *      → 原样重发」的死循环（反汇编 .text.wifi_send_cmd 的 b2..d2），于是那把全局锁永远
+ *      不释放：Scan()/DisableWifi()/SetWifiModeOff() 全部阻塞在同一个 mutex 上，
+ *      现场的表现就是「wifi scan 也卡、wifi off 也卡、只能断电」。
+ * 直接调 lz 层的 WifiConnect() 不占那把锁：最坏情况也只卡住 gwConn 这一个任务，
+ * shell 与 `wifi off` 仍然有响应。
+ *
+ * 顺序由 gw_net_sta_plan()（gw_net.h，纯逻辑）算出来，主机侧有断言覆盖。 */
 int gw_net_sta_start(const char *ssid, const char *psk)
 {
-    WifiDeviceConfig cfg;
-    int net_id = -1;
+    gw_net_sta_plan_t plan;
 
     if (ssid == NULL || psk == NULL || ssid[0] == '\0') {
         return -1;      /* psk 允许空串：开放热点（用户 2026-10-24 要求） */
     }
-    if (net_wifi_on() != 0) {
-        return -1;
-    }
-    memset(&cfg, 0, sizeof(cfg));
-    (void)snprintf(cfg.ssid, sizeof(cfg.ssid), "%s", ssid);
-    (void)snprintf(cfg.preSharedKey, sizeof(cfg.preSharedKey), "%s", psk);
-    cfg.securityType = (int)WIFI_SEC_TYPE_PSK;
-    cfg.ipType = DHCP;      /* 必须显式给 DHCP：0 是 STATIC_IP，会拿 0.0.0.0 去连 */
-    cfg.freq = 0u;          /* 不限频点（2.4 G 由 §12.6 的预检挡住） */
     (void)snprintf(s_sta_ssid, sizeof(s_sta_ssid), "%s", ssid);
     s_sta_polls = 0u;
     s_sta_pending = 1u;
 
-    /* 只走 AddDeviceConfig + ConnectTo 一条路。SDK 的 ConnectToDevice 在 wifi_device.h 里有原型，
-     * 但 libwifiservice.a 里没有实现：曾经把它当兜底，结果整个镜像链接失败
-     * （`undefined reference to 'ConnectToDevice'`，见 out/build-gateway.log）。 */
-    if (AddDeviceConfig(&cfg, &net_id) != WIFI_SUCCESS || net_id < 0) {
+    gw_net_sta_plan((IsWifiActive() == WIFI_STATE_AVALIABLE) ? 1 : 0, (int)s_resident_set, &plan);
+    if (plan.enable != 0u && net_wifi_on() != 0) {
         s_sta_pending = 0u;
-        printf("[NET] ⚠ AddDeviceConfig 失败（ssid=%s）\n", ssid);
+        return -1;      /* 射频都没开：不往邮箱里塞命令，否则就是"等 3 s → recovery → 重发" */
+    }
+    if (plan.resident != 0u) {
+        FlashSetResidentFlag(1);
+        s_resident_set = 1u;
+    }
+    if (WifiConnect((unsigned char *)ssid, (unsigned char *)psk) != LZ_HARDWARE_SUCCESS) {
+        s_sta_pending = 0u;
+        printf("[NET] ⚠ WifiConnect 被驱动拒绝（ssid=%s）：没有进 recovery，可直接重试\n", ssid);
         return -1;
     }
-    if (ConnectTo(net_id) != WIFI_SUCCESS) {
-        s_sta_pending = 0u;
-        printf("[NET] ⚠ ConnectTo(%d) 失败（ssid=%s）\n", net_id, ssid);
-        return -1;
-    }
-    printf("[NET] STA 连接发起 ssid=%s（口令不回显）\n", ssid);
+    printf("[NET] STA 连接发起 ssid=%s（口令不回显；WifiConnect 直发，不占适配层全局锁）\n", ssid);
     return 0;
 }
 
@@ -897,6 +931,10 @@ int gw_net_sta_poll(char *reason, uint32_t cap)
     }
     if (info.connState == WIFI_CONNECTED) {
         s_sta_pending = 0u;
+        /* t189：上板判据要一行可 grep 的"已关联"。只在这里打（pending 归零是一次性的），
+         * 之后的 IP 由 gw_main 打「联网成功：IP=…」。 */
+        printf("[NET] STA 已连接 ssid=%s（下一步等 DHCP 发地址）\n",
+               (s_sta_ssid[0] != '\0') ? s_sta_ssid : (const char *)info.ssid);
         /* 连上就立刻装默认网卡：此刻还没拿 IP 也没关系——ip4_route 自己会判
          * default 的地址是否为空，先装后取地址是安全的（报告 FIX-1 的调用点 1）。 */
         (void)gw_net_install_default_iface();

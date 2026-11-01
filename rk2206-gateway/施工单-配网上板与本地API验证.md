@@ -749,3 +749,91 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\serial-capture.ps1 -Po
 - 不要因为看到 `[WDT] 已启动` 就去查"是不是它在乱复位"：它只在**没人喂狗**时才咬，正常运行时永远不会。
 - 卡死后**不要长按复位键 3 次以上**去"叫醒"它：等 30–45 s，看门狗会自己做，重复断电只会丢现场日志。
 - 不要在退避窗口里反复敲 `wifi set`：那 3 分钟是有意的，敲了也只会返回 `busy`（日志里能看到）。
+
+## 13. t189：Wi-Fi 关联失败的根因与修复（今晚这版镜像按这一节验）
+
+**一句话**：卡住的不是 Wi-Fi 芯片，是**一个持着全局锁、又永远不返回的调用**。原来发起连接走
+`ConnectTo()`，它会在**拿着适配层全局锁**的情况下调 `WifiConnect()`；而 `WifiConnect()` 里固件一旦
+不应答，SDK 就是「等 3 秒 → 让 B 核恢复 → 原样重发」的死循环。于是那一次没应答的连接会把**整把锁**
+永久占住：`wifi scan`、`wifi off` 全跟着卡住，只能断电。本版把连接改到不占那把锁的接口上，
+再失败也最多卡住"连接"这一个后台任务，**`wifi off` 仍然有响应**（这就是今晚要验的重点）。
+
+### 13.1 根因（三条，都能在 SDK 源码/反汇编里点到）
+
+| # | 事实 | 位置 |
+|---|---|---|
+| ① | `ConnectTo(netId)` 先 `LockWifiGlobalLock()`，**在锁内**调 `WifiConnect(ssid, psk)` | `device/rockchip/rk2206/adapter/hals/communication/wifi_lite/wifiservice/source/wifi_device.c:322-340` |
+| ② | `WifiConnect` → `wifi_send_cmd`：命令塞进 B 核邮箱后 `OsalSemWait(3000 ms)`（扫描类 1000 ms）；**超时 → `wifi_recovery_process()` → 原样重发**，没有终止条件 | 反汇编 `device/rockchip/hardware/libhardware.a` 的 `.text.wifi_send_cmd`（`:b2`..`:d2`） |
+| ③ | 触发条件：把连接命令发进一个**没有 B 核 / 正在 recovery** 的邮箱。原来 `net_wifi_on()` 只看自己的缓存位 `s_wifi_on`，不看适配层真值（`IsWifiActive()`），射频若被别人关掉就会照发 | `rk2206-gateway/src/gw_net.c`（旧版 :45-55） |
+
+三条叠起来就是现场那一串：`[NET] 连接 15200 ms 无结果：worker 卡在 SDK 里（recovery）` →
+`[wifi_api_internal:D]recovery process ...` 刷屏 → `wifi scan` 卡 → `wifi off` 卡 → 只能断电。
+
+> 顺带纠正一个常见误判：**不是"漏了先扫描"**。厂商 `SetWifiModeOn()`（`config_network.c:638`）里的
+> `SetWifiScan()` 在本 SDK 里是**空函数**（`board/include/config_network.h:30` 的 `WIFI_SCAN_ON` 是 `0`，
+> `config_network.c:567-636` 的函数体整个被 `#if` 掉），厂商的联网路径里根本没有扫描这一步。
+
+### 13.2 本版改了什么（只动 `rk2206-gateway/src/gw_net.c` / `gw_net.h` / 自测，界面与命令不变）
+
+| 改动 | 为什么 |
+|---|---|
+| 发起连接改成 **`WifiConnect(ssid, psk)`（lz 层直发）**，不再走 `AddDeviceConfig + ConnectTo` | 绕开那把被 `ConnectTo` 长期持有的全局锁：卡也只卡 `gwConn` 一个任务 |
+| `net_wifi_on()` 改成**先问 `IsWifiActive()`**，真值没开才 `EnableWifi()` | 不往没有 B 核的邮箱里发命令（= recovery 的唯一触发点） |
+| 补 **`FlashSetResidentFlag(1)`**（每次上电一次） | 与厂商 `SetWifiModeOn()` 对齐（`config_network.c:688`）；这是写 Flash，所以只置一次 |
+| `wifi off` 在"已卡死"时**不再碰任何 Wi-Fi 接口**，只清本机状态并提示断电 | 底层邮箱锁被卡住的 worker 占着，此时 `WifiDisconnect/SetWifiModeOff` 只会把 shell 一起拖死 |
+
+顺序由 `gw_net.h` 的纯逻辑 `gw_net_sta_plan()` 决定（`enable`/`resident`/`connect` 三件事），
+主机自测里有 11 条断言盯着它（不必扫、不重复 `EnableWifi`、`connect` 恒发）。
+
+### 13.3 新增/变化的日志（照这几行判，都是字面量，可 grep）
+
+| 日志行（原文） | 出现 = 什么 |
+|---|---|
+| `[NET] STA 连接发起 ssid=<你的热点>（口令不回显；WifiConnect 直发，不占适配层全局锁）` | 命令已发出，**这是新路径的标志**（旧版这行结尾是"（口令不回显）"） |
+| `[NET] STA 已连接 ssid=<你的热点>（下一步等 DHCP 发地址）` | **已关联上 AP**（新增判据行） |
+| `[gw] 联网成功：IP=192.168.137.x（接着取时 → 连 IoTDA）` | DHCP 拿到地址（这行本来就有） |
+| `[NET] 射频已关（WifiDisconnect rc=0，未走硬关）` | `wifi off` 走的是软断开，**没有卡住** |
+
+失败时对应这几行（都是本版新增，看到就能判断卡在哪一层）：
+
+| 日志行 | 含义 / 下一步 |
+|---|---|
+| `[NET] ⚠ WifiConnect 被驱动拒绝（ssid=…）：没有进 recovery，可直接重试` | 参数/驱动拒绝，**没有进 recovery**，直接重敲 `wifi set` |
+| `[NET] ⚠ EnableWifi 失败（射频仍未开）` | 射频没起来；先 `wifi off`，再 `wifi set` |
+| `[NET] 连接 … ms 无结果：worker 卡在 SDK 里（recovery），命令先返回` | 仍然卡了（说明是固件侧真不回）；**接着敲 `wifi off`，它现在必须立刻有响应** |
+| `[NET] 驱动仍在 recovery：跳过 WifiDisconnect/SetWifiModeOff（两者都会卡在同一个邮箱锁上），本机状态已清；请断电重启` | 唯一需要断电的情况（这条出现说明连 `wifi off` 都救不了） |
+
+### 13.4 你要做的（3 步，约 1 分钟）
+
+1. 刷这版 `gateway-Firmware.img`（烧录见 §3；COM19，115200）。
+2. 等开机那行 `[WDT] 已启动 timeout=…`，然后敲：
+   ```
+   wifi set ssid=<你的热点名> psk=<口令>
+   ```
+   （SSID 里有空格就整段加引号；口令不回显是正常的）
+3. 30 秒内盯 13.3 的四行：`STA 连接发起` → `STA 已连接` → `联网成功：IP=` → 之后 `[TS] 取时成功` / `IoTDA 已连接`。
+
+**判据（明早只看这两条就够）**：
+- 联网成功：`[NET] STA 已连接` 与 `[gw] 联网成功：IP=192.168.137.` 各出现 ≥1 次。
+- 卡死可自救：即使又卡，`wifi off` 必须**立刻**回一行（不是"敲了没反应"）；断电不再是唯一手段。
+
+### 13.5 如果还是连不上（按这个顺序回传，别自己反复敲）
+
+1. `wifi show`（确认 SSID 没有写成旧名 `123456798`、`STA：未连接` 还是别的）
+2. 从 `wifi set` 那一行往下 **30 行原始日志**（含所有 `[NET]` / `[wifi_api_internal` 行）
+3. 电脑热点是否 2.4 GHz、是否开了"最大兼容性"（5 GHz-only 连不上，见 §12.6）
+
+### 13.6 本版镜像指纹（只当次；正式口径 = 体积 + 提交号）
+
+| 项 | 值 |
+|---|---|
+| 体积 | `2097152` B（恒） |
+| md5（当次） | `1a905b446fead89f285151c266a79aa5` |
+| sha256（当次） | `a421cb9ec0d1706eb6af3bcf6e9fddd3930c2cb6ccacac1076b93f1ec79fdb57` |
+| liteos.elf | `1018620` B |
+| SDK rev | `35339be8fb6b59871eed793fdce0472352398d94` |
+| 锚点（`strings \| grep -c`） | `不占适配层全局锁`=1、`STA 已连接 ssid=`=1、`跳过 WifiDisconnect`=1、`[WDT] 已启动`≥1 |
+
+> RK2206 镜像**跨次不可复现**（`__TIME__` 等 10 个字节差异，见 §12.6），所以上面 md5 只用于"确认你刷的是这一版"，
+> 不以哈希作防伪。
+
