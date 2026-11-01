@@ -15,7 +15,7 @@
 import { HttpApiService } from '../ets/service/HttpApiService';
 import { MockTransport } from './selfcheck-mock-transport';
 import { SessionStore } from '../ets/service/SessionStore';
-import { ApiResult, NETWORK_ERROR_CODE } from '../ets/model/Result';
+import { ApiResult, NETWORK_ERROR_CODE, bindCodeProblem, bindErrorText } from '../ets/model/Result';
 import {
   ActivityReport, AlertDetail, AlertItem, AlertListResult, BindResult, CommandResult, DemoResult,
   DeviceListResult, DeviceSettings, DeviceStatus, GatewayProperties, HealthResult, LoginResult,
@@ -138,6 +138,34 @@ class RecordingTransport implements HttpPort {
       this.lastPutBody = req.body;
     }
     return this.inner.request(req);
+  }
+}
+
+/**
+ * 绑定接口桩（t181 自检专用）：只为 `POST /devices/bind` 回预设响应。
+ *
+ * 为什么不用 MockTransport：绑定是**账号侧**接口（要带令牌、要 1200–1203 的
+ * 业务码），而这个桩要能按用例切换状态码与响应体，所以在这里独立实现一份，
+ * 只替换传输层——URL 拼接 / 鉴权头 / 信封解析 / 错误翻译仍然跑真代码。
+ */
+class BindStubTransport implements HttpPort {
+  status: number = 200;
+  body: string = '{}';
+  count: number = 0;
+  lastUrl: string = '';
+  lastMethod: string = '';
+  lastBody: string = '';
+  lastAuth: string = '';
+
+  request(req: HttpRequest): Promise<HttpResponse> {
+    this.count++;
+    this.lastUrl = req.url;
+    this.lastMethod = req.method;
+    this.lastBody = req.body;
+    const h: Record<string, string> = req.headers;
+    const auth: string | undefined = h['Authorization'];
+    this.lastAuth = auth === undefined ? '' : auth;
+    return Promise.resolve(new HttpResponse(this.status, this.body, ''));
   }
 }
 
@@ -756,6 +784,78 @@ class Runner {
       seq: 50, name: '越界值被 1002 拒、上限 120 可提交（t153）', contract: '§6.10/§9.2',
       ok: bad.code === 1002 && hi.ok && v50 === 120, code: bad.code, httpStatus: 400,
       detail: `3→code=${bad.code}（'${bad.message}'）; 120→ok=${hi.ok}; 再查=${v50}`
+    });
+
+    await this.bindCases();
+  }
+
+  /** t181：绑定码三条路径 + 错误码人话（拆成方法，run() 只负责调用）。 */
+  private async bindCases(): Promise<void> {
+    // ============================================================ t181 绑定码
+    // #51 空码 / 全空格：本地就挡下，不发请求（现场没网时也能立刻给出提示）
+    const stub51: BindStubTransport = new BindStubTransport();
+    const api51: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', stub51);
+    const pEmpty: string = bindCodeProblem('');
+    const pBlank: string = bindCodeProblem('   ');
+    if (pEmpty.length === 0 && pBlank.length === 0) {
+      await api51.bindDevice('M2', bindCodeProblem('').length > 0 ? '' : '', '卧室');
+    }
+    const ok51: boolean = pEmpty.indexOf('6 位绑定码') >= 0 && pBlank.length > 0
+      && stub51.count === 0;
+    this.cases.push({
+      seq: 51, name: '绑定码空/全空格本地拦下且不发请求（t181）', contract: '§6.6',
+      ok: ok51, code: 0, httpStatus: 0,
+      detail: `空=「${pEmpty}」 空格=「${pBlank}」 请求次数=${stub51.count}`
+    });
+
+    // #52 5 位 / 含字母 / 6 位；1200–1203 与 1001(field) 逐条翻成人话
+    const p5: string = bindCodeProblem('12345');
+    const pLetter: string = bindCodeProblem('12a456');
+    const pOk: string = bindCodeProblem('123456');
+    const e1200: string = bindErrorText(1200, '');
+    const e1201: string = bindErrorText(1201, '');
+    const e1202: string = bindErrorText(1202, '');
+    const e1203: string = bindErrorText(1203, '');
+    const e1001: string = bindErrorText(1001, 'field=bind_code；expected=6 位数字');
+    const e1002sn: string = bindErrorText(1002, 'field=sn');
+    const ok52: boolean = p5.indexOf('6 位') >= 0 && pLetter.indexOf('只有数字') >= 0
+      && pOk.length === 0
+      && e1200.indexOf('没找到这台设备') >= 0 && e1201.indexOf('绑定码不对') >= 0
+      && e1202.indexOf('已经被别人绑定') >= 0 && e1203.indexOf('过期') >= 0
+      && e1001.indexOf('绑定码填得不对') >= 0 && e1002sn.indexOf('设备编号') >= 0;
+    this.cases.push({
+      seq: 52, name: '5位/含字母被拦 + 1200–1203 与 1001 人话（t181）', contract: '§6.6/§9.2',
+      ok: ok52, code: 0, httpStatus: 400,
+      detail: `5位=「${p5}」 字母=「${pLetter}」 6位=「${pOk}」| 1200=「${e1200}」 1202=「${e1202}」 `
+        + `1203=「${e1203}」 1001=「${e1001}」`
+    });
+
+    // #53 正确码：POST /devices/bind，body 只含 sn/bind_code/name，带令牌
+    SessionStore.saveLogin('t181-selfcheck-token', 5, 't181-selfcheck');
+    const stub53: BindStubTransport = new BindStubTransport();
+    stub53.body = '{"code":0,"message":"ok","ts":1793000000000,'
+      + '"data":{"device_id":3,"sn":"M2","role":"owner"}}';
+    const api53: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', stub53);
+    const r53: ApiResult<BindResult> = await api53.bindDevice('M2', '123456', '卧室');
+    let keys53: string[] = [];
+    let body53: string = stub53.lastBody;
+    if (body53.length > 0) {
+      const flat: Record<string, Object> = JSON.parse(body53) as Record<string, Object>;
+      keys53 = Object.keys(flat);
+    }
+    const sorted53: string = keys53.slice().sort().join(',');
+    const ok53: boolean = r53.ok && r53.data !== undefined && r53.data.role === 'owner'
+      && r53.data.sn === 'M2' && r53.data.device_id === 3
+      && stub53.lastMethod === 'POST' && stub53.lastUrl.indexOf('/devices/bind') >= 0
+      && stub53.lastUrl.indexOf('127.0.0.1:80/api/devices/bind') >= 0
+      && sorted53 === 'bind_code,name,sn'
+      && body53.indexOf('"bind_code":"123456"') >= 0 && body53.indexOf('"name":"卧室"') >= 0
+      && stub53.lastAuth === 'Bearer t181-selfcheck-token';
+    this.cases.push({
+      seq: 53, name: '绑定码正确→POST /devices/bind 且带令牌（t181）', contract: '§6.6',
+      ok: ok53, code: r53.code, httpStatus: 200,
+      detail: `${stub53.lastMethod} ${stub53.lastUrl} keys=[${sorted53}] body=${body53} `
+        + `auth=「${stub53.lastAuth}」 → role=${r53.data === undefined ? '-' : r53.data.role}`
     });
   }
 

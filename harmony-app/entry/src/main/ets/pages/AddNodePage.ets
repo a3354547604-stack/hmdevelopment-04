@@ -17,6 +17,9 @@ import { promptAction, router } from '@kit.ArkUI';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
 import { BackBar } from '../components/BackBar';
+import { bindCodeProblem, bindErrorText } from '../model/Result';
+import { ServiceHub } from '../service/ServiceHub';
+import { KEY_FOREGROUND_SEQ, SessionStore } from '../service/SessionStore';
 
 /** 一个待配对的节点（蓝牙扫描结果的一条）。 */
 class NearbyNode {
@@ -26,11 +29,15 @@ class NearbyNode {
   rssi: number = -60;
 }
 
-/** 页面状态：搜索中 / 发现列表 / 连接中 / 选地点。 */
+/** 页面状态：搜索中 / 发现列表 / 连接中 / 选地点 / 绑定到账号。 */
 const STEP_SEARCH: number = 0;
 const STEP_FOUND: number = 1;
 const STEP_CONNECTING: number = 2;
 const STEP_SITE: number = 3;
+const STEP_BIND: number = 4;
+
+/** 绑定码固定 6 位（契约 §6.6 的错误码 1201/1203 都按这个长度判）。 */
+const BIND_CODE_LEN: number = 6;
 
 /** 模拟扫描/连接的等待时长，让「正在搜」有过程感（真机上由回调驱动）。 */
 const SCAN_MS: number = 1800;
@@ -45,6 +52,13 @@ export struct AddNodePage {
   @State devices: NearbyNode[] = [];
   @State picked: NearbyNode = new NearbyNode();
   @State site: string = UserCopy.SITE_HOME;
+  /**
+   * 绑定码**只存在内存里、只来自用户输入**：不预填、不给默认值、不落盘、不写日志。
+   * 它是贴在设备机身上的物理凭据，写死或预填等于把凭据印在说明书上。
+   */
+  @State bindCode: string = '';
+  @State binding: boolean = false;
+  @State bindError: string = '';
   private scanTimer: number = -1;
   private connectTimer: number = -1;
 
@@ -58,6 +72,9 @@ export struct AddNodePage {
   }
 
   aboutToDisappear(): void {
+    // 离开页面即清空绑定码：不留内存副本，避免下次进来还看到上次那串数字
+    this.bindCode = '';
+    this.bindError = '';
     // 页面被返回键关掉时，定时器还在跑会给已销毁的页面设状态
     if (this.scanTimer >= 0) {
       clearTimeout(this.scanTimer);
@@ -128,6 +145,57 @@ export struct AddNodePage {
     promptAction.showToast({
       message: UserCopy.nodeAddedToast(this.site, this.picked.name),
       duration: 2500
+    });
+    router.back();
+  }
+
+  /** 进入第 5 步（绑定到账号）。 */
+  private goBind(): void {
+    this.cancelTimers();
+    this.bindCode = '';
+    this.bindError = '';
+    this.step = STEP_BIND;
+  }
+
+  /**
+   * 第 5 步：把设备归属到当前账号（`POST /api/devices/bind`，契约 §6.6）。
+   *
+   * 为什么必须补这一步：前四步只让设备**连上家里的 Wi-Fi**，服务器侧它还是一台
+   * 没有主人的设备——不绑定就永远不会出现在首页设备列表里，子女也收不到它的提醒。
+   */
+  private async bindToAccount(): Promise<void> {
+    const problem: string = bindCodeProblem(this.bindCode);
+    if (problem.length > 0) {
+      this.bindError = problem;
+      return;
+    }
+    if (this.binding) {
+      return;
+    }
+    this.bindError = '';
+    this.binding = true;
+    // name 用第 4 步确定的地点（如「卧室」）：绑定时一次写死，省得用户再回来改名
+    const r = await ServiceHub.api().bindDevice(this.picked.sn, this.bindCode.trim(), this.site);
+    this.binding = false;
+    if (!r.ok) {
+      this.bindError = bindErrorText(r.code, r.message);
+      return;
+    }
+    this.bindCode = '';
+    promptAction.showToast({ message: '已绑定到你的账号', duration: 2000 });
+    // 回首页前推一下前台序号：首页 @Watch(foregroundSeq) 会重拉 /api/devices，
+    // 否则「刚绑好的设备」要等下一次轮询才出现，用户会以为没绑上。
+    AppStorage.setOrCreate<number>(KEY_FOREGROUND_SEQ, SessionStore.foregroundSeq() + 1);
+    router.back();
+  }
+
+  /** 「稍后再说」：设备已联网但没归属 → 必须说清楚，否则用户以为已经加好了。 */
+  private skipBind(): void {
+    this.bindCode = '';
+    this.bindError = '';
+    promptAction.showToast({
+      message: '设备已联网，但还没归到你的账号，可稍后在『我的 → 设备』里补绑',
+      duration: 3000
     });
     router.back();
   }
@@ -325,14 +393,102 @@ export struct AddNodePage {
 
       Blank()
 
-      Button(UserCopy.ADD_NODE_DONE)
+      Button('下一步：绑定到账号')
         .width('100%')
         .height(AppTheme.BTN_HEIGHT)
         .backgroundColor(AppTheme.COLOR_PRIMARY_FILL)
         .fontColor(AppTheme.COLOR_ON_PRIMARY)
         .fontSize(AppTheme.FONT_BODY)
         .onClick(() => {
-          this.finish();
+          this.goBind();
+        })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 第 5 步：输入机身贴纸上的 6 位绑定码。 */
+  @Builder
+  bindView() {
+    Column({ space: 12 }) {
+      Row({ space: 8 }) {
+        Image($r('app.media.ic_ok_circle'))
+          .width(AppTheme.ICON_MD)
+          .height(AppTheme.ICON_MD)
+          .fillColor(AppTheme.COLOR_LEVEL0)
+          .objectFit(ImageFit.Contain)
+        Column({ space: 2 }) {
+          Text(this.picked.name + ' 已连上家里的 Wi-Fi')
+            .fontSize(AppTheme.FONT_BODY)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+          Text('将放到：' + this.site)
+            .fontSize(AppTheme.FONT_LABEL)
+            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+      }
+      .width('100%')
+      .padding(AppTheme.CARD_PADDING)
+      .backgroundColor(AppTheme.COLOR_SURFACE)
+      .borderRadius(AppTheme.CARD_RADIUS)
+
+      Text('最后一步：绑定到你的账号')
+        .fontSize(AppTheme.FONT_SECTION)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
+        .width('100%')
+      Text('输入机身贴纸上的 6 位绑定码，这台设备才会出现在你的首页。')
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .width('100%')
+
+      TextInput({ placeholder: '6 位绑定码' })
+        .type(InputType.Number)
+        .maxLength(BIND_CODE_LEN)
+        .height(AppTheme.BTN_HEIGHT)
+        .fontSize(AppTheme.FONT_BODY)
+        .backgroundColor(AppTheme.COLOR_SURFACE)
+        .borderRadius(AppTheme.CARD_RADIUS)
+        .padding({ left: 12, right: 12 })
+        .onChange((v: string) => {
+          this.bindCode = v;
+          if (this.bindError.length > 0) {
+            this.bindError = '';
+          }
+        })
+
+      if (this.bindError.length > 0) {
+        Text(this.bindError)
+          .fontSize(AppTheme.FONT_LABEL)
+          .fontColor(AppTheme.COLOR_LEVEL2)
+          .width('100%')
+          .lineHeight(20)
+      }
+
+      Blank()
+
+      Button('绑定到我的账号')
+        .width('100%')
+        .height(AppTheme.BTN_HEIGHT)
+        .backgroundColor(AppTheme.COLOR_PRIMARY_FILL)
+        .fontColor(AppTheme.COLOR_ON_PRIMARY)
+        .fontSize(AppTheme.FONT_BODY)
+        .enabled(!this.binding)
+        .onClick(() => {
+          this.bindToAccount();
+        })
+
+      Text('稍后再说')
+        .width('100%')
+        .height(AppTheme.BTN_HEIGHT)
+        .fontSize(AppTheme.FONT_BODY)
+        .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          this.skipBind();
         })
     }
     .width('100%')
@@ -350,8 +506,10 @@ export struct AddNodePage {
         this.foundView()
       } else if (this.step === STEP_CONNECTING) {
         this.connectingView()
-      } else {
+      } else if (this.step === STEP_SITE) {
         this.doneView()
+      } else {
+        this.bindView()
       }
     }
     .width('100%')

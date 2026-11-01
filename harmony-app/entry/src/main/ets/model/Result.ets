@@ -403,3 +403,62 @@ export function describe(status: number, code: number, serverMessage: string,
   }
   return `请求失败（HTTP ${status}${detail.length > 0 ? ' ' + detail : ''}）`;
 }
+
+// ============================================================ 绑定码（t181）
+/**
+ * 绑定码的本地校验（页面与自检共用一份判据，避免两处规则漂移）。
+ *
+ * 为什么本地先判一次：绑定码是**贴在设备机身上的物理凭据**，用户照着贴纸逐位敲，
+ * 最常见的错就是「少敲一位」「把 O 敲成 0」「不小心粘进空格」。这类错误没必要
+ * 打一次网络请求再回一个 1001 —— 现场没网时更是直接卡住，用户不知道是自己敲错了。
+ * 服务器仍会独立校验（`server/app/routers/devices.py` 的 `bind_device()`），
+ * 本地这一道只把明显打错的挡在门外，不是唯一一道闸。
+ *
+ * 返回空串 = 可以提交；非空 = 直接就是给用户看的那句话。
+ */
+export function bindCodeProblem(code: string): string {
+  const v: string = code.trim();
+  if (v.length === 0) {
+    return '请先输入机身贴纸上的 6 位绑定码';
+  }
+  if (!/^[0-9]+$/.test(v)) {
+    return '绑定码只有数字，请照贴纸逐位输入';
+  }
+  if (v.length !== 6) {
+    return `绑定码要是 6 位数字，现在只输入了 ${v.length} 位`;
+  }
+  return '';
+}
+
+/**
+ * 绑定失败 → 一句用户能照做的话。
+ *
+ * `detail` 传 `r.message`（`describe()` 已把服务器 message 与 `data.field` 等明细
+ * 拼在括号里）。这里只负责把 1200–1203 讲清楚：「是我的问题还是管理员的问题、
+ * 下一步该找谁」；1001/1002 则按明细里的 `field` 指出到底缺的是 `sn` 还是 `bind_code`。
+ */
+export function bindErrorText(code: number, detail: string): string {
+  const tail: string = detail.length > 0 ? '（服务器：' + detail + '）' : '';
+  if (code === 1200) {
+    return '没找到这台设备，请确认设备已通电并连上网' + tail;
+  }
+  if (code === 1201) {
+    return '绑定码不对，请核对贴纸上的 6 位数字' + tail;
+  }
+  if (code === 1202) {
+    return '这台设备已经被别人绑定了，需要管理员重新生成绑定码' + tail;
+  }
+  if (code === 1203) {
+    return '绑定码过期了，请让管理员重新生成' + tail;
+  }
+  if (code === 1001 || code === 1002) {
+    if (detail.indexOf('bind_code') >= 0) {
+      return '绑定码填得不对：要 6 位数字' + tail;
+    }
+    if (detail.indexOf('sn') >= 0) {
+      return '设备编号（SN）没带上或格式不对，请返回上一步重试' + tail;
+    }
+    return '提交的信息不完整，请检查绑定码后重试' + tail;
+  }
+  return detail.length > 0 ? detail : '绑定失败，请稍后重试';
+}
