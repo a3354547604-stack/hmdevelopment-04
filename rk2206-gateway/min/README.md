@@ -1,0 +1,173 @@
+# 最小网关固件（t192）
+
+旧网关（`rk2206-gateway/src/` 那套）在实机上有过四次「整板卡死/自复位」：t188 Wi-Fi 驱动进
+recovery 后 `SetWifiModeOff` 也卡、t189 适配层 `ConnectTo()` 持锁 + `wifi_send_cmd` 无限重发、
+t190 `resident set timeout` 死循环每 44 s 自复位、t191 连不上 Wi-Fi。定位结论都是**同一条**：
+把太多东西塞进一个进程，任何一处 SDK 死循环都能把整机拖死。
+
+这个目录是**从零另写**的最小固件：只做四件事，代码不复用 `src/` 的任何一行（`grep -r 'src/' `
+为空，构建时也只把本目录拷进 SDK）。
+
+| 做的事 | 落点 |
+|---|---|
+| 上电读 Flash 里的 Wi-Fi 凭证，用 lz 层 `WifiConnect(ssid, psk)` 直连 | `min_kv.c` / `min_net.c` |
+| 连上后 HTTP 取时 `GET http://<time_host>/api/time` → `utc_epoch` | `min_net.c` |
+| 连 IoTDA（MQTT 1883，一机一密，QoS1，keepalive 120） | `min_iotda.c` |
+| 读 UART0 的 `AA55` 帧，把节点 JSON 按契约 §4.6 `device.message` 上报 | `min_proto.c` / `min_main.c` |
+
+刻意**没有**：看门狗、SoftAP/配网页、433、板载键、阈值下发、demo_trigger、断网缓存、shell 命令。
+没有的东西不会再坏一次——这是这一版存在的理由。
+
+## 1. 文件与行数
+
+| 文件 | 行 | 作用 |
+|---|---|---|
+| `min_gw.h` | 150 | 唯一头文件：常量、结构、全部原型（任务卡限制 8 个 `.c/.h`，所以接口集中在这里） |
+| `min_main.c` | 293 | 入口 + 一个状态机任务（WIFI→TIME→MQTT→RUN）+ UART 采集与上报 |
+| `min_proto.c` | 182 | CRC16-MODBUS、`AA55` 分帧、退避阶梯（纯逻辑，主机可测） |
+| `min_kv.c` | 229 | Flash 凭证读取（Vendor 两槽 + `0x6FF000` 的 256 B 块），解码部分是纯函数 |
+| `min_net.c` | 228 | `WifiConnect` 直连 + 装默认网卡 + TCP/HTTP 取时 |
+| `min_iotda.c` | 513 | SHA-256/HMAC、clientId 拼装、MQTT（CONNECT/PUBLISH QoS1/PUBACK/PINGREQ）、§4.6 报文 |
+| `test/test_min.c` | 372 | 主机单测（55 条断言，含契约 §3.7 的三条真帧） |
+| `BUILD.gn` | 43 | GN 目标 `gateway_min` |
+
+固件本体 = 6 个 `.c/.h` 共 **1598 行**（含注释）。任务卡写的是「尽量 ≤ 1200」：超了的部分主要
+是「为什么这么写」的注释（t188~t191 的坑都写进注释了，删掉等于下次再踩）。真正可压的逻辑
+大约 900 行。**这是与卡面的一处偏差，请验收时按「可读性优先」判断。**
+
+## 2. 开机日志四行样例（判据）
+
+```
+[min] ---- RK2206 最小网关启动 MIN-GW-v0.1 (Nov  1 2026 22:30:11) ----
+[min] KV：Wi-Fi ssid=123456798 口令=已读到（不回显）
+[min] KV：IoTDA 接入 1a2b3c4d5e.st1.iotda-device.cn-north-4.myhuaweicloud.com:1883 设备 <device_id>，取时 123.206.99.28:80
+[min] UART0 就绪 9600 8N1（RX=GPIO0_PB6 / TX=GPIO0_PB7，MUX_FUNC2）
+[min] 主任务已启动（栈 8192 B，优先级 24）
+```
+
+之后按状态机往下走，成功链是：
+
+```
+[min] STA 连接发起 ssid=123456798
+[min] STA 已连接 ssid=123456798 联网成功 IP=192.168.137.x
+[min] 取时成功 utc_epoch=1792243200（来源 123.206.99.28:80）
+[min] IoTDA 已连接 clientId=<device_id>_0_1_2026101722
+[min] 已上报 node seq=1 len=124（PUBACK）
+```
+
+锚点串 `MIN-GW-v0.1` 会进 `Firmware.img`，构建脚本用 `strings | grep` 断言它存在——
+**看到这行就说明烧进去的确实是这一版**。
+
+## 3. KV 字段名与来源（不重新配网也能接着用旧凭证）
+
+### 3.1 Wi-Fi 凭证：Flash 的 Vendor 区两槽
+
+| 项 | 值 | 来源 |
+|---|---|---|
+| 槽号 | `VENDOR_ID_CUSTOM + 20`（头）、`+21`（口令体），每槽 63 B | `src/gw_store.c:45-46` |
+| 头布局 | `[0]=0x57('W')` magic、`[1]=1` 版本、`[2]=ssid 字节和`、`[3]=口令长度`、`[4..36]=ssid`（33 B，NUL 结尾）、其余填充 | `src/gw_store.c:62-69` |
+| 口令体 | 明文口令与 16 B 密钥逐字节异或 | `src/gw_store.c:196-199` |
+| 密钥派生 | `key[i] = "ECGWSTOR"[i%8] ^ SN[i%len] ^ (i*31+7)`，SN = `M0-3F1A2B` | `src/gw_store.c:124-142` |
+
+⚠️ **`MIN_DEVICE_SN` 必须与旧固件 `gw_config.h:302` 一致**（`"M0-3F1A2B"`），否则解出来的口令是乱码——
+这不是 bug，是「换了设备身份本来就要重配」的刻意设计。
+
+### 3.2 IoTDA 凭证：Flash `0x6FF000` 的 256 B 块
+
+| 偏移 | 长度 | 字段 |
+|---|---|---|
+| 0 | 4 | magic `0x47574B56`（**小端**写盘，字节序 `56 4B 57 47`） |
+| 4 | 2 | 版本 `2`（u16 小端） |
+| 6 | 2 | 块大小 `256` |
+| 8 | 64 | `mqtt_host`（IoTDA 接入域名） |
+| 72 | 64 | `device_id` |
+| 136 | 64 | `secret`（设备密钥） |
+| 200 | 48 | `time_host`（取时服务器地址） |
+| 248 | 2 | `mqtt_port`（u16 小端，缺省 1883） |
+| 250 | 2 | `time_port`（u16 小端，缺省 80） |
+| 252 | 4 | FNV-1a 32 校验（覆盖 `[0,252)`，u32 小端） |
+
+来源：`src/gw_kvcfg.h:31-44`（字段）与 `src/gw_kvcfg.c:34-45,131-141`（字节序与 FNV）。
+写入方式见 `rk2206-gateway/施工单-凭证写入Flash-KV.md`（旧固件的 `gwkv set` 命令），
+**新固件只读不写**：配网/写凭证继续用旧固件做一次，或者用串口 `gwkv` 那套工具。
+
+## 4. UART 引脚与帧
+
+- UART0，**9600 8N1**，无流控，轮询读（`LzUartRead`），50 ms 一轮。
+- **RX = GPIO0_PB6**（E53 座 `UART_TX` 孔）、**TX = GPIO0_PB7**（座子 `UART_RX` 孔），`MUX_FUNC2`。
+  与旧固件 `gw_config.h:28-29` 同一份接线表；RX 上拉，避免悬空噪声被当帧头。
+- 帧格式（契约 §3.2）：`AA 55 | VER(1) | TYPE(1) | SEQ(2 小端) | LEN(2 小端) | PAYLOAD | CRC16-MODBUS(2 小端)`，
+  CRC 覆盖 `VER..PAYLOAD`（长度 `6+LEN`），整帧 `10+LEN` 字节，`LEN ≤ 1024`。
+- 只对 `TYPE=0x01`（节点 JSON 原样，契约 §3.4）上报；其余类型只计入统计不转发。
+
+## 5. 上报形状（契约 §4.6 `device.message`）
+
+topic：`$oc/devices/<device_id>/sys/messages/up`，QoS1。
+
+```json
+{"name":"node_samples","id":"<device_id>-1792243200000","content":"[{\"sn\":\"M1\",\"ts\":1792243200000,\"type\":\"gas\",\"payload\":{\"smoke\":320,\"temp\":24.5,\"humi\":56.2}}]"}
+```
+
+`content` 里是**帧里的节点 JSON 原样**（只做 JSON 字符串转义，不解析、不改字段——契约 §2.6
+「汇聚不解析业务字段」的同一条纪律，网关也不碰）。
+
+## 6. 失败重试策略（绝不进 recovery）
+
+| 失败点 | 行为 |
+|---|---|
+| `WifiEnable/WifiStartStation/WifiConnect` 返回失败 | 打一行日志 → 退避 → **重新走 wifi**（不重发同一条命令） |
+| 20 s 内没拿到 IP | 同上 |
+| 取时失败 | 退避 → 重取（不连 IoTDA） |
+| TCP/MQTT CONNECT 失败（含 `0x02`/`0x04`） | 关 socket → 退避 → 重连；`0x04` 会在日志里明说是口令问题 |
+| PUBACK 没等到 / PINGRESP 没回来 | 关 socket → 退避 → 重连 |
+
+退避阶梯：**30 s → 60 s → 120 s → 300 s（封顶）**，任何一步成功即清零。
+退避窗口内**只读串口**（帧不会丢），不发任何网络请求。
+
+## 7. 与旧固件相比删掉了什么
+
+| 删掉 | 原因 |
+|---|---|
+| 硬件看门狗（`GW_WATCHDOG_ENABLE`） | t190 的 44 s 自复位就是它 + resident 死循环的副作用；这一版不设狗，卡住能看见日志停在哪 |
+| SoftAP / 配网 H5 / 本地 HTTP server | 配网继续用旧固件或串口工具；少一个常驻 socket 任务 |
+| 433 单键遥控、板载键 K1–K4、`keys` 命令 | 与「联网 + 上报」无关 |
+| 阈值下发 / 命令响应 / 属性上报 / 事件上报 | 这一版只发节点明细；属性与事件由后续版本再加 |
+| paho MQTT + cJSON | 自己写：CONNECT/PUBLISH/PUBACK/PING 一共 200 行，省掉两棵依赖树 |
+| 断网缓存 2000 条 | 缓存要 Flash 写入，写入会触发 FlashSuspend/Resume —— 那正是 t190 死循环的入口 |
+| SDK shell 的 6 个自定义命令 | 减少初始化路径（shell 注册是同步的，一条失败就少一半功能） |
+
+## 8. 构建与验证
+
+```bash
+# 主机侧（秒级，不需要构建窗口）：55 条断言 + 5 个 .c 的交叉语法检查
+bash tools/gw-build-min.sh --check
+
+# 出镜像（走构建锁；产物 rk2206-gateway/out/gateway-Firmware.img）
+bash tools/build-lock.sh bash tools/gw-build-min.sh
+```
+
+断言（脚本里逐条打印）：`hb build` 退出码 0 / 日志有 `build success` / 无 `[OHOS ERROR]` /
+5 个源文件都有编译记录 / `libgateway_min.a` 存在 / `liteos.elf` 含符号 `min_crc16` /
+`Firmware.img` 含锚点串 `MIN-GW-v0.1` / 镜像 2097152 B 且打印当次 md5+sha256。
+
+**当次结果（2026-11-01 22:3x，本机）**：hb 退出码 0、日志 1519 行、7 项断言全过；
+`Firmware.img` **2097152 B**、md5 `59f757166a636657b035d599a805bd80`、sha256
+`69d4a2951e51acfb7739d157703f94a3b5966ff4ebcd9cb7d4f9d3e1280da1a9`、`liteos.elf` 837564 B。
+证据文件：`rk2206-gateway/out/build-min.evidence.txt`。
+
+## 9. 已知限制（未上板实测的部分）
+
+0. **`APP_FEATURE_INIT` 必须 `#include "ohos_init.h"`**：第一版漏了这个头，宏被当成隐式函数声明，
+   编译期只报 warning，链接期 `--gc-sections` 把整个 `min_main.o` 全删掉——表现是「构建成功、
+   镜像 2097152 B、但 `nm liteos.elf | grep min_` 一条都没有、`__zinitcall_app_feature_start==end`」。
+   构建脚本的「符号进 ELF」与「锚点进镜像」两条断言就是为这种假绿灯留的，别删。
+1. **样例帧出处**：`ws63-firmware/out/*.log` 里**没有** `AA55` 的十六进制转储（那边只打文本日志），
+   所以单测用的是 `docs/技术/接口契约.md` §3.7 的六条实测帧（0x01 节点气体 / 0x03 跌倒 / 0x02 汇聚心跳），
+   CRC 已与参考实现逐字节对上。等实机抓到真帧后应补一条「现场帧」到 `test/test_min.c`。
+2. **`WifiEnable()` 重复调用**：只忽略了它的返回值，真机上如果射频已经在 STA 态，`WifiStartStation()`
+   是否仍返回成功未实测（失败会走退避，不会卡死）。
+3. **取时只认点分十进制 IPv4**：不做 DNS（KV 里存的是 IP）。若后续改成域名需要补 `getaddrinfo`。
+4. **未做断线检测的被动路径**：只有主动 PING（60 s）失败才会重连；如果 broker 悄悄断了而 PING 还成功
+   （概率极低）会漏检一次。
+5. **`APP_FEATURE_INIT` 入口名**：与旧固件一致；如果 SDK 的启动流程改了（比如改成 `app_main`），
+   这里要跟着改——构建脚本的「符号进 ELF」断言会立刻发现。

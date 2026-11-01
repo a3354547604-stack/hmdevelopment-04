@@ -1,0 +1,43 @@
+# 最小网关固件的 GN 目标（t192）
+#
+# 与 rk2206-gateway/BUILD.gn 的关系：只借 GN 骨架，不借源码。sources 只有 min/ 下的 5 个 .c，
+# 没有 paho / cJSON / shell —— MQTT 与 JSON 全是自己写的（见 min_iotda.c 头注释），
+# 所以这里**不** deps paho、**不** 引 MQTTPacket 的 include，任何一条多引都可能把
+# 旧那套的链接期行为再带回来。
+#
+# include_dirs 的依据（逐条对应一个真实报错）：
+#   - adapter/include + adapter/include/lz_hardware：lz_hardware.h（UART/Flash/Vendor/WiFi）
+#   - sdk_liteos/board/include：config_network.h / VendorID
+#   - kernel/liteos_m/kernel/include：los_task.h（LOS_TaskCreate / LOS_Msleep）
+#   - musl porting/liteos_m/kernel/include：errno.h / unistd.h（usleep/close）
+#   - lwip/src/include/lwip：lwip/sockets.h、lwip/netifapi.h
+#   - utils/native/lite/include：APP_FEATURE_INIT
+# 仍然**不**加 //third_party/lwip/src/include（CAL-13：会让 lwip/sockets.h 命中原版而不是
+# porting 版，与 musl 头冲突，整条 hb build 挂在最后几个目标上）。
+
+import("//build/lite/config/component/lite_component.gni")
+
+static_library("gateway_min") {
+    sources = [
+        "min_main.c",   # 入口 + 状态机 + UART 采集/上报
+        "min_proto.c",  # CRC16-MODBUS + AA55 分帧 + 退避阶梯（纯逻辑，主机可测）
+        "min_kv.c",     # Flash 凭证读取（Vendor 两槽 + 0x6FF000 的 256 B 块）
+        "min_net.c",    # lz 层 WifiConnect + 默认网卡 + TCP/HTTP 取时
+        "min_iotda.c",  # SHA-256/HMAC + clientId + MQTT(CONNECT/PUBLISH/PUBACK/PING)
+    ]
+
+    include_dirs = [
+        "//vendor/lockzhiner/rk2206/samples/t5_min",
+        "//utils/native/lite/include",
+        "//device/rockchip/rk2206/adapter/include",
+        "//device/rockchip/rk2206/adapter/include/lz_hardware/",
+        "//device/rockchip/rk2206/sdk_liteos/board/include",
+        "//kernel/liteos_m/kernel/include",
+        "//third_party/musl/porting/liteos_m/kernel/include",
+        "//third_party/lwip/src/include/lwip",
+    ]
+
+    deps = [
+        "//device/rockchip/hardware:hardware",
+    ]
+}
