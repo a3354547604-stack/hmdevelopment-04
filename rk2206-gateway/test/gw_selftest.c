@@ -495,7 +495,10 @@ static void test_parser(void)
         t_ok(p.resync >= 1, "纯噪声被逐字节丢弃（resync 计数增长）");
         t_ok(peak <= 2, "残余长度始终 ≤2（垃圾不堆积，比 §3.6 的 2068 上限更保守）");
 
-        /* 反向用例：头部声称 LEN=1024 却凑不满 → 残余长大后必须能恢复干净 */
+        /* 反向用例：头部声称 LEN=1024 却凑不满 → 残余长大后必须能恢复干净。
+         * t183：这条路径的行为变了 —— 假帧头凑不满时，现在会在"残余顶到缓冲上限"或
+         * "整段再无帧头"时整段丢弃并计数（overflow++），而不是留着残余等下次。
+         * 断言跟着改成"丢弃发生过、残余被清干净、后面还能解析"，这才是要保的东西。 */
         {
             uint8_t hdr8[8] = { 0xAA, 0x55, 0x01, 0x01, 0x01, 0x00, 0x00, 0x04 };
             uint8_t noise[256];
@@ -509,9 +512,170 @@ static void test_parser(void)
                 (void)gw_parser_poll(&p, &f, &e);
             }
             t_ok(p.len < GW_PARSER_LIMIT, "半包堆积也不会超过解析器缓冲上限（§3.6）");
-            t_ok(p.overflow == 0, "未触发 overflow 保底分支（不需要清空就自愈了）");
+            t_ok(p.overflow >= 1, "假帧头凑不满 → 整段丢弃并计数（t183）");
+            t_ok(p.len <= 2, "丢弃后残余回到 ≤2 B（不会长期贴着上限）");
         }
     }
+}
+
+/* ================== 2b. t183：波特率失配下的垃圾流 ==================
+ * 现场：网关切到 115200、汇聚仍发 9600 → 收到的是"看起来在收、其实一帧都成不了"的垃圾流，
+ * 期间串口刷 `[ERR]HIGHEST task ID: gwUart:7 SP error!`，整板失去响应。
+ *
+ * 主机上能证明的部分（这就是本用例要守的东西）：
+ *   a) 灌 200 KB 伪随机字节，分帧器的残余长度**永远不超过缓冲上限**（缓冲区不增长）；
+ *   b) 垃圾期间发生"整段丢弃"并计数（overflow 涨），而不是把残余一路留到卡死；
+ *   c) 灌完之后再喂一帧**合法帧**，必须立刻解析成功（这条最关键：
+ *      老实现下假帧头会让解析器永久失步，rx 在涨但 frames 恒 0）。
+ * 随机源是固定种子的 LCG，不是 rand() —— 失败必须能复现，换个 libc 不许换结果。
+ */
+static uint32_t garbage_lcg(uint32_t *st)
+{
+    *st = (*st) * 1103515245u + 12345u;
+    return (*st >> 16) & 0x7FFFu;
+}
+
+static void test_parser_garbage_flood(void)
+{
+    static uint8_t chunk[512];
+    gw_parser_t p;
+    gw_frame_t f;
+    gw_frame_err_t e;
+    uint8_t good[GW_FRAME_MAX];
+    uint32_t good_n;
+    uint32_t seed = 20261101u;       /* 固定种子：失败可复现 */
+    uint32_t fed = 0u;
+    uint32_t peak = 0u;
+    uint32_t frames = 0u;
+    uint32_t chunk_sizes[] = { 37u, 256u, 513u, 1u, 7u };
+    uint32_t ci = 0u;
+
+    t_start("§3.6/t183 200 KB 高速垃圾流：不越界、不失步");
+    good_n = build_poll_frame(good);
+
+    gw_parser_init(&p);
+    while (fed < 200u * 1024u) {
+        uint32_t cs = chunk_sizes[ci % (sizeof(chunk_sizes) / sizeof(chunk_sizes[0]))];
+        uint32_t i;
+        gw_parse_result_t r;
+
+        ci++;
+        if (cs > sizeof(chunk)) {
+            cs = sizeof(chunk);
+        }
+        for (i = 0; i < cs; i++) {
+            chunk[i] = (uint8_t)(garbage_lcg(&seed) & 0xFF);
+        }
+        /* 有意让垃圾里出现假帧头：每 97 字节塞一对 AA 55，模拟"9600 的数据被 115200 解" */
+        for (i = 0; i + 1u < cs; i += 97u) {
+            chunk[i] = GW_FRAME_SOF0;
+            chunk[i + 1u] = GW_FRAME_SOF1;
+        }
+        (void)gw_parser_push(&p, chunk, cs);
+        fed += cs;
+        if (p.len > peak) {
+            peak = p.len;
+        }
+        /* 和 uart_task 一样：push 完就把 poll 抽干 */
+        for (;;) {
+            r = gw_parser_poll(&p, &f, &e);
+            if (r == GW_PARSE_FRAME) {
+                frames++;                      /* 垃圾里侥幸成帧（CRC 碰撞）：允许，但不是本用例要的 */
+                continue;
+            }
+            if (r == GW_PARSE_ERR) {
+                continue;
+            }
+            break;
+        }
+        if (p.len > peak) {
+            peak = p.len;
+        }
+    }
+
+    t_ok(peak <= GW_PARSER_LIMIT, "灌 200 KB 垃圾期间残余从未超过缓冲上限（缓冲区不增长）");
+    t_ok(p.len <= GW_PARSER_LIMIT, "收尾时残余也在上限内");
+    t_ok(p.overflow >= 1u, "垃圾流触发了整段丢弃并计数（overflow ≥ 1）");
+    t_ok(p.resync >= 100000u, "无帧头丢弃的字节数与灌进去的量同量级（resync ≥ 100 KB）");
+
+    /* 关键：垃圾之后必须还能解析出合法帧 —— 老实现会在这里永久失步 */
+    (void)gw_parser_push(&p, good, good_n);
+    t_ok(gw_parser_poll(&p, &f, &e) == GW_PARSE_FRAME,
+         "垃圾流之后仍能解析下一帧合法帧");
+    t_ok(f.type == GW_T_GW_CMD && f.seq == 4u, "解析出的就是那一帧（0x11 / SEQ=4）");
+
+    /* 缓冲上限本身的边界：灌满到 sizeof(buf) 后不许写出去 */
+    {
+        static uint8_t fill[GW_PARSER_LIMIT];
+        uint32_t wrote;
+
+        gw_parser_init(&p);
+        memset(fill, 0xA5, sizeof(fill));
+        wrote = gw_parser_push(&p, fill, sizeof(fill));
+        t_ok(wrote == sizeof(fill), "恰好灌满缓冲时全部收下（无越界）");
+        t_ok(gw_parser_push(&p, fill, 1u) == 0u, "缓冲满后再 push 返回 0（不覆盖、不越界）");
+        t_ok(p.len == sizeof(fill), "残余长度等于缓冲上限，没有多写一个字节");
+        (void)gw_parser_poll(&p, &f, &e);
+        (void)gw_parser_push(&p, good, good_n);
+        t_ok(gw_parser_poll(&p, &f, &e) == GW_PARSE_FRAME, "顶满之后仍能自恢复并成帧");
+    }
+
+    t_ok(frames <= fed / 100u, "垃圾里侥幸成帧的数量极少（远小于字节数）");
+}
+
+/* ================== 2c. t183：cJSON 递归深度的预检 ==================
+ * 为什么单独测：cJSON_Parse 对 `[`/`{` 递归下探，深度由字节数决定。垃圾帧侥幸通过 CRC
+ * 之后，1 KB 的 `[[[[…` 会让 uart_task 的栈按层数被吃掉 —— 这是"栈开大"之外的第二个入口。 */
+extern int gw_json_depth_ok(const uint8_t *p, uint32_t len, uint32_t max_depth);
+
+static void test_json_depth_guard(void)
+{
+    static uint8_t deep[1100];
+    static uint8_t bal[96];
+    uint32_t i;
+
+    t_start("t183 cJSON 递归预检（垃圾帧不许把栈压穿）");
+    t_ok(gw_json_depth_ok((const uint8_t *)"{\"sn\":\"N1\",\"v\":1}",
+                          (uint32_t)strlen("{\"sn\":\"N1\",\"v\":1}"), GW_JSON_MAX_DEPTH) == 1,
+         "正常节点报文通过");
+    t_ok(gw_json_depth_ok((const uint8_t *)"{\"a\":[{\"b\":1},[2,3]]}",
+                          (uint32_t)strlen("{\"a\":[{\"b\":1},[2,3]]}"), GW_JSON_MAX_DEPTH) == 1,
+         "契约最多层级（对象→数组→对象）通过");
+
+    memset(deep, '[', sizeof(deep));
+    t_ok(gw_json_depth_ok(deep, sizeof(deep), GW_JSON_MAX_DEPTH) == 0,
+         "1 KB 全是 '[' → 判为垃圾（否则 cJSON 会递归 1100 层）");
+
+    /* 恰好 23 层且闭合：必须在阈值内（阈值 24 是"能通过的最深"） */
+    for (i = 0u; i < 23u; i++) {
+        bal[i] = '[';
+        bal[23u + i] = ']';
+    }
+    t_ok(gw_json_depth_ok(bal, 46u, GW_JSON_MAX_DEPTH) == 1, "23 层闭合仍通过（阈值内）");
+    /* 25 层闭合：超阈值必须被拒 */
+    for (i = 0u; i < 25u; i++) {
+        bal[i] = '{';
+        bal[25u + i] = '}';
+    }
+    t_ok(gw_json_depth_ok(bal, 50u, GW_JSON_MAX_DEPTH) == 0, "25 层闭合被拒");
+
+    t_ok(gw_json_depth_ok((const uint8_t *)"{\"a\":1", 7u, GW_JSON_MAX_DEPTH) == 0,
+         "括号不闭合（截断）被拒");
+    t_ok(gw_json_depth_ok((const uint8_t *)"x{\"a\":1}", 8u, GW_JSON_MAX_DEPTH) == 0,
+         "开头不是 {/[ 的垃圾被拒");
+    t_ok(gw_json_depth_ok((const uint8_t *)"{\"s\":\"[[[[[[[[[[\"}",
+                          (uint32_t)strlen("{\"s\":\"[[[[[[[[[[\"}") , GW_JSON_MAX_DEPTH) == 1,
+         "字符串里的 '[' 不计深度（不误伤合法报文）");
+    t_ok(gw_json_depth_ok((const uint8_t *)"{}", 2u, GW_JSON_MAX_DEPTH) == 1, "空对象通过");
+    t_ok(gw_json_depth_ok(NULL, 0u, GW_JSON_MAX_DEPTH) == 0, "NULL 载荷被拒（不崩）");
+
+    /* 与 uart_task 的用法对齐：1 KB「合法风格」垃圾（反复的对象/数组）仍然放行 ——
+     * 预检只按真实嵌套深度拦，不做内容判断，不误伤正常报文。 */
+    for (i = 0u; i < sizeof(deep); i++) {
+        deep[i] = (uint8_t)("[{\"sn\":1}]"[(i % 10u)]);
+    }
+    t_ok(gw_json_depth_ok(deep, sizeof(deep), GW_JSON_MAX_DEPTH) == 1,
+         "1 KB 反复对象/数组（110 组完整闭合）通过：只按嵌套深度判");
 }
 
 /* ============================== 3. 鉴权（§4.1） ============================== */
@@ -2959,6 +3123,8 @@ int main(void)
     test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */
     test_hw_adc();                   /* t140 ADC 链路：幂等复用 / 已初始化 / 读失败留痕 */
     test_parser();
+    test_parser_garbage_flood();     /* t183：200 KB 垃圾流不断言越界/不失步 */
+    test_json_depth_guard();          /* t183：cJSON 递归深度预检 */
     test_crypto_auth();
     test_time();
     test_iotda_payloads();

@@ -45,6 +45,14 @@ mkdir -p "$OUT"
 # t139 起加 -DGW_HW_HOST：gw_hw.c 里只有「`keys` 参数分派」这层是纯逻辑，
 # 采样/基线/报告文本要碰 SDK 的 ADC，主机上没有那些符号（同 gw_net.c 的 GW_NET_HOST 口径）。
 CFLAGS='-std=c99 -O1 -g -Wall -Wextra -Wno-unused-parameter -DGW_HW_HOST=1'
+# t183：可选的内存/未定义行为检查。默认关（容器里不一定装了 libasan；默认关保证老路径行为不变）：
+#   GW_SANITIZE=1 tools/gw-host-test.sh
+# 打开后跑的是同一份源码与同一套用例，只是把越界写、悬垂读、有符号溢出变成"当场红"。
+# 分帧器改动的验收要它：200 KB 垃圾流的用例只有 ASAN 才能证明"真的没写出缓冲"。
+if [ "${GW_SANITIZE:-0}" = "1" ]; then
+    CFLAGS="$CFLAGS -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined"
+    SAN_FLAGS='1'
+fi
 OBJS='gw_proto.c gw_rules.c gw_crypto.c gw_time.c gw_iotda.c gw_cache.c gw_alarm.c gw_433.c gw_timesync.c gw_kvcfg.c gw_wifi_shell.c gw_scan.c gw_key.c gw_hw.c gw_hw_adc.c'
 # ↑ t34 起多一个 gw_kvcfg.c（凭证 Flash KV 的编解码与串口命令本体：纯逻辑、不碰 SDK）。
 #   它必须在这份清单里，否则 test/gw_selftest.c 的 test_kvcfg() 会因缺符号编译不过。
@@ -91,7 +99,14 @@ run_container() {
     # 注意：docker exec bash -lc 的字符串里**不能**用反斜杠续行 —— 宿主的双引号会先把
     # "\<换行>" 吃掉，内层 bash 收到的是换行分隔的多条命令，就会去执行 .c 文件。
     # 所以这里拼成一条单行命令。
-    local cmd="cd $STAGE && gcc $CFLAGS -I $STAGE/src -I $STAGE/stub -I $CJSON_DIR_IN_CONT $(for o in $OBJS; do printf '%s ' "$STAGE/src/$o"; done)$STAGE/gw_host_plat.c $STAGE/gw_selftest.c $CJSON_DIR_IN_CONT/cJSON.c -o $STAGE/gw_selftest 2> build.log; brc=\$?; echo BUILD_RC=\$brc; cat build.log; if [ \$brc = 0 ]; then $STAGE/gw_selftest; echo RUN_RC=\$?; fi"
+    # ASAN 的运行时选项要显式传进容器（docker exec 不继承宿主环境）：
+    #   detect_leaks=0 —— 自测进程不释放全局缓存是正常的，泄漏检测与本次目标无关；
+    #   halt_on_error=1 —— 一旦越界就停，别让后面的用例把证据冲掉。
+    local san_env=""
+    if [ "${GW_SANITIZE:-0}" = "1" ]; then
+        san_env="export ASAN_OPTIONS=detect_leaks=0:halt_on_error=1; export UBSAN_OPTIONS=print_stacktrace=1; "
+    fi
+    local cmd="cd $STAGE && ${san_env}gcc $CFLAGS -I $STAGE/src -I $STAGE/stub -I $CJSON_DIR_IN_CONT $(for o in $OBJS; do printf '%s ' "$STAGE/src/$o"; done)$STAGE/gw_host_plat.c $STAGE/gw_selftest.c $CJSON_DIR_IN_CONT/cJSON.c -o $STAGE/gw_selftest 2> build.log; brc=\$?; echo BUILD_RC=\$brc; cat build.log; if [ \$brc = 0 ]; then $STAGE/gw_selftest; echo RUN_RC=\$?; fi"
     set +e
     docker exec "$CONT" bash -lc "$cmd" > "$LOGF" 2>&1
     local rc=$?

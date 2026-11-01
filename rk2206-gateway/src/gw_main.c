@@ -46,6 +46,11 @@
 #include "lwip/netifapi.h"
 
 #include <string.h>
+
+/* t183：cJSON_Parse 的递归深度预检（实现在 gw_proto.c）。
+ * 没写进 gw_proto.h 是因为本卡 inScope 不含该头文件（任务卡 t183）；等允许改头文件时挪过去。
+ * 作用见 gw_proto.c 末尾注释：垃圾流里 `[[[[…` 的载荷会让 cJSON 逐层递归，把 uart_task 栈压穿。 */
+extern int gw_json_depth_ok(const uint8_t *p, uint32_t len, uint32_t max_depth);
 #include <stdio.h>      /* snprintf：只在命令参数解析这一处用，热路径一律手写十进制 */
 
 /* ============================== 全局状态 ============================== */
@@ -419,6 +424,11 @@ static void handle_node_data(const gw_frame_t *f, uint32_t now)
     if (f->len == 0 || f->len > GW_FRAME_MAX_PAYLOAD) {
         return;
     }
+    /* t183：先做深度预检再递归解析。校验和侥幸对上的垃圾帧也会走到这里，
+     * 而 cJSON 的递归深度由字节数决定 —— 不拦就可能在 uart_task 栈上失控。 */
+    if (!gw_json_depth_ok(f->payload, f->len, GW_JSON_MAX_DEPTH)) {
+        return;
+    }
     memcpy(buf, f->payload, f->len);
     buf[f->len] = '\0';
 
@@ -535,6 +545,11 @@ static void handle_hub_status(const gw_frame_t *f, uint32_t now)
     if (f->len == 0 || f->len > GW_FRAME_MAX_PAYLOAD) {
         return;
     }
+    /* t183：先做深度预检再递归解析。校验和侥幸对上的垃圾帧也会走到这里，
+     * 而 cJSON 的递归深度由字节数决定 —— 不拦就可能在 uart_task 栈上失控。 */
+    if (!gw_json_depth_ok(f->payload, f->len, GW_JSON_MAX_DEPTH)) {
+        return;
+    }
     memcpy(buf, f->payload, f->len);
     buf[f->len] = '\0';
     root = cJSON_Parse(buf);
@@ -583,6 +598,11 @@ static void handle_hub_event(const gw_frame_t *f, uint32_t now)
     const char *s;
 
     if (f->len == 0 || f->len > GW_FRAME_MAX_PAYLOAD) {
+        return;
+    }
+    /* t183：先做深度预检再递归解析。校验和侥幸对上的垃圾帧也会走到这里，
+     * 而 cJSON 的递归深度由字节数决定 —— 不拦就可能在 uart_task 栈上失控。 */
+    if (!gw_json_depth_ok(f->payload, f->len, GW_JSON_MAX_DEPTH)) {
         return;
     }
     memcpy(buf, f->payload, f->len);
@@ -914,6 +934,9 @@ static uint8_t  g_rx_ring[16];
 static uint8_t  g_rx_w;
 static uint32_t g_rx_last_print_ms;
 static uint32_t g_rx_frames;
+/* t183：解析错误日志限速（见 uart_task 里 GW_PARSE_ERR_PRINT_MS 的注释）。 */
+static uint32_t g_parse_err_last_ms;
+static uint32_t g_parse_err_suppressed;
 /* t174：自愈守卫的状态。串口 `uinfo` 也能看到——现场问「自愈过几次」不用翻日志。 */
 static gw_uart_guard_t s_uart_guard;
 static int      s_boot_reinit_done;
@@ -963,12 +986,24 @@ static void uart_task(void *arg)
                 continue;
             }
             if (r == GW_PARSE_ERR) {
-                /* 诊断：把解析失败的原因与首字节打出来（现场只看得到这一处） */
-                printf("[UART] parse err reason=%u seq=%u rx_bytes=%u ring=%02X%02X%02X%02X%02X%02X\n",
-                       (unsigned)err.reason, (unsigned)err.seq, (unsigned)g_rx_bytes,
-                       g_rx_ring[(g_rx_w + 0) % 16], g_rx_ring[(g_rx_w + 1) % 16],
-                       g_rx_ring[(g_rx_w + 2) % 16], g_rx_ring[(g_rx_w + 3) % 16],
-                       g_rx_ring[(g_rx_w + 4) % 16], g_rx_ring[(g_rx_w + 5) % 16]);
+                /* 诊断：把解析失败的原因与首字节打出来（现场只看得到这一处）。
+                 * t183：波特率失配时这条每秒能触发几十次，逐条打印等于把串口自己刷死，
+                 * 内容还几乎一样。限速到 GW_PARSE_ERR_PRINT_MS（1 s）一条，其余只计数，
+                 * 下一次打印时把「这段时间又压了多少条」带出来；NACK 逻辑不受限速影响。 */
+                g_parse_err_suppressed++;
+                if ((uint32_t)(now - g_parse_err_last_ms) >= GW_PARSE_ERR_PRINT_MS) {
+                    g_parse_err_last_ms = now;
+                    printf("[UART] parse err reason=%u seq=%u rx_bytes=%u crc_err=%u fmt_err=%u "
+                           "drop=%u suppressed=%u ring=%02X%02X%02X%02X%02X%02X\n",
+                           (unsigned)err.reason, (unsigned)err.seq, (unsigned)g_rx_bytes,
+                           (unsigned)s_parser.crc_err, (unsigned)s_parser.fmt_err,
+                           (unsigned)s_parser.overflow,
+                           (unsigned)(g_parse_err_suppressed - 1u),
+                           g_rx_ring[(g_rx_w + 0) % 16], g_rx_ring[(g_rx_w + 1) % 16],
+                           g_rx_ring[(g_rx_w + 2) % 16], g_rx_ring[(g_rx_w + 3) % 16],
+                           g_rx_ring[(g_rx_w + 4) % 16], g_rx_ring[(g_rx_w + 5) % 16]);
+                    g_parse_err_suppressed = 1u;   /* 本条已打出：从这条起重新计数 */
+                }
                 /* 契约 §3.6：CRC/LEN 错 → GW_NACK；同 SEQ+reason 只 NACK 一次防风暴 */
                 if (err.suppressed == 0) {
                     nack_len = gw_frame_encode_nack(nack, sizeof(nack), err.seq, err.seq, err.reason);
@@ -983,9 +1018,9 @@ static void uart_task(void *arg)
         gw_pending_tick(now);
         if (now - g_rx_last_print_ms >= 10000u) {
             g_rx_last_print_ms = now;
-            printf("[UART] rx_bytes=%u frames=%u crc_err=%u fmt_err=%u ring=%02X%02X%02X%02X\n",
+            printf("[UART] rx_bytes=%u frames=%u crc_err=%u fmt_err=%u drop=%u ring=%02X%02X%02X%02X\n",
                    (unsigned)g_rx_bytes, (unsigned)g_rx_frames, (unsigned)s_parser.crc_err,
-                   (unsigned)s_parser.fmt_err,
+                   (unsigned)s_parser.fmt_err, (unsigned)s_parser.overflow,
                    g_rx_ring[(g_rx_w + 0) % 16], g_rx_ring[(g_rx_w + 1) % 16],
                    g_rx_ring[(g_rx_w + 2) % 16], g_rx_ring[(g_rx_w + 3) % 16]);
             /* t174 自愈：字节在涨却解析不出帧（或 CRC 错涨太快）就再配一次波特率。
@@ -1650,8 +1685,10 @@ static void net_task(void *arg)
         }
         if (s_last_stat_ms == 0 || (uint32_t)(now - s_last_stat_ms) >= 10000u) {
             s_last_stat_ms = now;
-            printf("[%s] 统计 帧错(crc=%u fmt=%u ovf=%u) 缓存=%u 丢弃=%u\n", GW_LOG_TAG,
-                   s_parser.crc_err, s_parser.fmt_err, s_parser.overflow,
+            /* t183：ovf → drop（整段丢弃次数，含"连续无帧头"与"残余超限"两类事件），
+             * 并把无帧头丢掉的字节数一起打出来 —— 波特率失配时这俩数会一起飙。 */
+            printf("[%s] 统计 帧错(crc=%u fmt=%u drop=%u) 无帧头丢弃=%u B 缓存=%u 丢弃=%u\n", GW_LOG_TAG,
+                   s_parser.crc_err, s_parser.fmt_err, s_parser.overflow, s_parser.resync,
                    gw_cache_count(&s_cache), s_sample_drop);
         }
     }

@@ -118,8 +118,26 @@
 /* ------------------------------------------------------------------ *
  * 6. 任务与调试
  * ------------------------------------------------------------------ */
-#define GW_TASK_STACK_UART      4096
+/* t183：4096 → 16384。现场把网关波特率切到 115200（汇聚仍发 9600）后，串口持续刷
+ *   `[ERR]HIGHEST task ID: gwUart:7 SP error!` 并整板失去响应 —— 那是这条任务栈真被踩穿。
+ * 最坏路径 uart_task → handle_frame → handle_hub_event → gw_emit 的栈是这样叠的：
+ *   uart_task        rx[256] + gw_frame_t + gw_frame_err_t + 若干标量             ≈ 0.5 KB
+ *   handle_frame     ack[64]（未知 TYPE 回 NACK）/ buf[128]（ACK 解析）          ≈ 0.2 KB
+ *   handle_hub_*     buf[GW_FRAME_MAX_PAYLOAD + 1] = 1025（整帧拷贝加 NUL）      ≈ 1.1 KB
+ *   gw_emit          body[GW_MQTT_PAYLOAD_MAX] = 4096 + event_time/event_id      ≈ 4.3 KB
+ *   cJSON_Parse      对 1 KB 载荷逐层递归（喂进来的是垃圾时嵌套最深）            ≈ 1~2 KB
+ *   printf / LOS 调用格式化的临时缓冲 + 寄存器保存                               ≈ 0.5~1 KB
+ * 合计 ≈ 8 KB：4096 必然炸 —— 单 gw_emit 一个函数的局部数组就比原来的整个栈大。
+ * 16384 留约 2 倍余量：垃圾流下 cJSON 递归深度不可控，宁可多给这 12 KB。
+ * （栈只是"不被打崩"的兜底；垃圾流本身的两条入口另修：gw_proto.c 的整段丢弃、
+ *  gw_main.c 的 JSON 深度预检。） */
+#define GW_TASK_STACK_UART      16384
 #define GW_TASK_STACK_MAIN      8192        /* tick 任务 */
+/* t183：喂给 cJSON_Parse 之前的嵌套深度上限。cJSON 自身对 `[`/`{` 是逐层递归解析的，
+ * 垃圾流里稍不留神就是一串 '['，递归深度按字节数涨 —— 那是 uart_task 栈被打穿的
+ * 另一条路（与上面那条独立：即使帧头/CRC 侥幸对上，也不许把深嵌套垃圾喂进递归）。
+ * 契约 §2.2/§4 的报文最多 3 层（对象→数组→对象），24 层已很宽松。 */
+#define GW_JSON_MAX_DEPTH       24u
 #define GW_TASK_STACK_NET       12288       /* paho + cJSON + socket 都在这个栈上，太小会真炸栈 */
 #define GW_TASK_PRIO_UART       24
 #define GW_TASK_PRIO_MAIN       25
@@ -146,6 +164,9 @@
  * 换板/改 board 宏时只改这一处，gw_main.c 的 gw_now_ms() 会自动跟上。 */
 #define GW_TICK_PER_SECOND      1000u
 #define GW_UART_POLL_MS         20          /* 汇聚帧在 115200 下比 20 ms 密，读循环不能更稀 */
+/* t183：串口解析错误日志的限速周期。波特率失配时每 20 ms 就可能来一条 `[UART] parse err`，
+ * 逐条打印会把串口自己刷死；1 s 一条 + 累计 suppressed 足够判断"是不是一直在收垃圾"。 */
+#define GW_PARSE_ERR_PRINT_MS   1000u
 #define GW_TICK_PERIOD_MS       100         /* 声光脉冲/433 复查节拍 */
 #define GW_CLOUD_YIELD_MS       200         /* paho MQTTYield：兼顾下行命令时延与 UART 优先 */
 
