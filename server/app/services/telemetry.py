@@ -22,8 +22,13 @@ from . import alerts
 
 log = logging.getLogger("app.telemetry")
 
-# 节点编号形如 M1/M2/H1（§0.7）
-_NODE_SN_RE = re.compile(r"^[HM]\d{1,2}$")
+# 节点编号（§0.7，v1.6 起两种形态并存）：
+#   派生板 `<型号>-<4 位大写 hex>`（例 `M1-3FA2`，由芯片 Die ID 派生）；
+#   efuse 不可用的回落板仍是短编号 `M1`/`M2`/`M4`。两种都必须能进来，否则真机上报会被当垃圾丢掉。
+# 型号段只允许**一位**数字：契约 §3.4 的型号段预绑定示例写明「表项 `M1` 不命中 `M12`」，
+# 即 `M12` 不是合法节点编号；写成 `\d{1,2}` 会把 `M12` 一起放进来（t179 的验收项之一就是拒它）。
+# 后缀固定 4 位**大写** hex：小写（`M1-3fa2`）与位数不符（`M1-3FA`）一律拒，与固件派生口径一致。
+_NODE_SN_RE = re.compile(r"^[HM][0-9](-[0-9A-F]{4})?$")
 
 RESOURCE_PROPERTY = "device.property"
 RESOURCE_EVENT = "device.event"

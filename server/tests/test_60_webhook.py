@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app import db
 from app.config import settings
+from app.services.telemetry import _NODE_SN_RE
 from app.state import RUNTIME
 from app.timeutil import now_ms
 
@@ -267,3 +270,76 @@ def test_unknown_fields_are_ignored(client, device):
     assert _post(client, body).status_code == 200
     assert int(db.fetch_scalar("SELECT online FROM device_online WHERE device_id = :d",
                                {"d": device["id"]}, 0)) == 1
+
+
+# --------------------------------------------------------------------------- §0.7 节点 SN 形态（t179）
+
+# v1.6 起节点 SN 两种形态并存：派生板 `<型号>-<4 位大写 hex>`（例 `M1-3FA2`）、
+# efuse 不可用的回落板仍是短编号（`M1`）。服务端只有一处按形态判定（sos 的 `source`），
+# 其余位置一律透传；所以这里既测那个正则，也测两条真会落库的链路。
+def test_node_sn_regex_accepts_legacy_and_derived():
+    for sn in ("M1", "M2", "M4", "H1", "M0", "M2-1C09", "M1-3FA2", "H1-0000"):
+        assert _NODE_SN_RE.match(sn), f"应接受 {sn}"
+
+
+def test_node_sn_regex_rejects_malformed():
+    # M12：两位型号段（契约 §3.4：表项 `M1` 不命中 `M12`）；小写 hex；hex 位数不对；半截值
+    for sn in ("M12", "M1-3fa2", "M1-3FA", "M1-3FA22", "", "M", "M1-", "-3FA2", "m1", "M1_3FA2"):
+        assert not _NODE_SN_RE.match(sn), f"应拒绝 {sn}"
+
+
+def test_message_persists_derived_node_sn(client, device):
+    """派生 SN 的节点明细要原样落进 `sensor_readings.node_sn`（§7.4 列宽 16 够放 ≤12 字符）。"""
+    ts = now_ms()
+    content = json.dumps([{"sn": "M1-3FA2", "ts": ts, "type": "gas",
+                           "payload": {"smoke": 640, "temp": 27.5, "humi": 48.0}}])
+    resp = _post(client, _envelope("device.message", GATEWAY_SN, {"services": [{
+        "service_id": "gateway", "name": "node_samples", "id": f"{GATEWAY_SN}-{ts}", "content": content}]}))
+    assert resp.status_code == 200 and resp.json()["data"]["handled"] == 1
+    row = db.fetch_one("SELECT node_sn FROM sensor_readings WHERE device_id = :d ORDER BY id DESC LIMIT 1",
+                       {"d": device["id"]})
+    assert row["node_sn"] == "M1-3FA2"
+    # 型号段（`-` 之前）决定 nodes.type，派生 SN 不能被认成 unknown
+    node = db.fetch_one("SELECT sn, type FROM nodes WHERE device_id = :d AND sn = :sn",
+                        {"d": device["id"], "sn": "M1-3FA2"})
+    assert node is not None and node["type"] == "gas"
+
+
+def test_message_still_persists_legacy_node_sn(client, device):
+    """回落板（efuse 不可用）上报的短编号必须照旧能进。"""
+    ts = now_ms()
+    content = json.dumps([{"sn": "M1", "ts": ts, "type": "gas",
+                           "payload": {"smoke": 610, "temp": 26.0, "humi": 50.0}}])
+    resp = _post(client, _envelope("device.message", GATEWAY_SN, {"services": [{
+        "service_id": "gateway", "name": "node_samples", "id": f"{GATEWAY_SN}-{ts}", "content": content}]}))
+    assert resp.status_code == 200 and resp.json()["data"]["handled"] == 1
+    row = db.fetch_one("SELECT node_sn FROM sensor_readings WHERE device_id = :d ORDER BY id DESC LIMIT 1",
+                       {"d": device["id"]})
+    assert row["node_sn"] == "M1"
+
+
+def test_sos_source_accepts_derived_sn(client, device):
+    """`_NODE_SN_RE` 的唯一用处：sos 的 `source` 是不是节点号。派生 SN 要能当来源。"""
+    ts = now_ms()
+    resp = _post(client, _envelope("device.event", GATEWAY_SN, {"services": [{
+        "service_id": "gateway", "event_type": "sos", "event_time": "20261017T120000Z",
+        "paras": {"source": "M4-3FA5", "ts": ts, "event_id": f"{GATEWAY_SN}-sos-derived-{ts}"}}]}, event="sos"))
+    assert resp.status_code == 200
+    row = db.fetch_one("SELECT type, node_sn FROM alerts WHERE device_id = :d", {"d": device["id"]})
+    assert row["type"] == "sos" and row["node_sn"] == "M4-3FA5"
+
+
+@pytest.mark.parametrize("source", ["M12", "M1-3fa2", "M1-3FA"])
+def test_sos_source_rejects_malformed_sn(client, device, source):
+    """不是节点号就不写 node_sn —— §0.4 不编造来源；告警本身仍要落（handled=1）。
+
+    每个 source 独立成例（clean_state 每例清库）：sos 有 60 s 去重窗口，
+    同一 device/type 的第二个 sos 会被去重吃掉，串行断言会假红。
+    """
+    ts = now_ms()
+    resp = _post(client, _envelope("device.event", GATEWAY_SN, {"services": [{
+        "service_id": "gateway", "event_type": "sos", "event_time": "20261017T120000Z",
+        "paras": {"source": source, "ts": ts, "event_id": f"{GATEWAY_SN}-sos-bad-{ts}"}}]}, event="sos"))
+    assert resp.status_code == 200 and resp.json()["data"]["handled"] == 1
+    row = db.fetch_one("SELECT type, node_sn FROM alerts WHERE device_id = :d", {"d": device["id"]})
+    assert row["type"] == "sos" and row["node_sn"] is None
