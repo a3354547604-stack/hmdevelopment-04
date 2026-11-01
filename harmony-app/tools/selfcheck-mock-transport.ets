@@ -1,23 +1,17 @@
 /**
- * MockTransport —— 离线模式：把 `HttpPort` 换成"内存服务器"。
+ * 自检夹具（**不进产品包**）：假传输层。
  *
- * 关键设计（为什么不是 `if (mock) return FAKE_DATA`）：
- *  mock 只替换**传输层**，`HttpApiService` 的拼 URL、鉴权头、状态码翻译、
- *  契约字段解析**全部照跑**。因此：
- *   ① 页面代码在 mock / 真实两种模式下完全一致；
- *   ② mock 能抓出「字段名写错、类型不符」这类契约违背（解析器会抛带路径的错误），
- *      若在业务层塞假数据，这类错误会被绕过；
- *   ③ 下面的路由表就是契约 §6.2 的 18 行接口表 —— 与「契约字段核对表」同源，
- *      路径写错会立刻表现为 404 分支。
+ * 2026-11-01 起 harmony-app 的产品代码里没有任何假数据通路（登录/注册只走真实服务器），
+ * 但「无设备自检」仍需要一层可编程的传输层来模拟网络故障、401、空列表等分支。
+ * 所以把它从 entry/src/main/ets/service/ 搬到这里：自检用，HAP 不带。
  *
- * ⚠️ 但它**不能**证明真实服务器可用：真实链路要等 server/ 完成后按
- *    harmony-app/docs/01-构建与验收日志.md 的步骤复跑（这一点必须写进验收结论）。
+ * 注意：本文件只在 tools/run-selfcheck.sh 拼出的临时工作目录里被 esbuild 打包，
+ * 里面的 `../ets/...` 是相对那个临时布局写的，不是相对本文件在仓库里的位置。
  */
-
-import { HttpPort, HttpMethod, HttpRequest, HttpResponse } from './HttpClient';
-import { MockData, MockStore, errorEnvelope } from './MockData';
-import { JsonObject, asObject, optStr } from '../common/JsonUtil';
-import { SettingSpec, SETTING_KEYS, specOf } from '../common/SettingsSchema';
+import { HttpPort, HttpMethod, HttpRequest, HttpResponse } from '../ets/service/HttpClient';
+import { MockData, MockStore, errorEnvelope } from './selfcheck-mock-data';
+import { JsonObject, asObject, optStr } from '../ets/common/JsonUtil';
+import { SettingSpec, SETTING_KEYS, specOf } from '../ets/common/SettingsSchema';
 
 /**
  * 故障注入模式：为了让「错误态 / 空态」在无服务器时也能被验收看到。

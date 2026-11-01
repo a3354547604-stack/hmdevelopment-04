@@ -1,19 +1,11 @@
 /**
- * MockData —— 离线数据源（无服务器时把 5 个页面全部走通的唯一来源）。
+ * 自检夹具（**不进产品包**）：假数据与假存储。
  *
- * 取值原则：**凡是契约里给了示例 JSON 的，就原样照抄**（§6.4 登录、§6.5 设备、
- * §6.13 告警、§6.9 阈值、§6.16/§6.17/§6.18 报表）。这样「契约字段核对表」
- * 里 App 解析出的字段能与契约示例逐字对上；若我改写一个字段名，
- * 解析器会立刻在 mock 模式下报出带路径的错误（而不是等到服务器上线才发现）。
- * 契约没给示例的（如 §6.7 status 的完整 nodes 数组），按 §2.3/§4.3 的字段表构造，
- * 并在核对表里标注「字段取自 §x.y 字段表，非示例」。
- *
- * 时间是**相对当前时刻**生成的（`now - N 分钟`），而不是固定时间戳：
- * 固定时间戳会让「3 分钟前」在演示当天显示成「N 天前」，看起来像 bug。
+ * 与 selfcheck-mock-transport.ets 一起从产品代码搬到 tools/：自检要用，
+ * 产品包（HAP）不带。字段与契约 §6 的响应体保持一致，字段写错会让自检直接红。
  */
-
-import { JsonObject, num, optStr } from '../common/JsonUtil';
-import { LiteralConstants } from '../common/AppTheme';
+import { JsonObject, num, optStr } from '../ets/common/JsonUtil';
+import { LiteralConstants } from '../ets/common/AppTheme';
 
 /**
  * 浅拷贝一个 JSON 对象。
@@ -131,23 +123,27 @@ export class MockData {
       'nodes_online': '{"M1":true,"M2":true,"M4":false}',
       'battery': 255,
       'alarm_state': 2,
+      // §2.4.2：跌倒标志。0 = 当前没摔倒；历史上那次跌倒走 alerts，不在这里。
+      'fall': 0,
       // §4.3 第 13/14 项（v1.1）：白名单是 JSON 文本数组、配网状态是枚举字符串
       'bound_nodes': '["M1","M2","M4"]',
       'pair_state': 'sta'
     };
     // mac 是 §4.3.1 的 v1.1 可选字段（0x21/0x24 原样透传）；M4 故意不给 mac，
     // 复现 CAL-13「读不到时缺省」的情形，防止页面把缺省画成 "undefined"。
+    // `site` 是首页「地址 → 房间」两层分组的维度（契约暂未定义，见 model/Types.ets）：
+    // M1/M2 在「家」，M4 在「老家」，用来演示一台主机带两个住处的设备。
     const m1: JsonObject = {
-      'sn': 'M1', 'type': 'gas', 'location': '厨房', 'online': true,
+      'sn': 'M1', 'type': 'gas', 'location': '厨房', 'site': '家', 'online': true,
       'last_seen': ago(0), 'mac': '11:22:33:44:55:01', 'rssi': -62, 'battery': 255
     };
     const m2: JsonObject = {
-      'sn': 'M2', 'type': 'fall', 'location': '卧室', 'online': true,
+      'sn': 'M2', 'type': 'fall', 'location': '卧室', 'site': '家', 'online': true,
       'last_seen': ago(0), 'mac': '11:22:33:44:55:02', 'rssi': -55, 'battery': 255
     };
     // M4 离线示例：验证「节点离线」与「网关在线」是两个独立维度（契约 §8.7）
     const m4: JsonObject = {
-      'sn': 'M4', 'type': 'presence', 'location': '门厅', 'online': false,
+      'sn': 'M4', 'type': 'presence', 'location': '院子', 'site': '老家', 'online': false,
       'last_seen': ago(35), 'rssi': -70, 'battery': 255
     };
     const data: JsonObject = {

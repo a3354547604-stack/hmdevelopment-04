@@ -1,0 +1,6 @@
+## 本机工具链位置（.gitignore 已忽略，不入库；每台机器各自生成）
+## 2026-10-22 起本工程走 HarmonyOS 运行时 + DevEco 26 自带 SDK（见 build-profile.json5 注释），
+## SDK 由 DevEco 自己在启动 hvigor 时通过 DEVECO_SDK_HOME 注入，因此这里不再指定 sdk.dir。
+## 若要在纯命令行构建，先设：
+##   set DEVECO_SDK_HOME=C:\Program Files\Huawei\DevEco Studio\sdk
+## 再执行 hvigorw 命令（实测 eldercare-app 与 harmony-app 均由此路径同步成功）。

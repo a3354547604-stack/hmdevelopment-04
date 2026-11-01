@@ -1,8 +1,8 @@
 /**
- * RuntimeConfig —— 可改的运行期配置（服务器地址、离线演示开关）。
+ * RuntimeConfig —— 可改的运行期配置（服务器地址）。
  *
  * 为什么单独一层（t150）：`AppConfig` 是编译期常量，改一次要重新构建；
- * 而现场换演示服务器 / 从离线数据切到真实服务器，都不该逼用户重装 App。
+ * 而现场换服务器地址，不该逼用户重装 App。
  * 这里把「默认值」和「用户在高级里改过的值」分开：读的时候先看 AppStorage
  * （落盘，重启仍在），没有再回落到 AppConfig 的默认值。
  *
@@ -13,14 +13,11 @@ import { AppConfig } from './AppConfig';
 
 /** 服务器地址（落盘键）。 */
 export const KEY_SERVER_URL: string = 'serverBaseUrl';
-/** 离线演示开关（落盘键）：true = 不发起网络请求。 */
-export const KEY_MOCK_MODE: string = 'mockMode';
 
 export class RuntimeConfig {
   /** 在 Ability 启动时调用一次（与 SessionStore.initPersistence 一起）。 */
   static initPersistence(): void {
     PersistentStorage.persistProp<string>(KEY_SERVER_URL, AppConfig.SERVER_BASE_URL);
-    PersistentStorage.persistProp<boolean>(KEY_MOCK_MODE, AppConfig.MOCK_MODE);
   }
 
   /** 生效中的服务器地址（末尾不带 `/`，不带 `/api`；拼接由 HttpApiService 负责）。 */
@@ -67,16 +64,6 @@ export class RuntimeConfig {
 
   static isCustomBaseUrl(): boolean {
     return RuntimeConfig.baseUrl() !== RuntimeConfig.normalize(AppConfig.SERVER_BASE_URL);
-  }
-
-  /** 是否离线演示（不发起任何网络请求）。 */
-  static mockMode(): boolean {
-    const v: boolean | undefined = AppStorage.get<boolean>(KEY_MOCK_MODE);
-    return v === undefined ? AppConfig.MOCK_MODE : v;
-  }
-
-  static setMockMode(on: boolean): void {
-    AppStorage.setOrCreate<boolean>(KEY_MOCK_MODE, on);
   }
 
   /** 界面上给人看的地址标签：只显示主机部分，不带协议与路径。 */

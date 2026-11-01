@@ -84,6 +84,8 @@ export interface GatewayProperties {
   co?: number;
   /** JSON 文本，如 `{"M1":true,"M2":true}`（§4.3 原样透传） */
   nodes_online?: string;
+  /** §2.4.2：M2 卧室雷达的跌倒标志，0/1。缺省 = 该主机没接跌倒模块。 */
+  fall?: number;
   /** 0–100，255 = 市电（§4.3） */
   battery?: number;
   alarm_state?: number;
@@ -106,6 +108,12 @@ export interface NodeItem {
   /** `gas` / `fall` / `door` / `presence` / `gateway`（契约 §6.7） */
   type: string;
   location: string;
+  /**
+   * 节点所在的**地址**（「家」「老家」），一个地址下有多个房间。
+   * 契约 §6.7 的节点只有 `location`（房间），没有地址维度；这里先按可选字段接，
+   * 服务端没给时首页统一归到「家」，等契约补上再改成必填。
+   */
+  site?: string;
   online: boolean;
   last_seen: number;
   /**
@@ -441,6 +449,7 @@ export function parseProperties(o: JsonObject): GatewayProperties {
   p.nodes_online = optStr(o, 'nodes_online');
   p.battery = optNum(o, 'battery');
   p.alarm_state = optNum(o, 'alarm_state');
+  p.fall = optNum(o, 'fall');
   // v1.1 增补的两个属性（§4.3 第 13/14 项）：都是字符串，按可选键解析。
   // 用 optStr 而不是 str：老网关（v1.0 固件）不发这两个字段，不能因此整条 status 解析失败。
   p.bound_nodes = optStr(o, 'bound_nodes');
@@ -459,6 +468,7 @@ export function parseNodeItem(o: JsonObject): NodeItem {
     sn: str(o, 'sn', 'data.nodes[]'),
     type: str(o, 'type', 'data.nodes[]'),
     location: optStr(o, 'location') ?? '',
+    site: optStr(o, 'site'),
     online: bool(o, 'online', 'data.nodes[]'),
     last_seen: num(o, 'last_seen', 'data.nodes[]'),
     mac: optStr(o, 'mac'),

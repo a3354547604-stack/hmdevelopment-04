@@ -16,7 +16,6 @@ import { AppConfig } from '../common/AppConfig';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
 import { PrimaryButton } from '../components/CommonViews';
-import { ServiceHub } from '../service/ServiceHub';
 
 @Component
 export struct LoginPage {
@@ -56,6 +55,9 @@ export struct LoginPage {
     }
   }
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   build() {
     Column() {
       Column({ space: 6 }) {
@@ -63,9 +65,6 @@ export struct LoginPage {
           .fontSize(AppTheme.FONT_TITLE + 4)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-        Text(UserCopy.LOGIN_SUBTITLE)
-          .fontSize(AppTheme.FONT_CAPTION)
-          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
       }
       .width('100%')
       .margin({ top: 88, bottom: 40 })
@@ -75,7 +74,7 @@ export struct LoginPage {
         if (this.expiredHint) {
           Text(UserCopy.AUTH_EXPIRED)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL1)
+            .fontColor(AppTheme.COLOR_LEVEL1_TEXT)
             .width('100%')
         }
         Text(UserCopy.LABEL_PHONE)
@@ -126,16 +125,16 @@ export struct LoginPage {
         if (this.localHint.length > 0) {
           Text(this.localHint)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL2)
+            .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
             .width('100%')
         } else if (this.state.errorText.length > 0) {
           Text(this.state.errorText)
             .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_LEVEL2)
+            .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
             .width('100%')
         }
 
-        PrimaryButton({
+                PrimaryButton({
           text: UserCopy.BTN_LOGIN,
           canTap: this.canSubmit(),
           loading: this.state.submitting,
@@ -160,18 +159,6 @@ export struct LoginPage {
       .backgroundColor(AppTheme.COLOR_SURFACE)
       .borderRadius(AppTheme.CARD_RADIUS)
 
-      // 离线演示提示：只在离线数据模式下出现（现场直接能登录，不用背密码）
-      if (ServiceHub.isMock()) {
-        Column({ space: 2 }) {
-          Text('离线演示：' + AppConfig.DEMO_PHONE + ' / ' + AppConfig.DEMO_PASSWORD)
-            .fontSize(AppTheme.FONT_CAPTION)
-            .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-        }
-        .width('100%')
-        .padding({ top: AppTheme.PAGE_PADDING })
-        .alignItems(HorizontalAlign.Start)
-      }
-
       Column({ space: 4 }) {
         Text('装上它，爸妈在家有个照应')
           .fontSize(AppTheme.FONT_CAPTION)
@@ -184,7 +171,7 @@ export struct LoginPage {
     }
     .width('100%')
     .height('100%')
-    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+    .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING, top: this.safeTop })
     .backgroundColor(AppTheme.COLOR_BG)
     .alignItems(HorizontalAlign.Start)
   }

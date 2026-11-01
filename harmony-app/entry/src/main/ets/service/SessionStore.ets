@@ -27,6 +27,12 @@ export const KEY_DEVICE_SN: string = 'deviceSn';
 export const KEY_DEVICE_NAME: string = 'deviceName';
 /** 最近一次进前台的自增序号（EntryAbility 写入，页面监听以触发"回前台必拉 pending"）。 */
 export const KEY_FOREGROUND_SEQ: string = 'foregroundSeq';
+
+/**
+ * 前后台标志：EntryAbility 在 onBackground/onForeground 里维护。
+ * 页面据此暂停/恢复 10 秒轮询——后台每 10 秒拉一次 status 纯属白耗流量和电。
+ */
+export const KEY_APP_ACTIVE: string = 'appActive';
 /** 是否已拉取过设备列表（避免每次进首页都打一次 /devices）。 */
 export const KEY_DEVICE_LOADED: string = 'deviceLoaded';
 /**
@@ -62,7 +68,7 @@ export class SessionStore {
     PersistentStorage.persistProp<string>(KEY_DEVICE_SN, '');
     PersistentStorage.persistProp<string>(KEY_DEVICE_NAME, '');
     PersistentStorage.persistProp<string>(KEY_GATEWAY_URL, '');
-    // 服务器地址与离线开关也落盘（t150：地址内置但维护入口可改，改完重启仍在）
+    // 服务器地址也落盘（t150：地址内置但维护入口可改，改完重启仍在）
     RuntimeConfig.initPersistence();
     // 进前台序号与"已加载"标记是**进程内**状态，不落盘：重启 App 必须重新拉一次
     AppStorage.setOrCreate<number>(KEY_FOREGROUND_SEQ, 0);
@@ -77,6 +83,21 @@ export class SessionStore {
 
   static hasToken(): boolean {
     return SessionStore.token().length > 0;
+  }
+
+  /**
+   * 丢掉「看起来不是服务器签发的」令牌（2026-11 去掉离线演示数据后新增）。
+   *
+   * 为什么需要：早前离线演示模式写进持久化的是 `mock.jwt.token.for-offline-demo`，
+   * 它不会过期、也永远过不了服务器校验。老设备升级后如果带着它进主界面，
+   * 每个接口都会 401，用户看到的是「登录坏了」而不是「请重新登录」。
+   * JWT 一定是 `header.payload.signature`（含两个点），用它做最便宜的判别。
+   */
+  static dropStaleToken(): void {
+    const t: string = SessionStore.token();
+    if (t.length > 0 && (t.indexOf('.') < 0 || t.startsWith('mock.'))) {
+      SessionStore.clear();
+    }
   }
 
   /** 登录成功后写入（`expires_in` 由服务器给，这里不做本地过期判断，交给 401 处理）。 */

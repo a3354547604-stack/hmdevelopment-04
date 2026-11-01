@@ -5,7 +5,7 @@
  *  · 「添加设备」→ 4 步向导（pages/NetConfigPage）；
  *  · 「修改密码」→ 服务器没有改密接口（`server/app/routers/auth.py` 只有
  *    register/login/me），所以这里**如实**说「需要在管理员后台改」，不做假的成功提示；
- *  · 「关于 → 版本号」连点 5 次才展开「高级」：服务器地址、离线演示开关都在里面。
+ *  · 「关于 → 版本号」连点 5 次才展开「高级」：服务器地址在里面。
  *    为什么藏起来：这些是维护项，普通用户看到服务器地址只会以为「要自己搭服务器」。
  */
 
@@ -28,7 +28,10 @@ export struct ProfilePage {
   @State advanced: boolean = false;
   @State taps: number = 0;
   @State serverInput: string = '';
-  @State mockOn: boolean = true;
+  /** 提醒偏好：先存 AppStorage（切 tab 不丢）；接推送后要同步到服务端偏好。 */
+  @StorageLink('notifyOn') notifyOn: boolean = true;
+  @StorageLink('notifyDnd') dndOn: boolean = true;
+  @StorageLink('notifyUrgent') urgentOn: boolean = true;
   @State savedTip: string = '';
   @State demoBusy: boolean = false;
   /**
@@ -39,8 +42,18 @@ export struct ProfilePage {
   @State noMotionBusy: boolean = false;
 
   aboutToAppear(): void {
-    this.mockOn = RuntimeConfig.mockMode();
     this.serverInput = RuntimeConfig.baseUrl();
+    // 三个提醒开关走 AppStorage：切 tab 回来不该复位成默认值。
+    // 真正的推送偏好要等接推送通道后同步到服务端，这里只是本地记忆。
+    if (AppStorage.get<boolean>('notifyOn') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyOn', true);
+    }
+    if (AppStorage.get<boolean>('notifyDnd') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyDnd', true);
+    }
+    if (AppStorage.get<boolean>('notifyUrgent') === undefined) {
+      AppStorage.setOrCreate<boolean>('notifyUrgent', true);
+    }
   }
 
   private onVersionTap(): void {
@@ -110,7 +123,6 @@ export struct ProfilePage {
 
   private saveAdvanced(): void {
     RuntimeConfig.setBaseUrl(this.serverInput);
-    RuntimeConfig.setMockMode(this.mockOn);
     ServiceHub.invalidate();
     this.serverInput = RuntimeConfig.baseUrl();
     this.savedTip = UserCopy.ADVANCED_SAVED;
@@ -123,41 +135,40 @@ export struct ProfilePage {
     this.savedTip = UserCopy.ADVANCED_SAVED;
   }
 
-  private cycleMock(on: boolean): void {
-    this.mockOn = on;
-    RuntimeConfig.setMockMode(on);
-    ServiceHub.invalidate();
-    this.savedTip = UserCopy.ADVANCED_SAVED;
-  }
-
   @Builder
   row(label: string, value: string, chevron: boolean, onTap: () => void) {
     Row({ space: 8 }) {
+      // 标题不参与伸缩：早前 label 带 layoutWeight(1)，右侧提示一长就把
+      // 「修改密码」挤成两行；改成提示占剩余宽度、从右往左省略。
       Text(label)
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-        .layoutWeight(1)
+        .maxLines(1)
+        .flexShrink(0)
       Text(value)
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+        .textAlign(TextAlign.End)
       if (chevron) {
         Text('›')
           .fontSize(AppTheme.FONT_SECTION)
           .fontColor(AppTheme.COLOR_TEXT_HINT)
+          .accessibilityLevel('no')
       }
     }
     .width('100%')
-    .height(48)
+    .constraintSize({ minHeight: 48 })
     .onClick(() => onTap())
   }
 
   @Builder
   card(title: string) {
     Text(title)
-      .fontSize(AppTheme.FONT_CAPTION)
-      .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+      .fontSize(AppTheme.FONT_LABEL)
+      .fontColor(AppTheme.COLOR_TEXT_HINT)
       .width('100%')
       .padding({ left: 4, bottom: 2 })
   }
@@ -200,7 +211,7 @@ export struct ProfilePage {
             .fontSize(AppTheme.FONT_CAPTION)
             .fontColor(AppTheme.COLOR_PRIMARY)
             .textAlign(TextAlign.Center)
-            .height(36)
+            .constraintSize({ minHeight: 36 })
             .layoutWeight(1)
             .borderRadius(AppTheme.BTN_RADIUS)
             .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
@@ -237,9 +248,10 @@ export struct ProfilePage {
         Text('−')
           .fontSize(AppTheme.FONT_SECTION)
           .fontColor(AppTheme.COLOR_PRIMARY)
+          .accessibilityText('减少 5 分钟')
           .textAlign(TextAlign.Center)
-          .width(56)
-          .height(40)
+          .width(AppTheme.TOUCH_MIN + 12)
+          .height(AppTheme.TOUCH_MIN)
           .borderRadius(AppTheme.BTN_RADIUS)
           .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
           .onClick(() => {
@@ -253,9 +265,10 @@ export struct ProfilePage {
         Text('＋')
           .fontSize(AppTheme.FONT_SECTION)
           .fontColor(AppTheme.COLOR_PRIMARY)
+          .accessibilityText('增加 5 分钟')
           .textAlign(TextAlign.Center)
-          .width(56)
-          .height(40)
+          .width(AppTheme.TOUCH_MIN + 12)
+          .height(AppTheme.TOUCH_MIN)
           .borderRadius(AppTheme.BTN_RADIUS)
           .border({ width: 1, color: AppTheme.COLOR_PRIMARY })
           .onClick(() => {
@@ -277,13 +290,16 @@ export struct ProfilePage {
           this.card(UserCopy.SEC_FAMILY)
           Column({ space: 4 }) {
             Row({ space: 8 }) {
-              Text('👨‍👩‍👧')
-                .fontSize(22)
+              Image($r('app.media.ic_family'))
+                .width(AppTheme.ICON_SM)
+                .height(AppTheme.ICON_SM)
+                .fillColor(AppTheme.COLOR_PRIMARY)
+                .objectFit(ImageFit.Contain)
               Column({ space: 2 }) {
                 Text(SessionStore.username().length > 0 ? SessionStore.username() : '我')
                   .fontSize(AppTheme.FONT_BODY)
                   .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-                Text('负责照看家里的小盒子')
+                Text('负责照看家里的主机')
                   .fontSize(AppTheme.FONT_CAPTION)
                   .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
               }
@@ -298,26 +314,10 @@ export struct ProfilePage {
         }
         .width('100%')
 
-        // 绑定的设备
+        // 设备：不再重复展示主机名字（首页地址卡里已经有），只留「添加设备」入口
         Column({ space: 4 }) {
           this.card(UserCopy.SEC_DEVICE)
           Column() {
-            Row({ space: 8 }) {
-              Text('📦')
-                .fontSize(22)
-              Column({ space: 2 }) {
-                Text(SessionStore.deviceName().length > 0 ? SessionStore.deviceName() : '还没有添加设备')
-                  .fontSize(AppTheme.FONT_BODY)
-                  .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
-                Text(UserCopy.BIND_DEVICE_HINT)
-                  .fontSize(AppTheme.FONT_CAPTION)
-                  .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-            }
-            .width('100%')
-
             PrimaryButton({
               text: UserCopy.BIND_DEVICE,
               canTap: true,
@@ -327,7 +327,6 @@ export struct ProfilePage {
                 router.pushUrl({ url: 'pages/NetConfigPage' });
               }
             })
-              .margin({ top: 10 })
           }
           .width('100%')
           .padding(AppTheme.CARD_PADDING)
@@ -350,6 +349,30 @@ export struct ProfilePage {
                 this.savedTip = on ? '有情况时会在 App 里提醒你' : '已关掉手机提醒';
               }
             })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
+            SwitchRow({
+              label: UserCopy.NOTIFY_DND,
+              hint: UserCopy.NOTIFY_DND_HINT,
+              checked: this.dndOn,
+              onToggle: (on: boolean) => {
+                // 免打扰只影响「响不响」；提醒本身照旧记下来，第二天仍能在列表里看到。
+                this.dndOn = on;
+                this.savedTip = on ? '夜里不会响铃了' : '夜里也会响铃';
+              }
+            })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
+            SwitchRow({
+              label: UserCopy.NOTIFY_URGENT,
+              hint: UserCopy.NOTIFY_URGENT_HINT,
+              checked: this.urgentOn,
+              onToggle: (on: boolean) => {
+                // 报警级（燃气/跌倒）默认穿透免打扰：真出事时不能等天亮。
+                this.urgentOn = on;
+                this.savedTip = on ? '报警级提醒会一直响铃' : '报警级提醒也按免打扰处理';
+              }
+            })
           }
           .width('100%')
           .padding({ left: AppTheme.CARD_PADDING, right: AppTheme.CARD_PADDING, top: 4, bottom: 4 })
@@ -362,7 +385,11 @@ export struct ProfilePage {
         Column({ space: 4 }) {
           this.card(UserCopy.SEC_SECURITY)
           Column() {
-            this.row(UserCopy.CHANGE_PWD, UserCopy.CHANGE_PWD_HINT, true, () => {
+            this.row(UserCopy.ACCOUNT_PHONE, SessionStore.username(), false, () => {
+            })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
+            this.row(UserCopy.CHANGE_PWD, '', true, () => {
               this.savedTip = UserCopy.CHANGE_PWD_HINT;
             })
             Divider()
@@ -390,6 +417,12 @@ export struct ProfilePage {
         Column({ space: 4 }) {
           this.card(UserCopy.SEC_ABOUT)
           Column({ space: 8 }) {
+            this.row(UserCopy.ABOUT_HELP, '', true, () => {
+              router.pushUrl({ url: 'pages/HelpPage' }).catch(() => {
+              });
+            })
+            Divider()
+              .color(AppTheme.COLOR_DIVIDER)
             Row({ space: 8 }) {
               Text(UserCopy.VERSION_LABEL)
                 .fontSize(AppTheme.FONT_BODY)
@@ -418,19 +451,13 @@ export struct ProfilePage {
                 .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
                 .width('100%')
               TextInput({ text: this.serverInput, placeholder: 'http://host:port' })
-                .height(44)
+                .constraintSize({ minHeight: 44 })
                 .fontSize(AppTheme.FONT_CAPTION)
                 .backgroundColor(AppTheme.COLOR_BG)
                 .borderRadius(AppTheme.BTN_RADIUS)
                 .onChange((v: string) => {
                   this.serverInput = v;
                 })
-              SwitchRow({
-                label: UserCopy.ADVANCED_MOCK,
-                hint: '打开时不连网，只用离线数据',
-                checked: this.mockOn,
-                onToggle: (on: boolean) => this.cycleMock(on)
-              })
               this.demoRow()
               Divider()
                 .color(AppTheme.COLOR_DIVIDER)

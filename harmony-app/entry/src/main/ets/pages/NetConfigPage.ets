@@ -6,7 +6,7 @@
  * 为什么是 4 步而不是把字段堆一页：
  *  · 用户（子女）第一次做这件事时手上拿着手机、家里老人在旁边等，页面越短越好；
  *  · 每一步只问一件事，失败时能明确告诉他是哪一步出了问题（连不上热点 / 选不到 Wi-Fi /
- *    密码不对 / 小盒子联系不上），而不是一句「配网失败」。
+ *    密码不对 / 主机联系不上），而不是一句「配网失败」。
  *
  * 网关接口口径（契约 §12，网关固件实际路由）：
  *  · `GET /api/provision/status` → 热点名、剩余秒数、是否在线；
@@ -21,6 +21,7 @@ import { router } from '@kit.ArkUI';
 import { AppConfig } from '../common/AppConfig';
 import { AppTheme } from '../common/AppTheme';
 import { UserCopy } from '../common/UserCopy';
+import { BackBar } from '../components/BackBar';
 import { PrimaryButton } from '../components/CommonViews';
 import { LoadingView } from '../components/StateViews';
 import { ScanCache, ScanItem, WifiResult, WifiSubmit } from '../model/ProvisionTypes';
@@ -152,7 +153,7 @@ struct NetConfigPage {
         .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
         .width('100%')
       if (this.apName.length > 0) {
-        Text('小盒子的 Wi-Fi：' + this.apName)
+        Text('主机的 Wi-Fi：' + this.apName)
           .fontSize(AppTheme.FONT_BODY)
           .fontColor(AppTheme.COLOR_PRIMARY)
           .width('100%')
@@ -173,7 +174,7 @@ struct NetConfigPage {
       })
         .margin({ top: 6 })
 
-      Text('连不上？手动填小盒子地址')
+      Text('连不上？手动填主机地址')
         .fontSize(AppTheme.FONT_CAPTION)
         .fontColor(AppTheme.COLOR_TEXT_HINT)
         .width('100%')
@@ -183,7 +184,7 @@ struct NetConfigPage {
         })
       if (this.showAddr) {
         TextInput({ text: this.addrInput, placeholder: 'http://192.168.2.1' })
-          .height(44)
+          .constraintSize({ minHeight: 44 })
           .fontSize(AppTheme.FONT_CAPTION)
           .backgroundColor(AppTheme.COLOR_BG)
           .borderRadius(AppTheme.BTN_RADIUS)
@@ -231,13 +232,15 @@ struct NetConfigPage {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             if (this.ssid === item.ssid) {
-              Text('✓')
-                .fontSize(AppTheme.FONT_BODY)
-                .fontColor(AppTheme.COLOR_PRIMARY)
+              Image($r('app.media.ic_ok_check'))
+                .width(AppTheme.FONT_BODY)
+                .height(AppTheme.FONT_BODY)
+                .fillColor(AppTheme.COLOR_PRIMARY)
+                .objectFit(ImageFit.Contain)
             }
           }
           .width('100%')
-          .height(44)
+          .constraintSize({ minHeight: 44 })
           .padding({ left: 12, right: 12 })
           .backgroundColor(this.ssid === item.ssid ? AppTheme.COLOR_BG : AppTheme.COLOR_SURFACE)
           .borderRadius(AppTheme.BTN_RADIUS)
@@ -331,8 +334,11 @@ struct NetConfigPage {
   @Builder
   stepFour() {
     Column({ space: 10 }) {
-      Text('✅')
-        .fontSize(40)
+      Image($r('app.media.ic_ok_circle'))
+        .width(40)
+        .height(40)
+        .fillColor(AppTheme.COLOR_LEVEL0)
+        .objectFit(ImageFit.Contain)
       Text(UserCopy.NC_STEP4)
         .fontSize(AppTheme.FONT_SECTION)
         .fontWeight(FontWeight.Medium)
@@ -362,20 +368,12 @@ struct NetConfigPage {
     .alignItems(HorizontalAlign.Start)
   }
 
+  @StorageProp('safeTop') safeTop: number = 0;
+  @StorageProp('safeBottom') safeBottom: number = 0;
+
   build() {
     Column() {
-      Row() {
-        Text('‹ ' + UserCopy.BACK)
-          .fontSize(AppTheme.FONT_BODY)
-          .fontColor(AppTheme.COLOR_PRIMARY)
-          .onClick(() => {
-            router.back();
-          })
-        Blank()
-      }
-      .width('100%')
-      .height(44)
-      .padding({ left: AppTheme.PAGE_PADDING, right: AppTheme.PAGE_PADDING })
+      BackBar()
 
       Text(UserCopy.NC_TITLE)
         .fontSize(AppTheme.FONT_TITLE)
@@ -408,7 +406,7 @@ struct NetConfigPage {
             Column({ space: 8 }) {
               Text(this.errorText)
                 .fontSize(AppTheme.FONT_CAPTION)
-                .fontColor(AppTheme.COLOR_LEVEL2)
+                .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
                 .width('100%')
               Text(UserCopy.NC_RETRY_HINT)
                 .fontSize(AppTheme.FONT_CAPTION)
@@ -428,6 +426,7 @@ struct NetConfigPage {
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.safeTop })
     .backgroundColor(AppTheme.COLOR_BG)
     .alignItems(HorizontalAlign.Start)
   }

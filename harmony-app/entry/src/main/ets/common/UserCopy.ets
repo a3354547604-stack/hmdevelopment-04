@@ -14,7 +14,9 @@
 export class UserCopy {
   // ---------- 通用 ----------
   static readonly APP_NAME: string = '老人守护';
-  static readonly SLOGAN: string = '随时知道爸妈好不好';
+  // 标语与登录副标题目前都不显示：2026-10-29 用户要求去掉「老人守护」下方的小字。
+  // 常量留着是为了以后在别处复用，不要在页面里硬编码这两句话。
+  static readonly SLOGAN: string = '家里有异常，手机会提醒';
   static readonly OK: string = '好的';
   static readonly CANCEL: string = '取消';
   static readonly RETRY: string = '重试';
@@ -32,12 +34,18 @@ export class UserCopy {
   static readonly HOME_EMERGENCY: string = '有紧急情况';
   static readonly HOME_CHECKED_NOW: string = '刚刚看过一遍';
   static readonly HOME_NET_WEAK: string = '网络不太好，正在重试';
-  static readonly HOME_BOX_LOST: string = '小盒子联系不上了，请看看家里的电和网';
+  static readonly HOME_BOX_LOST: string = '主机联系不上了，请看看家里的电和网';
   static readonly HOME_TODAY_WALK: string = '今天走动';
   static readonly HOME_TODAY_ALERT: string = '今天的提醒';
   static readonly HOME_QUIET: string = '最长没动静';
+  static readonly HOME_STILL_MOVING: string = '一直有动静';
   static readonly HOME_WEEK_LINK: string = '看看这周';
-  static readonly BOX_NAME: string = '小盒子';
+
+  // ---------- 地址（一个地址下有多个房间） ----------
+  static readonly SITE_HOME: string = '家';
+  static readonly SITE_HOMETOWN: string = '老家';
+  /** 服务端还没给 `site` 时的兜底地址，避免节点凭空消失。 */
+  static readonly SITE_DEFAULT: string = '家';
 
   // ---------- 房间与传感器 ----------
   static readonly ROOM_KITCHEN: string = '厨房';
@@ -48,6 +56,10 @@ export class UserCopy {
   static readonly SENSOR_GAS: string = '燃气';
   static readonly SENSOR_DOOR: string = '门';
   static readonly SENSOR_PRESENCE: string = '有人活动';
+  /** M2 卧室雷达（契约 §2.4.2）：类型名是「跌倒」，不是「门」。 */
+  static readonly SENSOR_FALL: string = '跌倒';
+  static readonly FALL_YES: string = '有人摔倒';
+  static readonly FALL_NO: string = '正常';
   static readonly GAS_OK: string = '正常';
   static readonly GAS_HIGH: string = '有点高';
   static readonly GAS_VERY_HIGH: string = '很高';
@@ -57,6 +69,18 @@ export class UserCopy {
   static readonly PRESENCE_NO: string = '没人';
   static readonly NODE_NORMAL: string = '正常';
   static readonly NODE_LOST: string = '联系不上';
+  /** 顶栏那个点只说「设备在不在线」，不要写成「正常」——首页可能同时有未处理提醒 */
+  static readonly NODE_ONLINE: string = '在线';
+  // ---- 节点详情（半模态）：点小框看这一台的状态 ----
+  static readonly NODE_TYPE_LABEL: string = '类型';
+  static readonly NODE_STATE_LABEL: string = '状态';
+  static readonly NODE_LAST_LABEL: string = '最近上报';
+  static readonly NODE_SIGNAL_LABEL: string = '信号';
+  static readonly NODE_BATTERY_LABEL: string = '电量';
+  static readonly NODE_POWERED: string = '外接电源';
+  static readonly NODE_SHEET_HINT: string = '信号和电量由节点每次上报时带上。';
+  static readonly NODE_SHEET_OK: string = '知道了';
+
   static readonly ENV_TEMP: string = '屋里温度';
   static readonly ENV_HUMI: string = '屋里湿度';
 
@@ -75,7 +99,21 @@ export class UserCopy {
   static readonly ALERT_REASON_FALSE: string = '是误报';
   static readonly ALERT_REASON_OTHER: string = '其它情况';
   static readonly ALERT_DONE: string = '已记录，谢谢';
-  static readonly ALERT_HANDLED_TIP: string = '这件事已经处理过了';
+  static readonly ALERT_HANDLED_TIP: string = '已处理';
+  /** 「看过了但没处理」：对家人来说和「暂未处理」是同一件事，
+   *  详情页只显示「暂未处理」，不再加「已经看过了」的前缀（用户 2026-10-31 要求）。 */
+  static readonly ALERT_SEEN_TIP: string = '暂未处理';
+  static readonly ALERT_PENDING_TIP: string = '暂未处理';
+  static readonly ALERT_GROUP_TODAY: string = '今天';
+  static readonly ALERT_GROUP_YESTERDAY: string = '昨天';
+  static readonly ALERT_GROUP_EARLIER: string = '更早';
+  static readonly ALERT_LEVEL_WARN: string = '预警';
+  static readonly ALERT_LEVEL_ALARM: string = '报警';
+  static readonly ALERT_LEAD_NEXT: string = '先看这条';
+  static readonly ALERT_LEAD_LAST: string = '最近一条';
+  static readonly ALERT_GO_HANDLE: string = '去处理';
+  static readonly ALERT_FOOTER_KEEP: string = '只显示最近 30 天的提醒';
+  static readonly ALERT_FOOTER_REPORT: string = '看看这周的情况 ›';
 
   // ---------- 报表 ----------
   /** 没有对比基线时别留白，也别让用户自己算百分比。 */
@@ -92,7 +130,7 @@ export class UserCopy {
 
   // ---------- 登录 / 注册 ----------
   static readonly LOGIN_TITLE: string = '老人守护';
-  static readonly LOGIN_SUBTITLE: string = '随时知道爸妈好不好';
+  static readonly LOGIN_SUBTITLE: string = '家里有异常，手机会提醒';
   static readonly LABEL_PHONE: string = '手机号';
   static readonly LABEL_PASSWORD: string = '密码';
   static readonly LABEL_PASSWORD2: string = '确认密码';
@@ -112,12 +150,44 @@ export class UserCopy {
   // ---------- 我的 ----------
   static readonly PROFILE_TITLE: string = '我的';
   static readonly SEC_FAMILY: string = '家人';
-  static readonly SEC_DEVICE: string = '绑定的设备';
+  static readonly SEC_DEVICE: string = '设备';
   static readonly SEC_NOTIFY: string = '手机提醒';
   static readonly SEC_SECURITY: string = '账号';
   static readonly SEC_ABOUT: string = '关于';
+
+  // —— 我的页：账号、提醒设置与帮助入口 ——
+  /** 账号卡里那行只读的手机号，值由页面传入。 */
+  static readonly ACCOUNT_PHONE: string = '登录手机号';
+  /** 免打扰：夜里不响铃，但提醒照样记下来。 */
+  static readonly NOTIFY_DND: string = '免打扰时段';
+  static readonly NOTIFY_DND_HINT: string = '22:00–07:00 不响铃，提醒只记在 App 里';
+  /** 报警级提醒不受免打扰影响——这是家属最在意的一条。 */
+  static readonly NOTIFY_URGENT: string = '紧急提醒总是响铃';
+  static readonly NOTIFY_URGENT_HINT: string = '报警级提醒不受免打扰影响';
+  static readonly ABOUT_HELP: string = '使用帮助';
+  static readonly HELP_TITLE: string = '使用帮助';
   static readonly BIND_DEVICE: string = '添加设备';
-  static readonly BIND_DEVICE_HINT: string = '给小盒子配好家里的 Wi-Fi';
+  // —— 使用帮助：8 条问答 + 1 条隐私小标题 ——
+  static readonly HELP_SEC_PRIVACY: string = '隐私说明';
+  static readonly HELP_Q_ALERT_TITLE: string = '提醒太多怎么办';
+  static readonly HELP_Q_ALERT_BODY: string = '在「提醒」页点开一条，看完点「已处理」，这条就不会再催。\n只想知道有没有事，看首页最上面的那句话就够了。';
+  static readonly HELP_Q_WEEK_TITLE: string = '想知道这周的情况';
+  static readonly HELP_Q_WEEK_BODY: string = '首页最下面点「看看这周」，能按天看活动次数、提醒条数和最长没动静时长。\n白天 06:00–22:00 之外不算「没动静」，夜里睡觉本来就不动。';
+  static readonly HELP_Q_ADD_TITLE: string = '怎么添加新节点';
+  static readonly HELP_Q_ADD_BODY: string = '把节点放到要监测的房间并通电，等指示灯闪。\n在首页对应的地址卡最后一格点虚线＋，靠近节点等它连上就行。';
+  static readonly HELP_Q_PUSH_TITLE: string = '提醒会发到哪';
+  static readonly HELP_Q_PUSH_BODY: string = '只发到已登录的家人手机。\n关掉「有情况时在手机上提醒我」之后，提醒只在 App 里显示。';
+  static readonly HELP_Q_NOPUSH_TITLE: string = '收不到提醒怎么办';
+  static readonly HELP_Q_NOPUSH_BODY: string = '先看手机系统设置里，「老人守护」的通知权限是不是开着。\n再看「我的」页里「有情况时在手机上提醒我」有没有被关掉；关着的时候提醒只记在 App 里，不会响。';
+  static readonly HELP_Q_DATA_TITLE: string = '我的数据存在哪';
+  static readonly HELP_Q_DATA_BODY: string = '传感数据存在家里的主机上，不上传云端。\n换手机登录同一个账号，看到的是同一份数据。';
+  static readonly HELP_Q_PHONE_TITLE: string = '换手机怎么用';
+  static readonly HELP_Q_PHONE_BODY: string = '在新手机上用同一个手机号登录，看到的是同一份数据。\n旧手机不用退出，也不会影响提醒。';
+  static readonly HELP_Q_PRIV1_TITLE: string = '只采集必要的状态';
+  static readonly HELP_Q_PRIV1_BODY: string = '有人活动、门开关、燃气浓度这几项。不采集画面，也不采集声音。';
+  static readonly HELP_Q_PRIV2_TITLE: string = '只有家人能看到';
+  static readonly HELP_Q_PRIV2_BODY: string = '只有绑定这台主机的家人账号能查看数据。';
+
   static readonly CHANGE_PWD: string = '修改密码';
   static readonly CHANGE_PWD_HINT: string = '需要在管理员后台改，请让管理员帮你';
   static readonly LOGOUT: string = '退出登录';
@@ -127,9 +197,10 @@ export class UserCopy {
 
   // ---------- 添加设备（4 步向导） ----------
   static readonly NC_TITLE: string = '添加设备';
-  static readonly NC_STEP1: string = '第 1 步：连上小盒子的 Wi-Fi';
+  static readonly NC_STEP1: string = '第 1 步：连上主机的 Wi-Fi';
   static readonly NC_STEP1_BODY: string = '打开手机设置里的 WLAN，连上名字以 ElderCare 开头的 Wi-Fi（密码在说明书上）';
-  static readonly NC_STEP1_TROUBLE: string = '看不到这个 Wi-Fi？① 给小盒子重新上电 ② 长按配对键 3 秒 ③ 手机靠近一点再刷新';
+  static readonly NC_AP_LABEL: string = '主机的 Wi-Fi：';
+  static readonly NC_STEP1_TROUBLE: string = '看不到这个 Wi-Fi？① 给主机重新上电 ② 长按配对键 3 秒 ③ 手机靠近一点再刷新';
   static readonly NC_STEP2: string = '第 2 步：选家里的 Wi-Fi';
   static readonly NC_STEP2_PICK: string = '选择你家的 Wi-Fi';
   static readonly NC_MANUAL: string = '没找到？手动输入名字';
@@ -137,24 +208,23 @@ export class UserCopy {
   static readonly NC_PASSWORD: string = 'Wi-Fi 密码';
   static readonly NC_SUBMIT: string = '下一步';
   static readonly NC_STEP3: string = '第 3 步：正在连接';
-  static readonly NC_CONNECTING: string = '小盒子正在连你家的 Wi-Fi，大约 1 分钟';
+  static readonly NC_CONNECTING: string = '主机正在连你家的 Wi-Fi，大约 1 分钟';
   static readonly NC_STEP4: string = '第 4 步：完成了';
-  static readonly NC_OK: string = '连上了！以后小盒子会自动报平安';
+  static readonly NC_OK: string = '连上了！以后主机会自动报平安';
   static readonly NC_BACK_HOME: string = '回到首页';
-  static readonly NC_RETRY_HINT: string = '检查密码有没有输错，或让小盒子离路由器近一点';
+  static readonly NC_RETRY_HINT: string = '检查密码有没有输错，或让主机离路由器近一点';
   static readonly NC_NO_LIST: string = '附近没找到 Wi-Fi，可以手动输入名字';
   static readonly NC_EMPTY_SSID: string = '请先选或输入 Wi-Fi 名字';
   static readonly NC_EMPTY_PWD: string = '请输入 Wi-Fi 密码';
-  static readonly NC_LOADING: string = '正在看看小盒子和附近的 Wi-Fi…';
+  static readonly NC_LOADING: string = '正在看看主机和附近的 Wi-Fi…';
 
   // ---------- 维护入口（不参与技术词扫描） ----------
   static readonly ADVANCED_TITLE: string = '高级（维护用）';
   static readonly ADVANCED_SERVER: string = '服务器地址';
-  static readonly ADVANCED_MOCK: string = '使用离线演示数据';
   static readonly ADVANCED_RESET: string = '恢复默认地址';
   static readonly ADVANCED_SAVED: string = '已保存';
   static readonly ADVANCED_HINT: string = '仅维护人员使用；改错了会连不上服务器';
-  static readonly ADVANCED_GATEWAY: string = '小盒子本地地址';
+  static readonly ADVANCED_GATEWAY: string = '主机本地地址';
   /**
    * 无活动时长（t153）：D3「长时间没动静」的演示入口。
    *
@@ -179,17 +249,24 @@ export class UserCopy {
       UserCopy.TAB_HOME, UserCopy.TAB_ALERTS, UserCopy.TAB_PROFILE,
       UserCopy.HOME_ALL_WELL, UserCopy.HOME_EMERGENCY, UserCopy.HOME_CHECKED_NOW,
       UserCopy.HOME_NET_WEAK, UserCopy.HOME_BOX_LOST, UserCopy.HOME_TODAY_WALK,
-      UserCopy.HOME_TODAY_ALERT, UserCopy.HOME_QUIET, UserCopy.HOME_WEEK_LINK, UserCopy.BOX_NAME,
+      UserCopy.HOME_TODAY_ALERT, UserCopy.HOME_QUIET, UserCopy.HOME_STILL_MOVING, UserCopy.HOME_WEEK_LINK,
       UserCopy.ROOM_KITCHEN, UserCopy.ROOM_BEDROOM, UserCopy.ROOM_HALL, UserCopy.ROOM_LIVING,
       UserCopy.ROOM_PREFIX, UserCopy.SENSOR_GAS, UserCopy.SENSOR_DOOR, UserCopy.SENSOR_PRESENCE,
+      UserCopy.SENSOR_FALL, UserCopy.FALL_YES, UserCopy.FALL_NO,
       UserCopy.GAS_OK, UserCopy.GAS_HIGH, UserCopy.GAS_VERY_HIGH, UserCopy.DOOR_OPEN,
       UserCopy.DOOR_CLOSED, UserCopy.PRESENCE_YES, UserCopy.PRESENCE_NO, UserCopy.NODE_NORMAL,
-      UserCopy.NODE_LOST, UserCopy.ENV_TEMP, UserCopy.ENV_HUMI,
+      UserCopy.NODE_LOST, UserCopy.ENV_TEMP, UserCopy.ENV_HUMI, UserCopy.NODE_ADD_TITLE,
+      UserCopy.NODE_TYPE_LABEL, UserCopy.NODE_STATE_LABEL, UserCopy.NODE_SIGNAL_LABEL,
+      UserCopy.ADD_NODE_SCANNING, UserCopy.ADD_NODE_EMPTY, UserCopy.ADD_NODE_DONE,
       UserCopy.ALERT_FILTER_ALL, UserCopy.ALERT_FILTER_PENDING, UserCopy.ALERT_EMPTY,
       UserCopy.ALERT_LIST_TITLE, UserCopy.ALERT_DETAIL_TITLE, UserCopy.ALERT_BTN_KNOW,
       UserCopy.ALERT_BTN_HANDLED, UserCopy.ALERT_NOTE_HINT, UserCopy.ALERT_REASON_PICK,
       UserCopy.ALERT_REASON_CONTACT, UserCopy.ALERT_REASON_VISIT, UserCopy.ALERT_REASON_FALSE,
       UserCopy.ALERT_REASON_OTHER, UserCopy.ALERT_DONE, UserCopy.ALERT_HANDLED_TIP,
+      UserCopy.ALERT_PENDING_TIP, UserCopy.ALERT_GROUP_TODAY, UserCopy.ALERT_GROUP_YESTERDAY,
+      UserCopy.ALERT_GROUP_EARLIER, UserCopy.ALERT_LEVEL_WARN, UserCopy.ALERT_LEVEL_ALARM,
+      UserCopy.ALERT_LEAD_NEXT, UserCopy.ALERT_LEAD_LAST, UserCopy.ALERT_GO_HANDLE,
+      UserCopy.ALERT_FOOTER_KEEP, UserCopy.ALERT_FOOTER_REPORT,
       UserCopy.REPORT_TITLE, UserCopy.PERIOD_WEEK, UserCopy.PERIOD_MONTH, UserCopy.REPORT_WALK,
       UserCopy.REPORT_ALERTS, UserCopy.REPORT_TREND, UserCopy.REPORT_NO_BASELINE,
       UserCopy.REPORT_MAX_QUIET,
@@ -199,10 +276,13 @@ export class UserCopy {
       UserCopy.REGISTER_TITLE, UserCopy.PHONE_BAD, UserCopy.PWD_BAD, UserCopy.PWD_DIFF,
       UserCopy.PWD_REQUIRED, UserCopy.AUTH_EXPIRED, UserCopy.LOGIN_BAD,
       UserCopy.PROFILE_TITLE, UserCopy.SEC_FAMILY, UserCopy.SEC_DEVICE, UserCopy.SEC_NOTIFY,
-      UserCopy.SEC_SECURITY, UserCopy.SEC_ABOUT, UserCopy.BIND_DEVICE, UserCopy.BIND_DEVICE_HINT,
+      UserCopy.SEC_SECURITY, UserCopy.SEC_ABOUT, UserCopy.ACCOUNT_PHONE,
+      UserCopy.NOTIFY_DND, UserCopy.NOTIFY_URGENT, UserCopy.ABOUT_HELP, UserCopy.BIND_DEVICE,
+      UserCopy.HELP_SEC_PRIVACY, UserCopy.HELP_Q_ALERT_TITLE, UserCopy.HELP_Q_NOPUSH_TITLE,
+      UserCopy.HELP_Q_PHONE_TITLE, UserCopy.HELP_Q_PRIV2_TITLE,
       UserCopy.CHANGE_PWD, UserCopy.CHANGE_PWD_HINT, UserCopy.LOGOUT, UserCopy.NOTIFY_HINT,
       UserCopy.VERSION_LABEL,
-      UserCopy.NC_TITLE, UserCopy.NC_STEP1, UserCopy.NC_STEP1_BODY, UserCopy.NC_STEP1_TROUBLE,
+      UserCopy.NC_TITLE, UserCopy.NC_AP_LABEL, UserCopy.NC_STEP1, UserCopy.NC_STEP1_BODY, UserCopy.NC_STEP1_TROUBLE,
       UserCopy.NC_STEP2, UserCopy.NC_STEP2_PICK, UserCopy.NC_MANUAL, UserCopy.NC_HIDDEN,
       UserCopy.NC_PASSWORD, UserCopy.NC_SUBMIT, UserCopy.NC_STEP3, UserCopy.NC_CONNECTING,
       UserCopy.NC_STEP4, UserCopy.NC_OK, UserCopy.NC_BACK_HOME, UserCopy.NC_RETRY_HINT,
@@ -243,9 +323,9 @@ export class UserCopy {
     } else if (type === 'door_left') {
       return '门开着太久';
     } else if (type === 'node_offline') {
-      return '房间的小盒子联系不上';
+      return '房间的主机联系不上';
     } else if (type === 'device_offline') {
-      return '家里的小盒子联系不上';
+      return '家里的主机联系不上';
     } else if (type === 'env') {
       return '屋里温湿度不太对';
     }
@@ -258,6 +338,25 @@ export class UserCopy {
     return clock + ' · ' + r + ' · ' + UserCopy.alertTitle(type);
   }
 
+  /** 摘要卡标题：`还有 2 条没处理` / `提醒都处理完了`。 */
+  static alertSummaryTitle(pending: number): string {
+    if (pending > 0) {
+      return '还有 ' + pending.toString() + ' 条没处理';
+    }
+    return '提醒都处理完了';
+  }
+
+  /** 摘要卡副行：`先看这条：厨房 · 10:50 · 燃气浓度偏高`。 */
+  static alertSummaryHint(lead: string, room: string, clock: string, type: string): string {
+    const r: string = room.length > 0 ? room : UserCopy.ROOM_PREFIX;
+    return lead + '：' + r + ' · ' + clock + ' · ' + UserCopy.alertTitle(type);
+  }
+
+  /** 分组标题右侧的条数。 */
+  static alertCount(count: number): string {
+    return count.toString() + ' 条';
+  }
+
   static gasText(level: number): string {
     if (level >= 2) {
       return UserCopy.GAS_VERY_HIGH;
@@ -265,6 +364,53 @@ export class UserCopy {
       return UserCopy.GAS_HIGH;
     }
     return UserCopy.GAS_OK;
+  }
+
+  /** 地址标题右侧的小字：`3 个节点 · 2 个在线`——规模与掉线数一眼可见。 */
+  static siteSummary(total: number, online: number): string {
+    return total.toString() + ' 个节点 · ' + online.toString() + ' 个在线';
+  }
+
+  static readonly NODE_ADD_TITLE: string = '添加节点';
+
+  /** 「＋」按钮的读屏文案：说清是往哪个地址加。 */
+  static nodeAddA11y(site: string): string {
+    return '在' + site + '添加节点';
+  }
+
+  // —— 添加节点页（蓝牙配对流程：搜索 → 选中 → 连接 → 归位）——
+  static readonly ADD_NODE_SCANNING: string = '正在搜索附近节点…';
+  static readonly ADD_NODE_SCAN_HINT: string =
+    '让节点通电，指示灯快闪就说明它在等人配（长按 3 秒可重新进入配对）';
+  static readonly ADD_NODE_RESCAN: string = '重新搜索';
+  static readonly ADD_NODE_EMPTY: string = '附近没有发现节点';
+  static readonly ADD_NODE_LIST_HINT: string = '列表里没有？确认节点已通电、离手机近一些，再点「重新搜索」';
+  static readonly ADD_NODE_CONNECT: string = '连接';
+  static readonly ADD_NODE_KEEP_NEAR: string = '别走远，让节点靠近手机';
+  static readonly ADD_NODE_DONE: string = '完成';
+  static readonly ADD_NODE_RSSI_STRONG: string = '信号强';
+  static readonly ADD_NODE_RSSI_MIDDLE: string = '信号中';
+  static readonly ADD_NODE_RSSI_WEAK: string = '信号弱';
+
+  static addFoundTitle(count: number): string {
+    return '发现 ' + count.toString() + ' 个可添加的节点';
+  }
+
+  static addConnectingTitle(name: string): string {
+    return '正在连接 ' + name + '…';
+  }
+
+  static addConnectedTitle(name: string): string {
+    return '已连上 ' + name;
+  }
+
+  /** 连上后的归位说明：地点是点＋时所在的地址，不用再选。 */
+  static addNodePlaceHint(site: string): string {
+    return '会出现在「' + site + '」下面的格子里';
+  }
+
+  static nodeAddedToast(site: string, name: string): string {
+    return '已把 ' + name + ' 放到「' + site + '」';
   }
 
   static fmtBatteryText(v: number): string {

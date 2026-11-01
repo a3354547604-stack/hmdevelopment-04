@@ -15,7 +15,8 @@ cd harmony-app
 # ① 编译（含"门禁自证"）→ 产出 HAP + 构建日志
 bash tools/build-hap.sh
 
-# ② 无设备自检：真实 HttpApiService + Mock 传输层，逐条跑 18 个接口
+# ② 无设备自检：真实 HttpApiService + tools/ 里的自检夹具传输层，逐条跑 50 项
+#    夹具（selfcheck-mock-*.ets）只在自检时用，不进产品包
 bash tools/run-selfcheck.sh
 
 # ③ 预览图（设计预览，非真机截图）+ 内容校验
@@ -24,6 +25,29 @@ python3 tools/make-previews.py && python3 tools/check-previews.py
 
 预期结果：`BUILD SUCCESSFUL`、自检 **50/50 PASS**（现值 50 项，t153；历史链条 26 → 28 → 30 → 34（t65）→ 43（t145）→ 47（t150）→ 50）、预览图 **6/6 PASS**。
 三项都会写/读 `deliverables/` 下的产物。
+
+### 1.1 两套工具链：选 `product`，不要改文件
+
+`build-profile.json5` 里有两个 product，按环境选，**同一个仓库不用改任何文件**：
+
+| product | 给谁用 | SDK 字段写法 |
+|---|---|---|
+| `default`（默认） | 学校 OpenHarmony 工具链 · 交付/验收/CI | 整数 `12` + `runtimeOS: "OpenHarmony"` |
+| `harmonyos` | 只装了 HarmonyOS 26 SDK 的机器（DevEco 26，预览/联调） | 字符串 `"5.0.0(12)"` / `"26.0.0"` + `runtimeOS: "HarmonyOS"` |
+
+```bash
+# 学校口径（不带 -p 就是它，命令同上）
+bash tools/build-hap.sh
+
+# 本机口径（HarmonyOS 26 SDK）：命令行构建预览产物
+bash ../tools/preview-build.sh --clean
+
+# IDE 里：Build Variants 选 harmonyos，再开预览器
+```
+
+为什么不能合并成一个：OpenHarmony 工具链要求整数、HarmonyOS 26 要求字符串，
+且只装 HarmonyOS SDK 时 `runtimeOS: "OpenHarmony"` 会让预览器报 `sdk provider is null`——
+三者互斥，只能按环境选 product（细节见 `build-profile.json5` 顶部注释）。
 
 **为什么 build 脚本要先做"门禁自证"**：hvigor 只编译从入口可达的文件——
 页面没被 import 的话写得再错也不报错，`BUILD SUCCESSFUL` 是假绿。

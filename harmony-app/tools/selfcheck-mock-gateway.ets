@@ -1,20 +1,10 @@
 /**
- * MockGatewayTransport —— 网关本地 API 的假传输层（无网关也能演示配网四步）。
+ * 自检夹具（**不进产品包**）：假网关传输层（配网四步的离线替身）。
  *
- * 为什么替换传输层而不是替换 GatewayApiService：
- *   URL 拼接、信封解析、1600–1606 文案翻译、字段解析都是真代码在跑，
- *   这里只回答"网关会回什么"。于是自检能抓出路径写错/字段名写错，
- *   而不是"mock 里随便写个对象所以永远绿"。
- *
- * 演示口径（与 `harmony-app/deliverables/06-现场演示脚本.md` 的 Mock 降级一致）：
- *  · `/api/scan` 回**开窗前扫到的 2.4 G 缓存**（含一条中文 SSID 与一条弱信号）；
- *  · `/api/provision/wifi` 回 `saved/connecting`，并把 `settle_s=90` 原样带上；
- *  · 带云凭据时回 `iotda` 段（证明三件套确实进了请求体）。
- *
- * 故障注入（`setFault`）：现场演示"失败长什么样"用，也是自检断言 16xx 文案的入口。
+ * 与另外两个夹具一起从产品代码搬到 tools/：配网页的四步流程要在无网关时也能自检，
+ * 产品包（HAP）不带假数据。`../ets/...` 是相对 run-selfcheck.sh 拼出的临时布局。
  */
-
-import { HttpResponse, HttpPort, HttpRequest } from './HttpClient';
+import { HttpResponse, HttpPort, HttpRequest } from '../ets/service/HttpClient';
 
 /** 假网关的故障场景。`none` = 一切正常。 */
 export type GwFault = 'none' | 'not_in_window' | 'auth' | 'not_found' | 'busy' | 'hub_offline'

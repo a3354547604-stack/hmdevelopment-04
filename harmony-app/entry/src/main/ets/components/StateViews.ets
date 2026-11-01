@@ -33,14 +33,19 @@ export struct LoadingView {
 /** 空态：图标 + 一句话 + 可选的补充说明（永远不留白屏）。 */
 @Component
 export struct EmptyView {
-  @Prop icon: string = '🗂️';
+  /** 单色 SVG（resources/base/media），由本组件统一用 COLOR_TEXT_HINT 上色。 */
+  @Prop icon: Resource = $r('app.media.ic_empty_folder');
   @Prop title: string = '暂无数据';
   @Prop hint: string = '';
 
   build() {
     Column({ space: 10 }) {
-      Text(this.icon)
-        .fontSize(44)
+      Image(this.icon)
+        .width(AppTheme.ICON_EMPTY)
+        .height(AppTheme.ICON_EMPTY)
+        .fillColor(AppTheme.COLOR_TEXT_HINT)
+        .objectFit(ImageFit.Contain)
+        .accessibilityLevel('no')
       Text(this.title)
         .fontSize(AppTheme.FONT_BODY)
         .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
@@ -75,11 +80,15 @@ export struct ErrorView {
 
   build() {
     Column({ space: 12 }) {
-      Text('⚠️')
-        .fontSize(40)
+      Image($r('app.media.ic_status_warning'))
+        .width(AppTheme.ICON_XL)
+        .height(AppTheme.ICON_XL)
+        .fillColor(AppTheme.COLOR_LEVEL2)
+        .objectFit(ImageFit.Contain)
+        .accessibilityLevel('no')
       Text(this.message)
         .fontSize(AppTheme.FONT_BODY)
-        .fontColor(AppTheme.COLOR_LEVEL2)
+        .fontColor(AppTheme.COLOR_LEVEL2_TEXT)
         .textAlign(TextAlign.Center)
       if (this.code !== 0) {
         Text(`错误码 ${this.code}`)
@@ -89,7 +98,7 @@ export struct ErrorView {
       Button(this.retryText)
         .height(AppTheme.BTN_HEIGHT)
         .fontSize(AppTheme.FONT_BODY)
-        .backgroundColor(AppTheme.COLOR_PRIMARY)
+        .backgroundColor(AppTheme.COLOR_PRIMARY_FILL)
         .margin({ top: 8 })
         .onClick(() => this.onRetry())
     }

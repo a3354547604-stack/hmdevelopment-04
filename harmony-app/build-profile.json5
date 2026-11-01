@@ -1,25 +1,50 @@
 /**
- * 工程级构建配置（Stage 模型 · API 12 · OpenHarmony 北向）。
+ * 工程级构建配置（Stage 模型 · 单模块 entry）。
  *
- * 三条硬约束来自本机工具链实测（见 ~/harmony-toolchain/BUILD-NOTES.md 坑 5）：
- *  ① compatibleSdkVersion / compileSdkVersion / targetSdkVersion 必须是**整数**，不能写 "5.0.0(12)"；
- *  ② 三个都要显式给出，否则报 `Please configure compileSdkVersion in the product`；
- *  ③ signingConfigs 为空数组时，product 里**不能**写 signingConfig，
- *     否则报 `Cannot read properties of undefined (reading 'app')`。
+ * 【两套工具链并存，不再靠改文件】
+ * 同一份仓库要能在两种环境下构建/预览，用 products 区分：
+ *   · default    —— 学校口径（OpenHarmony 工具链）：三个 SDK 字段写**整数 12** + runtimeOS "OpenHarmony"。
+ *                   交付、验收、CI 都用这个；不带 -p product 时默认就是它。
+ *   · harmonyos  —— 本机口径（DevEco 26 + 只装了 HarmonyOS 26 SDK）：三个字段写字符串
+ *                   "5.0.0(12)" / "26.0.0"，runtimeOS "HarmonyOS"。
+ * 选择方式：命令行加 `-p product=harmonyos`（见 tools/preview-build.sh）；
+ *           IDE 里在 Build Variants 选 harmonyos（选择结果存在本机 .idea，不入库）。
  *
- * compatibleSdkVersion 定 12（不是 23）：兼容面最广，API 12+ 设备都能装。
- * 签名材料由打包方另行注入，不入库（AGENTS.md：不提交证书）。
+ * 【为什么必须两个产品，而不是一份配置打天下】
+ *  ① OpenHarmony 工具链要求三个 SDK 字段是**整数**（见 ~/harmony-toolchain/BUILD-NOTES.md 坑 5），
+ *     写 "5.0.0(12)" 会报 `Please configure compileSdkVersion in the product`；
+ *  ② HarmonyOS 26 工具链反过来要求**字符串**，写整数 12 会报 00306042 Specification Limit Violation；
+ *  ③ 只装 HarmonyOS SDK 的机器上，runtimeOS 写 "OpenHarmony" 会让预览器 precheck 报
+ *     `sdk provider is null`，工程同步失败。
+ *  三者互斥，所以只能是「同一工程、两个 product、按环境选」。
+ *
+ * 【其它硬约束（改这个文件前先读）】
+ *  · 三个 SDK 字段都要显式给出，缺一个报 `Please configure compileSdkVersion in the product`；
+ *  · signingConfigs 为空数组时，`signingConfig` 只在 HarmonyOS 工具链上可用；
+ *    OpenHarmony 工具链会报 `Cannot read properties of undefined (reading 'app')`，所以 default 不写它；
+ *  · compatibleSdkVersion 定 12（不是 23）：兼容面最广，API 12+ 设备都能装；
+ *  · 签名材料由打包方另行注入，不入库（AGENTS.md：不提交证书）。
  */
 {
   "app": {
     "signingConfigs": [],
     "products": [
       {
+        // 学校口径：OpenHarmony 工具链 + API 12 整数写法（交付/验收用）
         "name": "default",
         "compatibleSdkVersion": 12,
         "compileSdkVersion": 12,
         "targetSdkVersion": 12,
         "runtimeOS": "OpenHarmony"
+      },
+      {
+        // 本机口径：DevEco 26 + HarmonyOS 26 SDK（预览/联调用）
+        "name": "harmonyos",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "compileSdkVersion": "26.0.0",
+        "targetSdkVersion": "26.0.0",
+        "runtimeOS": "HarmonyOS"
       }
     ],
     "buildModeSet": [
@@ -34,7 +59,7 @@
       "targets": [
         {
           "name": "default",
-          "applyToProducts": ["default"]
+          "applyToProducts": ["default", "harmonyos"]
         }
       ]
     }
