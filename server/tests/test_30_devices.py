@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app import db
 from app.settings_keys import DEFAULTS
+from app.timeutil import ms_to_dt, now_ms
 
 from conftest import BIND_CODE, GATEWAY_SN, create_device, create_membership, create_user, login
 
@@ -111,9 +112,93 @@ def test_device_status_shape(client, device):
     assert set(data) <= {"device_id", "online", "last_heartbeat", "alarm_state", "properties",
                          "nodes", "pending_alerts", "server_ts"}
     assert [n["sn"] for n in data["nodes"]] == ["H1", "M1", "M2", "M4"]
-    assert all({"sn", "type", "location", "online", "last_seen"} <= set(n) for n in data["nodes"])
-    assert all(set(n) <= {"sn", "type", "location", "online", "last_seen", "rssi", "battery"} for n in data["nodes"])
+    assert all({"sn", "type", "kind", "location", "online", "last_seen"} <= set(n) for n in data["nodes"])
+    assert all(set(n) <= {"sn", "type", "kind", "location", "online", "last_seen", "rssi", "battery"}
+               for n in data["nodes"])
     assert data["properties"] == {}          # 还没收到属性上报 → 空对象而不是 null
+
+
+# ---- t187：设备离线时不得回放缓存里的在线位（现场实测：overall offline 但 nodes_online 全 true）
+
+def _touch_online(device_id: int, *, online: int, age_ms: int, nodes_online) -> None:
+    """写一行 device_online 快照；`age_ms` 是心跳距今多久（> 阈值即已离线）。"""
+    hb = now_ms() - age_ms
+    db.execute(
+        "INSERT INTO device_online (device_id, online, last_heartbeat, last_heartbeat_ms, "
+        "last_properties_json, alarm_state) VALUES (:d, :on, :hb, :hbms, :props, 0) "
+        "ON DUPLICATE KEY UPDATE online = :on, last_heartbeat = :hb, last_heartbeat_ms = :hbms, "
+        "last_properties_json = :props, alarm_state = 0",
+        {"d": device_id, "on": online, "hb": ms_to_dt(hb), "hbms": hb,
+         "props": db.jdump({"temp": 24.5, "humi": 56.2, "nodes_online": nodes_online})},
+    )
+
+
+def test_status_offline_heartbeat_expired_forces_nodes_offline(client, device):
+    """心跳过期（尽管调度器还没把 online 置 0）→ 在线表与节点在线位一律 false。"""
+    _touch_online(device["id"], online=1, age_ms=300_000,          # 5 分钟前的心跳
+                  nodes_online='{"H1":true,"M1":true,"M2":true,"M4":true}')
+    data = client.get(f"/api/devices/{device['id']}/status",
+                      headers=_auth(device["token"])).json()["data"]
+    assert data["online"] is False
+    assert abs(int(data["last_heartbeat"]) - (now_ms() - 300_000)) < 5_000
+    # §4.3：nodes_online 是 JSON 文本 ⇒ 形状保持字符串，但值全部 false、键集合不变
+    raw = data["properties"]["nodes_online"]
+    assert isinstance(raw, str), raw
+    table = db.jload(raw, {})
+    assert set(table) == {"H1", "M1", "M2", "M4"}
+    assert all(v is False for v in table.values()), table
+    # 其它属性不受影响（离线只说明现在收不到，不代表上次的温湿度失效）
+    assert data["properties"]["temp"] == 24.5 and data["properties"]["humi"] == 56.2
+    assert [n["online"] for n in data["nodes"]] == [False, False, False, False]
+    # last_seen 仍然回放（"最后看到它是什么时候"是历史事实，不该被抹掉）
+    assert all(n["last_seen"] for n in data["nodes"])
+
+
+def test_status_offline_flag_zero_forces_nodes_offline(client, device):
+    """调度器已置 online=0 → 同样一律 false（即使心跳时间看起来还在阈值内）。"""
+    _touch_online(device["id"], online=0, age_ms=1_000,
+                  nodes_online='{"H1":true,"M1":true,"M2":false,"M4":true}')
+    data = client.get(f"/api/devices/{device['id']}/status",
+                      headers=_auth(device["token"])).json()["data"]
+    assert data["online"] is False
+    table = db.jload(data["properties"]["nodes_online"], {})
+    assert table == {"H1": False, "M1": False, "M2": False, "M4": False}
+    assert all(n["online"] is False for n in data["nodes"])
+
+
+def test_status_online_keeps_nodes_online(client, device):
+    """在线时行为不变：在线表原样回放（含原本就是 false 的项），节点在线位照旧。"""
+    _touch_online(device["id"], online=1, age_ms=1_000,
+                  nodes_online='{"H1":true,"M1":true,"M2":false,"M4":true}')
+    data = client.get(f"/api/devices/{device['id']}/status",
+                      headers=_auth(device["token"])).json()["data"]
+    assert data["online"] is True
+    assert db.jload(data["properties"]["nodes_online"], {}) == {
+        "H1": True, "M1": True, "M2": False, "M4": True}
+    assert [n["online"] for n in data["nodes"]] == [True, True, True, True]
+
+
+def test_status_offline_nodes_online_object_shape_kept(client, device):
+    """缓存里 nodes_online 存成对象（不是 JSON 文本）时按对象回写，不强行转字符串。"""
+    _touch_online(device["id"], online=1, age_ms=600_000,
+                  nodes_online={"H1": True, "M1": True})
+    data = client.get(f"/api/devices/{device['id']}/status",
+                      headers=_auth(device["token"])).json()["data"]
+    raw = data["properties"]["nodes_online"]
+    assert isinstance(raw, dict) and raw == {"H1": False, "M1": False}
+
+
+def test_status_nodes_expose_kind_for_app_filtering(client, device):
+    """nodes[] 每项带 kind：汇聚 H1 是 hub，其余是 sensor（App 据此不画「客厅」行）。"""
+    _touch_online(device["id"], online=1, age_ms=1_000, nodes_online='{"H1":true}')
+    nodes = client.get(f"/api/devices/{device['id']}/status",
+                       headers=_auth(device["token"])).json()["data"]["nodes"]
+    assert {n["sn"]: n["kind"] for n in nodes} == {
+        "H1": "hub", "M1": "sensor", "M2": "sensor", "M4": "sensor"}
+    # type 语义不变（契约 §6.7），kind 只是附加的粗分类
+    assert {n["sn"]: n["type"] for n in nodes} == {
+        "H1": "hub", "M1": "gas", "M2": "fall", "M4": "presence"}
+
 
 
 def test_status_forbidden_for_stranger_1104(client, device):

@@ -148,11 +148,52 @@ def bind_device(payload: BindIn, user: CurrentUser) -> dict:
 
 # --------------------------------------------------------------------------- 状态与读数
 
+def _gateway_online(device: dict, row: dict[str, Any]) -> bool:
+    """网关是否在线 = 库里的在线位 **且** 心跳没过期（t187，契约 §8.7）。
+
+    为什么要自己再判一次心跳：`scheduler.tick_gateway_offline()` 每 10 s 才把 `online` 置 0，
+    在这最多 10 s（调度器停着时更久）的窗口里直接回放 `online=1`，App 会一边显示「主机联系不上」
+    （心跳时间已陈旧）一边显示在线。阈值取设备级 `gateway_offline_timeout_s`，与调度器同一个来源
+    （`alerts.device_settings`），避免两处口径漂移。没有心跳时间戳按离线处理：没有心跳就无法证明在线。
+    """
+    if not bool(row.get("online")):
+        return False
+    last = row.get("last_heartbeat_ms")
+    if not last:
+        return False
+    timeout_s = int(alerts.device_settings(device).get("gateway_offline_timeout_s") or 180)
+    return now_ms() - int(last) <= timeout_s * 1000
+
+
+def _offline_properties(properties: dict[str, Any]) -> dict[str, Any]:
+    """设备离线时把属性快照里的在线表整体置 false（t187）。
+
+    离线只说明「现在收不到」，不代表上次的温湿度读数失效，所以只动 `nodes_online` 一个键。
+    形状必须跟存储里一致：契约 §4.3 把 `nodes_online` 定义成 **JSON 文本**（字符串），
+    但历史数据/测试里也可能直接存成对象，因此按原类型回写，避免把 App 的解析分支悄悄改掉。
+    """
+    if "nodes_online" not in properties:
+        return properties
+    raw = properties["nodes_online"]
+    table: Any = raw
+    if isinstance(raw, str):
+        table = db.jload(raw, None)
+    if not isinstance(table, dict):
+        return properties
+    offline = {key: False for key in table}
+    return {**properties, "nodes_online": db.jdump(offline) if isinstance(raw, str) else offline}
+
+
 @router.get("/{device_id}/status")
 def device_status(device_id: int, user: CurrentUser) -> dict:
     device = device_context(user, device_id)
     online = online_row(device_id) or {}
+    is_online = _gateway_online(device, online)
     properties = db.jload(online.get("last_properties_json"), {}) or {}
+    if not is_online:
+        # 网关判离线 ⇒ 在线表与节点在线位一律按离线返回：缓存里的 true 只是历史快照，
+        # 回放它会让 App 同时显示「主机联系不上」与「4 个在线」（t187 现场实测的缺陷）。
+        properties = _offline_properties(properties)
     nodes = db.fetch_all(
         "SELECT sn, type, location, online, last_seen_ms, rssi, battery FROM nodes "
         "WHERE device_id = :did ORDER BY id ASC",
@@ -162,7 +203,7 @@ def device_status(device_id: int, user: CurrentUser) -> dict:
         prune_none(
             {
                 "device_id": device_id,
-                "online": bool(online.get("online")),
+                "online": is_online,
                 "last_heartbeat": online.get("last_heartbeat_ms"),
                 "alarm_state": int(online.get("alarm_state") or 0),
                 "properties": properties,
@@ -171,8 +212,12 @@ def device_status(device_id: int, user: CurrentUser) -> dict:
                         {
                             "sn": row["sn"],
                             "type": row["type"],
+                            # kind 给 App 过滤房间行用（t187）：type="hub" 的节点就是汇聚自己，
+                            # 不是房间里的传感器；App 只给 kind="sensor" 画行，免得多出一行。
+                            # 只增字段不改旧字段，老客户端忽略即可（契约 §6.7 的 type 语义不变）。
+                            "kind": "hub" if row["type"] == "hub" else "sensor",
                             "location": row["location"],
-                            "online": bool(row["online"]),
+                            "online": bool(row["online"]) and is_online,
                             "last_seen": row["last_seen_ms"],
                             "rssi": row["rssi"],
                             "battery": row["battery"],
