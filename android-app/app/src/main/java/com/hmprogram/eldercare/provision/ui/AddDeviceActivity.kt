@@ -11,6 +11,7 @@ import com.hmprogram.eldercare.provision.core.ContractErrors
 import com.hmprogram.eldercare.provision.core.SessionStore
 import com.hmprogram.eldercare.provision.databinding.ActivityAddDeviceBinding
 import com.hmprogram.eldercare.provision.wifi.WifiHelper
+import com.hmprogram.eldercare.provision.wifi.gatewayCandidateBases
 import kotlinx.coroutines.delay
 
 /**
@@ -116,18 +117,23 @@ class AddDeviceActivity : BaseActivity() {
     /**
      * 自动找小盒子：按候选地址逐个试 `/api/provision/status`，谁答上来就用谁。
      *
-     * 为什么不是让用户自己填：家属不知道板子的 AP 地址，契约里也写明这个地址由驱动决定、
-     * 上板实测后才回填。手填只是兜底，自动探测才是默认路径。
+     * 候选顺序由 [gatewayCandidateBases] 给出：手填/上次成功的地址 → **手机 DHCP 拿到的网关**
+     * → 历史候选兜底。DHCP 必须排在最前（除了用户明确手填时），因为小盒子 SoftAP 的网段由
+     * 板子驱动决定（现场实测这块板是 192.168.2.10），任何写死的 .1 列表都可能一个都不中。
      */
     private suspend fun probeGateway(showToast: Boolean): Boolean {
-        val candidates = (listOf(session.gatewayBase) + GATEWAY_CANDIDATES.map { "http://$it/api" })
-            .map { SessionStore.normalizeGatewayBase(it) }
-            .distinct()
+        val handTyped = SessionStore.normalizeGatewayBase(vb.etGateway.text.toString())
+        val candidates = gatewayCandidateBases(
+            dhcpHosts = WifiHelper.currentGatewayHosts(this),
+            handTypedBase = handTyped,
+            storedBase = SessionStore.normalizeGatewayBase(session.gatewayBase),
+        )
         vb.tvGatewayTip.text = getString(R.string.gateway_probing)
         for (base in candidates) {
             session.gatewayBase = base
             if (container.gatewayApi.status() is ApiResult.Ok) {
                 vb.etGateway.setText(session.gatewayBase)
+                // 现场排障要看这一行：地址是从哪来的、探到的是哪个，必须一眼可见
                 vb.tvGatewayTip.text = getString(R.string.gateway_found, session.gatewayBase)
                 if (showToast) toast(getString(R.string.gateway_found, session.gatewayBase))
                 return true
@@ -339,13 +345,6 @@ class AddDeviceActivity : BaseActivity() {
     private fun visible(show: Boolean): Int = if (show) View.VISIBLE else View.GONE
 
     private companion object {
-        /**
-         * 网关 SoftAP 的候选地址（契约 §12.3 / CAL-12）：仓库里读不到确定值，
-         * 官方样例实测 192.168.2.1、驱动常量串 192.168.237.1、adapter 死代码 192.168.5.1，
-         * 占位是 192.168.4.1。按「最可能的排前面」的顺序试。
-         */
-        val GATEWAY_CANDIDATES = listOf("192.168.2.1", "192.168.4.1", "192.168.237.1", "192.168.5.1")
-
         /** 轮询间隔，与鸿蒙 VERIFY_POLL_MS 一致 */
         const val VERIFY_POLL_MS = 2_000L
 

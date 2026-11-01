@@ -15,6 +15,7 @@ import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
+import com.hmprogram.eldercare.provision.core.AppConfig
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
@@ -163,6 +164,49 @@ object WifiHelper {
         runCatching { cm?.bindProcessToNetwork(null) }
     }
 
+    /**
+     * 手机当前网络的默认网关地址（IPv4 的 int 表示，0 = 拿不到）。
+     *
+     * 为什么要问系统而不是写死：小盒子 SoftAP 的网段由板子驱动决定，
+     * 现场实测这块板给的是 192.168.2.10，而代码里写死的 .1 列表一个都探不到。
+     * 手机连上热点后 DHCP 一定会发下网关地址，这才是「第一候选」的唯一可靠来源。
+     *
+     * `getDhcpInfo()` 已标记过时（13+ 建议用 LinkProperties），但它对「当前 Wi-Fi 的网关」
+     * 仍然有效且不需要额外权限；拿不到就返回 0，由上层退回候选表。
+     */
+    @Suppress("DEPRECATION")
+    fun currentDhcpGatewayIp(context: Context): Int {
+        val wm = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            ?: return 0
+        return runCatching { wm.dhcpInfo?.gateway ?: 0 }.getOrDefault(0)
+    }
+
+    /**
+     * 手机自己拿到的网关地址（可能 0~2 个），作为自动探测的**第一候选**。
+     *
+     * 两条来源都走，因为各有短板：
+     *  · LinkProperties 的默认路由给的是 [InetAddress] 字符串，没有字节序问题，
+     *    也是官方推荐（`getDhcpInfo` 已过时）——优先；
+     *  · DhcpInfo 只有 int，字节序在不同 ROM/文档表述上并不统一（见 [dhcpGatewayHosts]），
+     *    所以那种情况把两种读法都给出来，让探测自己判定哪个是真的。
+     */
+    fun currentGatewayHosts(context: Context): List<String> {
+        val out = LinkedHashSet<String>()
+        runCatching {
+            val cm = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE)
+                as? ConnectivityManager ?: return@runCatching
+            // 必须挑 Wi-Fi 那一张网：手机同时开着蜂窝数据时 activeNetwork 通常是移动网，
+            // 它的网关（10.x）跟小盒子毫无关系，先试它只会白等一次超时
+            val wifi = cm.allNetworks.firstOrNull {
+                cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            } ?: cm.activeNetwork
+            val lp = wifi?.let { cm.getLinkProperties(it) }
+            lp?.routes?.firstOrNull { it.isDefaultRoute }?.gateway?.hostAddress?.let { out += it }
+        }
+        out += dhcpGatewayHosts(currentDhcpGatewayIp(context))
+        return out.toList()
+    }
+
     fun openWifiSettings(context: Context) {
         val intent = Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(intent) }
@@ -198,4 +242,52 @@ data class WifiEntry(
         }
         if (weak) append("  信号弱")
     }
+}
+
+/**
+ * 直连小盒子时「先试哪个地址」的候选顺序（纯函数，便于单测）。
+ *
+ * 顺序与理由：
+ * 1. 用户在输入框里**改过**的地址 → 他明确指定过，照他说的试（改之前的值不算，否则
+ *    默认占位地址会永远排在 DHCP 前面，等于又回到写死）；
+ * 2. 手机自己拿到的网关（[WifiHelper.currentGatewayHosts]）→ 唯一能适应「这块板给 .10」
+ *    的信息，写死的 .1 列表在任何非 .1 网段上都是废的；
+ * 3. 界面上的历史地址 + [AppConfig.GATEWAY_FALLBACK_HOSTS] → 拿不到网关时兜底。
+ *
+ * @param dhcpHosts 系统告诉我们的网关主机名（0~2 个，见 [dhcpGatewayHosts]）
+ * @param handTypedBase 输入框里当前的值（已 normalize），可空
+ * @param storedBase 上次保存的地址（已 normalize），可空；与 [handTypedBase] 不同即视为「用户手填」
+ */
+fun gatewayCandidateBases(
+    dhcpHosts: List<String>,
+    handTypedBase: String? = null,
+    storedBase: String? = null,
+    fallbackHosts: List<String> = AppConfig.GATEWAY_FALLBACK_HOSTS,
+): List<String> {
+    val typed = handTypedBase?.takeIf { it.isNotBlank() }
+    val stored = storedBase?.takeIf { it.isNotBlank() }
+    val out = LinkedHashSet<String>()
+    if (typed != null && typed != stored) out += typed
+    dhcpHosts.filter { it.isNotBlank() }.forEach { out += AppConfig.gatewayBaseOf(it) }
+    typed?.let { out += it }
+    stored?.let { out += it }
+    fallbackHosts.forEach { out += AppConfig.gatewayBaseOf(it) }
+    return out.toList()
+}
+
+/**
+ * `DhcpInfo.gateway` 是 IPv4 的 int。文档口径是「network byte order」（高位在前），
+ * 但社区里流传的另一种拆法是低位在前，两种写法在不同机型上都有人验证过——
+ * 赌错一次就是现场又找不到网关，而多试一个地址的代价只是一次必然失败的探测，
+ * 所以两种读法都给出：真正存在于网段里的那个会被探测选中。
+ *
+ * 例：0xC0A8020A → ["192.168.2.10", "10.2.168.192"]（前者为文档口径，排第一）。
+ * ip = 0（拿不到）返回空表，由调用方退回候选表。
+ */
+fun dhcpGatewayHosts(ip: Int): List<String> {
+    if (ip == 0) return emptyList()
+    val v = ip.toLong() and 0xFFFFFFFFL
+    val networkOrder = "${(v shr 24) and 0xFF}.${(v shr 16) and 0xFF}.${(v shr 8) and 0xFF}.${v and 0xFF}"
+    val reversed = "${v and 0xFF}.${(v shr 8) and 0xFF}.${(v shr 16) and 0xFF}.${(v shr 24) and 0xFF}"
+    return if (networkOrder == reversed) listOf(networkOrder) else listOf(networkOrder, reversed)
 }

@@ -146,10 +146,10 @@
     <string name="add_step_1_hint">小盒子通电后，会发出一个名字以 ElderCare 开头的 Wi-Fi</string>
     <string name="add_step_1_body">打开手机的 Wi-Fi 设置连上它。连不上就靠近一点再试。</string>
     <string name="gateway_label">小盒子地址（一般不用改）</string>
-    <string name="gateway_hint">http://192.168.4.1</string>
+    <string name="gateway_hint">留空自动找，也可以手填（如 192.168.2.10）</string>
     <string name="action_probe">找一下</string>
     <string name="gateway_probing">正在找小盒子…</string>
-    <string name="gateway_found">找到了：%1$s</string>
+    <string name="gateway_found">已找到网关：%1$s</string>
     <string name="gateway_not_found">没找到小盒子：先确认手机连的是小盒子的 Wi-Fi</string>
     <string name="gateway_not_responding">地址对，但小盒子没应答：看看它是不是刚上电，或者不在配网时间里</string>
     <string name="action_open_wifi">去连接</string>

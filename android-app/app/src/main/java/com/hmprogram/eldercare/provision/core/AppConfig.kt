@@ -19,11 +19,22 @@ object AppConfig {
     /** 接口路径前缀，给 [ApiPaths] 之外的少量地方（mock 路由匹配）复用。 */
     const val PATH_PREFIX = "/api"
 
-    /** 配网时手机直连小盒子的地址（只有添加设备向导会用到）。 */
+    /** 配网时手机直连小盒子的地址（DHCP 拿不到网关时的兜底之一）。 */
     const val GATEWAY_BASE = "http://192.168.4.1/api"
+
+    /**
+     * 直连小盒子时的历史候选地址（DHCP 网关拿不到时才按这个顺序试）。
+     *
+     * 为什么还要留着：现场这块板 SoftAP 给的是 192.168.2.10 这类非 .1 地址，
+     * 但另一些板子/驱动确实用 .1；DHCP 是首选，这张表只是「实在拿不到时」的兜底。
+     */
+    val GATEWAY_FALLBACK_HOSTS = listOf("192.168.2.1", "192.168.4.1", "192.168.237.1", "192.168.5.1")
 
     /** 小盒子热点地址主机名，mock 用它区分「走本地」还是「走云端」。 */
     const val GATEWAY_HOST = "192.168.4.1"
+
+    /** 主机名/IP → 小盒子基地址（界面层不要自己拼字符串）。 */
+    fun gatewayBaseOf(host: String): String = SCHEME + host.trim().trimEnd('/') + PATH_PREFIX
 
     /** 读数明细在接口里的键名（界面把它翻成「读数内容」，不直接展示）。 */
     const val FIELD_READING_DETAIL = "payload"
