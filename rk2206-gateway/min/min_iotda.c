@@ -21,6 +21,7 @@
 #endif
 #ifdef MIN_HOST_TEST
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <unistd.h>
 #define send(h,b,l,f) ((int)write((h),(b),(size_t)(l)))
 #define recv(h,b,l,f) ((int)read((h),(b),(size_t)(l)))
@@ -291,7 +292,9 @@ static int json_escape(const uint8_t *in, uint32_t n, char *out, uint32_t cap)
 int min_msg_node_samples(const char *device_id, uint64_t epoch_ms, const uint8_t *node_json,
                          uint32_t n, char *out, uint32_t cap)
 {
-    char inner[MIN_PAYLOAD_MAX * 2u];
+    /* t193：这块原来是 2 KB 的栈数组，与调用方的 body[] 叠在一起把 8 KB 栈压到临界；
+     * 单任务固件不需要可重入，改静态区，栈峰值立刻降下来（心跳里的 stk 峰值可验证）。 */
+    static char inner[MIN_PAYLOAD_MAX * 2u];
     int il;
 
     if (device_id == NULL || node_json == NULL || out == NULL || cap == 0u) {
@@ -339,6 +342,48 @@ static int mqtt_send(int fd, const uint8_t *buf, uint32_t len)
         sent += (uint32_t)n;
     }
     return 0;
+}
+
+/*
+ * t193：现场「23:26:38 之后零输出但 ping 仍通」的最大嫌疑就是这里——
+ * 一旦 PUBACK 不来，阻塞式 recv 会把主循环钉死（不再读 UART、不再打心跳）。
+ * 两道闸：①select 带预算等可读，到点就返回超时；②socket 层 SO_RCVTIMEO 3 s 兜底。
+ * 有了 ①，即使 lwIP 那边超时语义失效，也不会无限等。
+ */
+static int mqtt_recv(int fd, uint8_t *type, uint8_t *body, uint32_t cap);   /* 下面的实现 */
+
+static int mqtt_wait_readable(int fd, uint32_t ms)
+{
+    fd_set rs;
+    struct timeval tv;
+
+    FD_ZERO(&rs);
+    FD_SET(fd, &rs);
+    tv.tv_sec = (long)(ms / 1000u);
+    tv.tv_usec = (long)((ms % 1000u) * 1000u);
+    return (select(fd + 1, &rs, NULL, NULL, &tv) > 0) ? 0 : -1;
+}
+
+/* 带总预算收一个包：0 = 收到、-2 = 到预算还没来（可重试）、-1 = socket 错 */
+static int mqtt_recv_deadline(int fd, uint8_t *type, uint8_t *body, uint32_t cap,
+                              uint32_t deadline_ms)
+{
+    for (;;) {
+        int32_t left = (int32_t)(deadline_ms - min_now_ms());
+        int rc;
+
+        if (left <= 0) {
+            return -2;
+        }
+        if (left > (int32_t)MIN_MQTT_RECV_SLICE_MS) {
+            left = (int32_t)MIN_MQTT_RECV_SLICE_MS;
+        }
+        if (mqtt_wait_readable(fd, (uint32_t)left) != 0) {
+            continue;                     /* 切片到点：回头再看总预算 */
+        }
+        rc = mqtt_recv(fd, type, body, cap);   /* 已确认可读，这里的 recv 不会长等 */
+        return (rc < 0) ? -1 : 0;
+    }
 }
 
 /* 读一个完整 MQTT 包（固定头 + 长度 + 体）。返回体长，-1 失败。 */
@@ -443,6 +488,18 @@ int min_mqtt_connect(min_mqtt_t *m, int fd, const char *client_id, const char *u
                MIN_LOG_TAG, (unsigned)body[1]);
         return -2;
     }
+    {
+        /* t193：把 MQTT 会话的 socket 超时统一成 3 s（取时那条是 5 s，不复用）。
+         * lwipopts.h:123 已开 LWIP_SO_RCVTIMEO，设不上就打印出来，别静默。 */
+        struct timeval tv;
+
+        tv.tv_sec = (long)MIN_MQTT_RECV_TIMEOUT_S;
+        tv.tv_usec = 0;
+        if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+            printf("[%s] ⚠ SO_RCVTIMEO 设置失败（%u s）：靠 select 预算兜底\n", MIN_LOG_TAG,
+                   (unsigned)MIN_MQTT_RECV_TIMEOUT_S);
+        }
+    }
     m->fd = fd;
     m->next_id = 1u;
     return 0;
@@ -480,19 +537,26 @@ int min_mqtt_publish(min_mqtt_t *m, const char *topic, const uint8_t *payload, u
             return -1;
         }
     }
-    /* 等 PUBACK：期间可能收到别的包（PINGRESP 等），最多看 4 个 */
-    for (tries = 0; tries < 4; tries++) {
-        if (mqtt_recv(m->fd, &type, body, sizeof(body)) < 0) {
-            return -1;
-        }
-        if (type == 4u) {
-            if (body[0] == pid[0] && body[1] == pid[1]) {
+    /* 等 PUBACK：期间可能收到别的包（PINGRESP 等），最多看 4 个；
+     * 整段有自己的总预算 MIN_MQTT_PUB_BUDGET_MS，超了返回 -2（可重试），绝不无限等。 */
+    {
+        uint32_t deadline = min_now_ms() + MIN_MQTT_PUB_BUDGET_MS;
+
+        for (tries = 0; tries < 4; tries++) {
+            n = mqtt_recv_deadline(m->fd, &type, body, sizeof(body), deadline);
+            if (n == -2) {
+                return -2;                /* PUBACK 超时 */
+            }
+            if (n < 0) {
+                return -1;                /* socket 错：交给上层重连 */
+            }
+            if (type == 4u && body[0] == pid[0] && body[1] == pid[1]) {
                 m->next_id++;
                 return 0;
             }
         }
     }
-    return -1;
+    return -2;                            /* 预算内没等到 PUBACK：当超时处理 */
 }
 
 int min_mqtt_ping(min_mqtt_t *m)
@@ -506,8 +570,16 @@ int min_mqtt_ping(min_mqtt_t *m)
     if (mqtt_send(m->fd, (const uint8_t *)"\xC0\x00", 2) != 0) {
         return -1;
     }
-    if (mqtt_recv(m->fd, &type, body, sizeof(body)) < 0) {
-        return -1;
+    {
+        uint32_t deadline = min_now_ms() + MIN_MQTT_PUB_BUDGET_MS;
+        int rc = mqtt_recv_deadline(m->fd, &type, body, sizeof(body), deadline);
+
+        if (rc == -2) {
+            return -2;                    /* PINGRESP 超时 */
+        }
+        if (rc < 0) {
+            return -1;
+        }
     }
     return (type == 13u) ? 0 : -1;
 }

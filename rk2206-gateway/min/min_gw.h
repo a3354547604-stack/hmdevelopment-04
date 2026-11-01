@@ -18,7 +18,7 @@
 
 /* ---------------------------------------------------------------- 常量 */
 
-#define MIN_IMAGE_TAG       "MIN-GW-v0.1"          /* 构建脚本的镜像锚点，别拆成变量拼接 */
+#define MIN_IMAGE_TAG       "MIN-GW-v0.2-diag"     /* 构建脚本的镜像锚点，别拆成变量拼接（t193 诊断版） */
 #define MIN_LOG_TAG         "min"
 #define MIN_DEVICE_SN       "M0-3F1A2B"            /* 与旧固件 gw_config.h:302 一致：
                                                     * Wi-Fi 口令的 XOR 混淆密钥由它派生，
@@ -44,6 +44,18 @@
 #define MIN_VER             0x01u
 #define MIN_PAYLOAD_MAX     1024u
 #define MIN_BUF_MAX         (MIN_PAYLOAD_MAX + 16u)
+
+/* 运行态自证（t193）：定位「停止上报」是崩溃 / UART 没帧 / MQTT 掉线 */
+#define MIN_IDLE_MS         20u      /* 每轮最多睡这么久：LzUartRead 返回 0 也不忙等 */
+#define MIN_HB_MS           5000u    /* 心跳 5 s 一行 [min] alive ... */
+#define MIN_RX_REPORT_MS    8000u    /* UART 计数 8 s 一行 [min] uart rx=... */
+#define MIN_STALL_S         20u      /* 守卫任务：主循环 20 s 不前进就报 [min] !! fatal */
+#define MIN_MQTT_RECV_SLICE_MS 1000u /* select 单次等待切片（到点再看总预算，避免一次等死） */
+#define MIN_MQTT_PUB_BUDGET_MS 5000u /* 一次 publish 等 PUBACK 的总预算，超时返回 -2（可重试） */
+#define MIN_MQTT_RECV_TIMEOUT_S 3u   /* socket 层 SO_RCVTIMEO 兜底（lwIP 已开 LWIP_SO_RCVTIMEO） */
+
+/* 单调毫秒时钟：固件用 LOS tick，主机单测用 CLOCK_MONOTONIC（t193 给 PUBACK 预算用） */
+uint32_t min_now_ms(void);
 
 /* 重试退避（任务卡）：30 s → 60 s → 120 s → 300 s 封顶 */
 #define MIN_BACKOFF_STEP0   30000u
@@ -89,6 +101,8 @@ uint16_t min_crc16(const uint8_t *d, uint32_t n);
 void     min_parser_init(min_parser_t *p);
 /* 喂字节；返回 1 = 解出一帧（out 指向 p->buf 内部，下次 poll 前有效），0 = 还需要更多字节 */
 int      min_parser_feed(min_parser_t *p, const uint8_t *d, uint32_t n, min_frame_t *out);
+/* 不喂新字节，只从已有缓冲里再解一帧：一次 read 带回两帧时第二帧不会丢（t193） */
+int      min_parser_pull(min_parser_t *p, min_frame_t *out);
 /* 把缓冲区当作一整帧来校验（单测用）：0 = 合法 */
 int      min_frame_verify(const uint8_t *f, uint32_t n, min_frame_t *out);
 

@@ -1,5 +1,10 @@
 /*
- * test_min.c — 最小网关的主机单测（t192）
+ * test_min.c — 最小网关的主机单测（t192 / t193）
+ *
+ * t193 增补：`test_puback_timeout()` 用 socketpair 造「PUBACK 永不返回」的场景，
+ * 证明 min_mqtt_publish 在 MIN_MQTT_PUB_BUDGET_MS 预算内返回 -2（超时）而不是卡死
+ * ——这是「平台不回来一条 PUBACK，主循环就永远停住」那条现场假设的主机侧反证。
+ * 本文件因此必须提供 min_now_ms()（板上是 min_main.c 用 LOS tick 实现）。
  *
  * 编译方式见 tools/gw-build-min.sh --check：
  *   gcc -DMIN_HOST_TEST min_proto.c min_kv.c min_iotda.c test/test_min.c -o test_min && ./test_min
@@ -11,8 +16,21 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <unistd.h>
 
 #include "min_gw.h"
+
+/* 板上的时基在 min_main.c（LOS tick）；主机单测不链 min_main.c，这里补一个。 */
+uint32_t min_now_ms(void)
+{
+    struct timespec ts;
+
+    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)(ts.tv_nsec / 1000000));
+}
 
 static int g_pass;
 static int g_fail;
@@ -358,15 +376,45 @@ static void test_auth_and_shape(void)
           min_backoff_ms(99u) == 300000u, "退避阶梯不符 30/60/120/300");
 }
 
+/* 「PUBACK 永远不来」时 publish 会不会把主循环钉死——主机侧可判定的反证。 */
+static void test_puback_timeout(void)
+{
+    int sv[2];
+    min_mqtt_t m;
+    uint8_t pl[8] = { 0xA5u, 1u, 2u, 3u, 4u, 5u, 6u, 7u };
+    uint32_t t0;
+    uint32_t dt;
+    int rc;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
+        CHECK(0, "socketpair 创建失败，无法验证 PUBACK 超时路径");
+        return;
+    }
+    m.fd = sv[0];
+    m.next_id = 7u;
+    t0 = min_now_ms();
+    /* 对端（sv[1]）一个字节都不发：PUBACK 永不返回 */
+    rc = min_mqtt_publish(&m, "$oc/devices/dev1/sys/messages/up", pl, sizeof(pl));
+    dt = min_now_ms() - t0;
+
+    CHECK(rc == -2, "PUBACK 不到必须返回 -2（超时），实际 rc=%d", rc);
+    CHECK(dt >= (MIN_MQTT_PUB_BUDGET_MS - 800u) && dt <= (MIN_MQTT_PUB_BUDGET_MS + 3000u),
+          "总预算应约 %u ms，实际 %u ms", (unsigned)MIN_MQTT_PUB_BUDGET_MS, (unsigned)dt);
+    CHECK(m.next_id == 7u, "超时不算成功，packet id 不应前进（=%u）", (unsigned)m.next_id);
+    (void)close(sv[0]);
+    (void)close(sv[1]);
+}
+
 int main(void)
 {
-    printf("min 固件主机单测（t192）\n");
+    printf("min 固件主机单测（t192 + t193）\n");
     test_crc();
     test_real_frames();
     test_bad_frames();
     test_kv();
     test_crypto();
     test_auth_and_shape();
+    test_puback_timeout();
     printf("通过 %d / 失败 %d\n", g_pass, g_fail);
     return (g_fail == 0) ? 0 : 1;
 }

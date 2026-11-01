@@ -31,7 +31,7 @@ OBJDIR=/home/openharmony/out/rk2206/lockzhiner-rk2206
 LIB=gateway_min
 FEAT='./t5_min:gateway_min'
 SYM=min_crc16
-ANCHOR='MIN-GW-v0.1'
+ANCHOR='MIN-GW-v0.2-diag'
 LOGNAME=build-min
 
 CHECK=0

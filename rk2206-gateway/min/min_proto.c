@@ -100,12 +100,54 @@ int min_frame_verify(const uint8_t *f, uint32_t n, min_frame_t *out)
     return 0;
 }
 
-int min_parser_feed(min_parser_t *p, const uint8_t *d, uint32_t n, min_frame_t *out)
+/* 从缓冲里「尝试」解一帧：成功 1（已消费），没解出 0。
+ * 无论成功失败都由调用方决定要不要继续——这样 feed / pull 两条入口共用同一段判定逻辑。 */
+static int parser_extract(min_parser_t *p, min_frame_t *out)
 {
     uint16_t plen;
     uint32_t total;
     int rc;
 
+    (void)parser_goto_sof(p);
+    if (p->len < 8u) {
+        return 0;
+    }
+    plen = (uint16_t)((uint16_t)p->buf[6] | ((uint16_t)p->buf[7] << 8));
+    if (p->buf[2] != MIN_VER || plen > MIN_PAYLOAD_MAX) {
+        /* VER/LEN 非法：只丢 1 字节，让后面的真帧有机会对齐 */
+        p->fmt_err++;
+        p->drop += 1u;
+        memmove(p->buf, &p->buf[1], p->len - 1u);
+        p->len -= 1u;
+        return 0;
+    }
+    total = 10u + (uint32_t)plen;
+    if (p->len < total) {
+        return 0;                         /* 半包，等下一次 */
+    }
+    rc = min_frame_verify(p->buf, total, out);
+    if (rc == 0) {
+        p->frames++;
+        if (out != NULL) {
+            out->payload = &p->buf[8];
+        }
+        memmove(p->buf, &p->buf[total], p->len - total);
+        p->len -= total;
+        return 1;
+    }
+    if (rc == -3) {
+        p->crc_err++;
+    } else {
+        p->fmt_err++;
+    }
+    p->drop += 1u;
+    memmove(p->buf, &p->buf[1], p->len - 1u);
+    p->len -= 1u;
+    return 0;
+}
+
+int min_parser_feed(min_parser_t *p, const uint8_t *d, uint32_t n, min_frame_t *out)
+{
     if (p == NULL || d == NULL) {
         return 0;
     }
@@ -126,43 +168,32 @@ int min_parser_feed(min_parser_t *p, const uint8_t *d, uint32_t n, min_frame_t *
         d += take;
         n -= take;
 
-        (void)parser_goto_sof(p);
-        if (p->len < 8u) {
-            continue;
-        }
-        plen = (uint16_t)((uint16_t)p->buf[6] | ((uint16_t)p->buf[7] << 8));
-        if (p->buf[2] != MIN_VER || plen > MIN_PAYLOAD_MAX) {
-            /* VER/LEN 非法：只丢 1 字节，让后面的真帧有机会对齐 */
-            p->fmt_err++;
-            p->drop += 1u;
-            memmove(p->buf, &p->buf[1], p->len - 1u);
-            p->len -= 1u;
-            continue;
-        }
-        total = 10u + (uint32_t)plen;
-        if (p->len < total) {
-            continue;                     /* 半包，等下一次 */
-        }
-        rc = min_frame_verify(p->buf, total, out);
-        if (rc == 0) {
-            p->frames++;
-            if (out != NULL) {
-                out->payload = &p->buf[8];
-            }
-            memmove(p->buf, &p->buf[total], p->len - total);
-            p->len -= total;
+        if (parser_extract(p, out) == 1) {
             return 1;
         }
-        if (rc == -3) {
-            p->crc_err++;
-        } else {
-            p->fmt_err++;
-        }
-        p->drop += 1u;
-        memmove(p->buf, &p->buf[1], p->len - 1u);
-        p->len -= 1u;
     }
     return 0;
+}
+
+/* t193：一次 LzUartRead 里可能带回两帧，feed 只解出第一帧就返回；第二帧留在缓冲里，
+ * 要等下一次读到新字节才会被处理——流一停它就永远出不来（现场「24 条之后不再上报」的
+ * 嫌疑之一）。pull 把缓冲里剩下的帧立刻挤出来，调用方 while 循环即可。 */
+int min_parser_pull(min_parser_t *p, min_frame_t *out)
+{
+    if (p == NULL) {
+        return 0;
+    }
+    for (;;) {
+        uint32_t before = p->len;
+        int r = parser_extract(p, out);
+
+        if (r == 1) {
+            return 1;
+        }
+        if (p->len == before) {
+            return 0;                     /* 没进展：空缓冲或半包 */
+        }
+    }
 }
 
 /* ---------------------------------------------------------------- 退避 */

@@ -22,27 +22,27 @@ t190 `resident set timeout` 死循环每 44 s 自复位、t191 连不上 Wi-Fi�
 
 | 文件 | 行 | 作用 |
 |---|---|---|
-| `min_gw.h` | 150 | 唯一头文件：常量、结构、全部原型（任务卡限制 8 个 `.c/.h`，所以接口集中在这里） |
-| `min_main.c` | 293 | 入口 + 一个状态机任务（WIFI→TIME→MQTT→RUN）+ UART 采集与上报 |
-| `min_proto.c` | 182 | CRC16-MODBUS、`AA55` 分帧、退避阶梯（纯逻辑，主机可测） |
+| `min_gw.h` | 164 | 唯一头文件：常量、结构、全部原型（任务卡限制 8 个 `.c/.h`，所以接口集中在这里） |
+| `min_main.c` | 521 | 入口 + 一个状态机任务（WIFI→TIME→MQTT→RUN）+ UART 采集与上报 + t193 自证/守卫 |
+| `min_proto.c` | 213 | CRC16-MODBUS、`AA55` 分帧（含 `pull` 二次取帧）、退避阶梯（纯逻辑，主机可测） |
 | `min_kv.c` | 229 | Flash 凭证读取（Vendor 两槽 + `0x6FF000` 的 256 B 块），解码部分是纯函数 |
 | `min_net.c` | 228 | `WifiConnect` 直连 + 装默认网卡 + TCP/HTTP 取时 |
-| `min_iotda.c` | 513 | SHA-256/HMAC、clientId 拼装、MQTT（CONNECT/PUBLISH QoS1/PUBACK/PINGREQ）、§4.6 报文 |
-| `test/test_min.c` | 372 | 主机单测（55 条断言，含契约 §3.7 的三条真帧） |
+| `min_iotda.c` | 585 | SHA-256/HMAC、clientId 拼装、MQTT（CONNECT/PUBLISH QoS1/PUBACK/PINGREQ，等 PUBACK 带 select 预算）、§4.6 报文 |
+| `test/test_min.c` | 420 | 主机单测（58 条断言，含契约 §3.7 的三条真帧 + t193 的 PUBACK 超时用例） |
 | `BUILD.gn` | 43 | GN 目标 `gateway_min` |
 
-固件本体 = 6 个 `.c/.h` 共 **1598 行**（含注释）。任务卡写的是「尽量 ≤ 1200」：超了的部分主要
-是「为什么这么写」的注释（t188~t191 的坑都写进注释了，删掉等于下次再踩）。真正可压的逻辑
-大约 900 行。**这是与卡面的一处偏差，请验收时按「可读性优先」判断。**
+固件本体 = 6 个 `.c/.h` 共 **1940 行**（含注释）。任务卡写的是「尽量 ≤ 1200」：超了的部分主要
+是「为什么这么写」的注释 + t193 的现场自证（心跳/计数/故障钩子/守卫任务，约 250 行）。
+真正可压的逻辑大约 1100 行。**这是与卡面的一处偏差，请验收时按「可读性优先」判断。**
 
 ## 2. 开机日志四行样例（判据）
 
 ```
-[min] ---- RK2206 最小网关启动 MIN-GW-v0.1 (Nov  1 2026 22:30:11) ----
+[min] ---- RK2206 最小网关启动 MIN-GW-v0.2-diag (Nov  1 2026 23:5x) ----
 [min] KV：Wi-Fi ssid=123456798 口令=已读到（不回显）
 [min] KV：IoTDA 接入 1a2b3c4d5e.st1.iotda-device.cn-north-4.myhuaweicloud.com:1883 设备 <device_id>，取时 123.206.99.28:80
 [min] UART0 就绪 9600 8N1（RX=GPIO0_PB6 / TX=GPIO0_PB7，MUX_FUNC2）
-[min] 主任务已启动（栈 8192 B，优先级 24）
+[min] 主任务已启动（栈 12288 B，优先级 24）；心跳 5 s / UART 计数 8 s
 ```
 
 之后按状态机往下走，成功链是：
@@ -55,7 +55,7 @@ t190 `resident set timeout` 死循环每 44 s 自复位、t191 连不上 Wi-Fi�
 [min] 已上报 node seq=1 len=124（PUBACK）
 ```
 
-锚点串 `MIN-GW-v0.1` 会进 `Firmware.img`，构建脚本用 `strings | grep` 断言它存在——
+锚点串 `MIN-GW-v0.2-diag` 会进 `Firmware.img`，构建脚本用 `strings | grep` 断言它存在——
 **看到这行就说明烧进去的确实是这一版**。
 
 ## 3. KV 字段名与来源（不重新配网也能接着用旧凭证）
@@ -139,7 +139,7 @@ topic：`$oc/devices/<device_id>/sys/messages/up`，QoS1。
 ## 8. 构建与验证
 
 ```bash
-# 主机侧（秒级，不需要构建窗口）：55 条断言 + 5 个 .c 的交叉语法检查
+# 主机侧（秒级，不需要构建窗口）：58 条断言 + 5 个 .c 的交叉语法检查
 bash tools/gw-build-min.sh --check
 
 # 出镜像（走构建锁；产物 rk2206-gateway/out/gateway-Firmware.img）
@@ -148,12 +148,24 @@ bash tools/build-lock.sh bash tools/gw-build-min.sh
 
 断言（脚本里逐条打印）：`hb build` 退出码 0 / 日志有 `build success` / 无 `[OHOS ERROR]` /
 5 个源文件都有编译记录 / `libgateway_min.a` 存在 / `liteos.elf` 含符号 `min_crc16` /
-`Firmware.img` 含锚点串 `MIN-GW-v0.1` / 镜像 2097152 B 且打印当次 md5+sha256。
+`Firmware.img` 含锚点串 `MIN-GW-v0.2-diag` / 镜像 2097152 B 且打印当次 md5+sha256。
 
-**当次结果（2026-11-01 22:3x，本机）**：hb 退出码 0、日志 1519 行、7 项断言全过；
-`Firmware.img` **2097152 B**、md5 `59f757166a636657b035d599a805bd80`、sha256
-`69d4a2951e51acfb7739d157703f94a3b5966ff4ebcd9cb7d4f9d3e1280da1a9`、`liteos.elf` 837564 B。
+**当次结果（t193，2026-11-01 23:5x，本机）**：hb 退出码 0、日志 1519 行、7 项断言全过；
+`Firmware.img` **2097152 B**、md5 `0e07ad3e1e4c48d2e5db0a6e524eed01`、sha256
+`5c0ad0e130ca80ab95fc82ad4a19f35704b497b51dc537f30ec8bece585275e9`、`liteos.elf` 839424 B。
 证据文件：`rk2206-gateway/out/build-min.evidence.txt`。
+（t192 首版：md5 `59f757166a636657b035d599a805bd80`、elf 837564 B。）
+
+镜像内锚点（`strings out/gateway-Firmware.img | grep -c -F '串'`，t193 当次）：
+
+| 串 | 次数 | 说明 |
+|---|---|---|
+| `MIN-GW-v0.2-diag` | 1 | 版本锚点（构建脚本断言它存在） |
+| `alive n=` | 1 | t193 心跳 |
+| `uart rx=` | 1 | t193 UART 计数 |
+| `PUBACK 超时` | 1 | t193 等 PUBACK 预算闸 |
+| `minGuard` | 1 | t193 守卫任务名 |
+| `!! fatal` | 4 | HardFault / BusFault / 栈溢出 / 20 s 不前进 |
 
 ## 9. 已知限制（未上板实测的部分）
 
@@ -171,3 +183,68 @@ bash tools/build-lock.sh bash tools/gw-build-min.sh
    （概率极低）会漏检一次。
 5. **`APP_FEATURE_INIT` 入口名**：与旧固件一致；如果 SDK 的启动流程改了（比如改成 `app_main`），
    这里要跟着改——构建脚本的「符号进 ELF」断言会立刻发现。
+
+## 10. t193：运行态自证（「不再上报」时怎么一眼定位）
+
+现场问题是「23:26:38 之后一条 webhook 都没有，但板子还 ping 得通、也没有重启」。这个组合至少
+对应三种完全不同的原因，光看「没上报」分不出来：
+
+| 现象 | 结论 | 下一步 |
+|---|---|---|
+| `alive` / `uart rx` / `pub` **三条全不动** | 主任务死了（HardFault / 栈溢出 / 被 SDK 卡住） | 看 `!! fatal` 那行；没有就看 `stk 峰值` |
+| `alive` 在涨、`uart rx=` 不涨 | 串口侧没数据（汇聚没发 / 线松 / 波特率不对） | 查汇聚 COM17 与 RX 线 |
+| `uart rx` 在涨、`frames=` 不涨 | 帧头/CRC 对不上（噪声、错帧） | 抓一次 `uart rx` 的增量 |
+| `frames` 在涨、`pub` 不涨或 `err` 在涨 | 拼装或 MQTT 发布这条路 | 看 `⚠` 那几行（超长 / PUBACK 超时 / rc） |
+
+### 10.1 日志格式（每一行都带 `[min]` 前缀）
+
+```
+[min] alive n=<圈数> up=<开机秒> uart=<累计收到的字节> pub=<发布成功次数> err=<失败次数>   ← 5 s 一行
+[min] stk 已用 <B> / 峰值 <B> / 栈 <B>                                                  ← 跟心跳同频
+[min] uart rx=<B> frames=<解析出的完整帧数>                                              ← 8 s 一行
+[min] pub seq=<帧序号> len=<payload 字节> rc=<上一次 publish 的返回码>                    ← 每次发布前
+[min] 已上报 node seq=<帧序号> len=<报文长度>（PUBACK）rc=0                               ← 成功
+[min] ⚠ 上报失败 rc=<码>（seq=… len=…）                                                  ← 失败
+[min] ⚠ PUBACK 超时（5s 预算内没等到）→ 重连 seq=… len=…                                  ← 平台不回 PUBACK
+[min] ⚠ MQTT 断开重连 n=<第几次> rc=<上次返回码>
+[min] !! fatal <原因>（stage=… n=… uart=… pub=… err=…）                                  ← 崩溃/卡死
+```
+
+返回码约定（`min_mqtt_publish`）：`0` 成功（拿到 PUBACK）、`-1` socket 错、`-2` **等 PUBACK 超预算**。
+`-2` 不是致命错：打一行超时日志 → 关 socket → 走原有退避重连，**主循环继续转、心跳照打**。
+
+### 10.2 「主循环会不会被 PUBACK 拖死」—— 两层闸 + 主机反证
+
+1. **select 预算闸**：等 PUBACK 时先 `select(fd, 可读, 切片 1000 ms)`，总预算
+   `MIN_MQTT_PUB_BUDGET_MS = 5000 ms`，到点无条件返回 `-2`。
+   ⇒ 即使平台一条 PUBACK 都不回，主循环最多停 5 s，然后日志 + 重连。
+2. **socket 兜底**：连接建立后仍设 `SO_RCVTIMEO = 3 s`（lwIP 的 `LWIP_SO_RCVTIMEO` 在本 SDK 是 1）。
+3. **主机反证（不需要板子）**：`test_puback_timeout()` 用 `socketpair` 造「对端一个字节都不发」
+   的场景，断言 `min_mqtt_publish` 在 ~5 s 内返回 `-2`、且 `packet id` 不前进：
+
+```bash
+bash tools/gw-build-min.sh --check        # 58 条断言，其中 3 条就是这件事
+```
+
+4. **板上人为制造 PUBACK 不返回**（哪天现场要复现）：
+   - 最简单：在 PC 上**关掉热点共享的网络**（保留热点本身）→ 板子 Wi-Fi 还连着、TCP 也不一定断，
+     但 broker 的应答回不来；
+   - 或者在本机防火墙加一条出站 `TCP 1883` 阻断规则；
+   - 期望日志：`⚠ PUBACK 超时（5s 预算内没等到）→ 重连` 之后仍有 `[min] alive …` 每 5 s 一行，
+     `uart rx` 继续涨（说明 UART 采集没停）。
+
+### 10.3 故障钩子与守卫任务
+
+- `HardFault_Handler` / `BusFault_Handler`：elf 里原是弱符号（默认 `b .` 死循环），这里给强定义，
+  异常时先打一行 `!! fatal` 再停。异常上下文里 printf 不一定还可用，所以它是「尽力而为」。
+- `minGuard` 任务（2048 B / 最低优先级）：主任务 `g_loops` 20 s 不涨就喊
+  `!! fatal 主任务 20 s 没有前进（stage=… seq=… uart=… frames=… pub=… err=…）` + 栈用量。
+  这条专治「卡在 SDK 死循环里、既不复位也不打日志」——t190 的 `resident set timeout` 就是那样。
+- 栈：主任务 8192 → **12288 B**，同时把最大的两块缓冲从栈上挪到静态区
+  （`min_msg_node_samples` 的 `inner[]` 2 KB、`s_ctx.body` 2.3 KB）。
+  真实峰值看 `[min] stk 峰值`；`bOvf=1` 会额外喊一条 `!! fatal 主栈溢出`。
+
+### 10.4 一个 read 带回多帧不再吞帧
+
+`LzUartRead` 一次可能返回两帧以上：`min_parser_pull()` 不喂新字节、只从缓冲里再解一帧，
+`uart_pump()` 会把缓冲里的帧全部取完再回去睡 `MIN_IDLE_MS = 20 ms`（读 0 字节也不忙等）。
