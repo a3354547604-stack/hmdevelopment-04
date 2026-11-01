@@ -552,6 +552,23 @@ static void test_wdt_and_backoff(void)
     t_ok(strstr(GW_BOOT_NO_CONNECT_MSG, "wifi set") != NULL,
          "开机日志原文里写明用 `wifi set` 联网（来自 gw_config.h 的 GW_BOOT_NO_CONNECT_MSG）");
 
+    t_start("t191 连接超时改 35 s（现场成功链 >15 s）");
+    /* 现场（镜像 fcbd2d73）成功那一次从 `AP BSSID` 到 `STA 已连接` 明显超过 15 s，
+     * 15 s 的上限会把"本来能连上"的那次判成超时（日志 `连接 15200 ms 无结果`）。
+     * 上下界都要卡：必须大于 15 s 的旧值，且仍远小于 180 s 退避窗口。 */
+    t_ok(GW_WIFI_CONNECT_TIMEOUT_MS == 35000u, "连接超时 = 35000 ms（t191：15 s → 35 s）");
+    t_ok(GW_WIFI_CONNECT_TIMEOUT_MS > 15000u, "必须大于旧的 15 s（实测成功链就超过它）");
+    t_ok(GW_WIFI_CONNECT_TIMEOUT_MS < GW_NET_BACKOFF_MS,
+         "必须远小于 180 s 退避窗口（否则一次超时就把退避期吃掉）");
+    t_ok(GW_WIFI_CONNECT_POLL_MS > 0u && GW_WIFI_CONNECT_POLL_MS < GW_WIFI_CONNECT_TIMEOUT_MS,
+         "轮询间隔必须小于总超时");
+
+    t_start("t191 看门狗默认关闭（喂狗任务建不起来 → 44 s 复位循环）");
+    /* 现场：`[WDT] 已启动 timeout=44s` 有了，但 `[gw] ⚠ 喂狗任务创建失败`，
+     * 于是每 44 s 复位一次。狗守的那个死循环已在 t190 拆掉，默认关掉；
+     * 断言 this 值，避免有人"顺手改回 1"又不验证喂狗任务能建成。 */
+    t_ok(GW_WATCHDOG_ENABLE == 0, "GW_WATCHDOG_ENABLE 默认 0（没有喂狗任务就不该开狗）");
+
     t_start("t188 看门狗开关与周期口径");
     /* 开关宏必须是 0/1（写成 2 之类会让 #if 与运行期判断分叉） */
     t_ok(GW_WATCHDOG_ENABLE == 0 || GW_WATCHDOG_ENABLE == 1, "GW_WATCHDOG_ENABLE 是 0/1 布尔宏");

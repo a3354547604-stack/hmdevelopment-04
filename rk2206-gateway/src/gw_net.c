@@ -284,8 +284,10 @@ int gw_net_sta_connect_wait(const char *ssid, const char *psk,
         if (waited >= deadline) {
             s_conn_state = GW_CONN_STUCK;
             s_sta_pending = 0u;     /* 别让配网状态机以为"还在连" */
-            printf("[NET] 连接 %u ms 无结果：worker 卡在 SDK 里（recovery），命令先返回\n",
-                   (unsigned)waited);
+            /* t191：文案里带上本次用的上限（35 s ↔ 35200 ms 会随宏变），别再把 15200 写死；
+             * 判读：waited 约等于 上限 + 2 次轮询，说明 worker 在 SDK 里没回来。 */
+            printf("[NET] 连接 %u ms 无结果（上限 %u ms）：worker 卡在 SDK 里（recovery），命令先返回\n",
+                   (unsigned)waited, (unsigned)timeout_ms);
             net_set_reason(reason, cap, "stuck");
             net_backoff_note_fail();
             return -1;

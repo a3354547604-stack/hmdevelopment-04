@@ -944,3 +944,67 @@ VendorGet(SSID) → printf("Connect to (SSID=%s)") → wifi_set_mode_internal() 
 2. `wifi show`、`wifi scan`、`wifi net` 三条命令各自的输出；
 3. `grep -c "resident set timeout"` 的结果（应为 0）；
 4. 若出现 `[NET] STA 已连接 ssid=…` 但仍无 IP，回传紧跟其后的 20 行（DHCP 阶段）。
+
+## 15. t191：喂狗任务没建成导致每 44 s 复位 + 连接超时 15 s 太短
+
+> 现场（镜像 `fcbd2d73`，即 t190）：Wi-Fi 已经通了（`resident set timeout` 计数 **0**，抓到完整成功链
+> `AP BSSID → STA 已连接 → 默认网卡 → 联网重试成功 IP=192.168.137.6 → 取时成功 → IoTDA 已连接`），
+> 但板子**每 44 s 复位一次**，联网刚成功就被打断。
+
+### 15.1 两个问题的根因
+
+**① 复位循环**：开机日志里同时出现
+
+```
+[WDT] 已启动 timeout=44s（喂狗周期 5000 ms）
+[gw] ⚠ 喂狗任务创建失败（30 s 后会被看门狗复位（请检查任务数/内存））
+```
+
+旧代码的顺序是「**先开狗、后建 `gwWdt` 任务**」。`LOS_TaskCreate` 一旦失败，狗已经上岗却没人喂，
+于是 44 s 必然复位。这不是"看门狗太灵敏"，是**我们自己把顺序写反了**。
+
+- 任务数不是瓶颈：`device/rockchip/rk2206/sdk_liteos/include/target_config.h:50` 的
+  `LOSCFG_BASE_CORE_TSK_LIMIT = 63`，我们只有 6 个应用任务；
+- 真因要靠 ret 码定位（`LOS_ERRNO_TSK_NO_MEMORY` = 栈从系统堆里分配失败；`LOS_ERRNO_TSK_CNT_MAX` = 任务数满）。
+  旧代码只打了一句中文，没有 ret 码，等于把唯一的线索丢了。
+
+**② 15 s 太短**：成功那一次从 `[wifi_api_internal:D]AP BSSID (…)` 到 `[NET] STA 已连接 ssid=…` 明显超过 15 s，
+于是被 `[NET] 连接 15200 ms 无结果` 判成超时，接着触发重试——而重试又会把驱动往 recovery 上推，越试越坏。
+
+### 15.2 本版改了什么
+
+| 文件 | 改动 |
+|---|---|
+| `rk2206-gateway/src/gw_config.h` | `GW_WATCHDOG_ENABLE` **1 → 0**（默认关掉；t190 已经把狗要守的死循环拆掉，狗现在是负资产）；`GW_WIFI_CONNECT_TIMEOUT_MS` **15000 → 35000**（注释写清实测依据） |
+| `rk2206-gateway/src/gw_main.c` | 顺序改成「**先建 `gwWdt` → 建成才 `gw_plat_wdt_start()`**」；失败打印 `ret=0x%08x`，并且**建不起来就绝不启动看门狗**（最坏是"没有狗"，不是"复位循环"） |
+| `rk2206-gateway/src/gw_net.c` | 超时文案改成 `[NET] 连接 %u ms 无结果（上限 %u ms）：worker 卡在 SDK 里（recovery），命令先返回`——上限跟着宏走，不再把 15200 写死 |
+| `rk2206-gateway/test/gw_selftest.c` | 新增 5 条断言：超时 = 35000 ms、必须 >15 s、必须 <180 s 退避、轮询 <总超时、看门狗默认 0 |
+
+`GW_BOOT_CONNECT=0`（开机不自动联网）与 t190 的 `FlashSetResidentFlag(0)` 都**没动**。
+
+### 15.3 刷完后照这几行判
+
+| 你看到的 | 含义 |
+|---|---|
+| 开机日志里**没有** `[WDT] 已启动`、也没有 `喂狗任务` 任何一行 | 本版默认关狗（`GW_WATCHDOG_ENABLE=0`，整段编译期消失）——**正常** |
+| 板子连续运行 ≥ 3 分钟不再自己重启 | 复位循环已消除（判据就是这一条） |
+| `[NET] STA 已连接 ssid=<你的热点>` → `[gw] 联网重试成功（第 N 次）：IP=192.168.137.x` | Wi-Fi/DHCP 正常 |
+| 若日志出现 `[NET] 连接 35200 ms 无结果（上限 35000 ms）…` | 那是 worker 真的卡在 SDK 里（超过 35 s 没回来），不是"15 s 太短"误判；此时等 180 s 退避后再试，或 `wifi off` 后重来 |
+
+> 想临时重新打开看门狗：`gw_config.h` 把 `GW_WATCHDOG_ENABLE` 改 1 重编，然后**必须**在开机日志里同时看到
+> `任务已建 gwWdt ret=0x0` 与 `[WDT] 已启动 timeout=44s` 两行；只看到后者说明喂狗任务又没建成 ——
+> 本版已保证这种情况下不会开狗，但也就没有看门狗保护了。
+
+### 15.4 本版镜像指纹（只当次；正式口径 = 体积 + 提交号）
+
+| 项 | 值 |
+|---|---|
+| 体积 | `2097152` B（恒） |
+| md5（当次） | `600a067787c1bebca525072a5853dee0` |
+| sha256（当次） | `9a07a5410d495d455663587c25df784f931aa01197cf826e082c98e8b6206b46` |
+| liteos.elf | `1017096` B |
+| SDK rev | `35339be8fb6b59871eed793fdce0472352398d94` |
+| 锚点（`grep -a -o -F` 计数） | `[WDT] 已启动`=**0**、`喂狗任务未建成`=**0**（证明 `GW_WATCHDOG_ENABLE=0` 真的编译期整段消失）、`无结果（上限 %u ms）`=1、`已解除 Flash 常驻钩子`=1 |
+
+> 「`[WDT] 已启动` = 0」就是本版最硬的验证：整条看门狗路径不在镜像里，不可能再出现"狗开着没人喂"的复位循环。
+> RK2206 镜像跨次不可复现（`__TIME__` 派生 10 字节差异，见 §12.6），md5 只用于"确认你刷的是这一版"。

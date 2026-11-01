@@ -305,16 +305,18 @@
  * 9. 串口 `wifi` 命令（t136）：免按键配网
  *    现场没有外接配网按键，原来只能长按 GPIO0_PA3 进 SoftAP，
  *    所以给调试串口一条命令直接写家庭 Wi-Fi。数值都是"人机交互"口径：
- *    - 15 s：配网流程默认 30 s，但串口命令是人在等、失败还能重敲；
- *      15 s 覆盖 DHCP 慢的常见情况，又不至于让串口看起来卡死。
+ *    - 35 s：**现场实测（2026-11-01 夜，镜像 fcbd2d73）成功那一次从
+ *      `[wifi_api_internal:D]AP BSSID …` 到 `[NET] STA 已连接 ssid=…` 明显超过 15 s**，
+ *      原来 15 s 的上限会把"本来能连上"的那次判成超时（日志 `连接 15200 ms 无结果`），
+ *      再触发一次重试反而把驱动往 recovery 上推。35 s 仍远小于 180 s 退避窗口。
  *    - 100 ms：与 gw_net_sta_poll 的"3 s 后才认认证失败"节拍配套
  *      （GW_NET_AUTH_FAIL_POLLS = 30）。
  * ------------------------------------------------------------------ */
-#define GW_WIFI_CONNECT_TIMEOUT_MS  15000u  /* wifi set 同步等连接结果的上限 */
+#define GW_WIFI_CONNECT_TIMEOUT_MS  35000u  /* wifi set 同步等连接结果的上限（t191：15 s → 35 s） */
 #define GW_WIFI_CONNECT_POLL_MS     100u    /* 阻塞等待时每次轮询的间隔 */
 
 /* ------------------------------------------------------------------ *
- * 9.1 Wi-Fi 自愈：硬件看门狗 + 连接退避（t188）
+ * 9.1 Wi-Fi 自愈：硬件看门狗 + 连接退避（t188 / t191 调整）
  * ------------------------------------------------------------------ */
 /* 现场致命故障：调用 Wi-Fi 连接后 SDK 的 wifi_send_cmd 等固件事件**没有超时**，
  * 固件不回就进 wifi_recovery_process 死循环，gwConn 永久卡在 SDK 里；此后连
@@ -323,7 +325,21 @@
  *   ② 退避让「驱动已经坏了」时别再往上加压，给 `wifi off` 和人工介入留窗口。
  * 注意 ① 只覆盖调度停摆：gwConn 卡在 SDK 里而 gwWdt 还在跑时，狗照样被喂 ——
  * 那条路靠 ② 与 `wifi off`（WifiDisconnect 优先），不靠复位。 */
-#define GW_WATCHDOG_ENABLE          1       /* 0 = 编译期整段去掉（对齐"关掉就不再碰狗"） */
+/* ---- t191：默认**关掉**看门狗（现场证据） ----
+ * 刷 fcbd2d73（t190）后实测：`[WDT] 已启动 timeout=44s` 起来了，但紧接着
+ *   `[gw] ⚠ 喂狗任务创建失败`
+ * —— 没有任务喂狗，狗就每 44 s 把板子复位一次，联网刚成功就被打断（t190 之前那个
+ * "wifi_send_cmd 死循环"已经被 FlashSetResidentFlag(0) 拆掉，狗的主要用途随之消失）。
+ * 复现条件已写入施工单 §15：只要 GW_WATCHDOG_ENABLE=1 且 gwWdt 没建起来就必现。
+ *
+ * 所以默认置 0（编译期整段去掉，连 [WDT] 那行都不会有）。要重新启用：
+ *   ① 把下面改成 1；② 看日志里 `[WDT] 已启动` 与 `任务已建 gwWdt ret=0x…` 两行都在；
+ *   ③ 若 `任务已建 gwWdt` 的 ret 非 0，本版已经做到"建不起来就绝不启动狗"，
+ *      板子会停在"没有看门狗"的状态而不是复位循环。
+ * 任务数上限不是瓶颈：`device/rockchip/rk2206/sdk_liteos/include/target_config.h:50`
+ * 的 LOSCFG_BASE_CORE_TSK_LIMIT = 63；失败原因要靠 ret 码定位（LOS_ERRNO_TSK_NO_MEMORY
+ * 通常来自 PSRAM 堆不够/碎片，而不是"任务数满了"）。 */
+#define GW_WATCHDOG_ENABLE          0       /* 0 = 编译期整段去掉（对齐"关掉就不再碰狗"）；t191 默认 0 */
 #define GW_WDT_TIMEOUT_S            30u     /* 请求 30 s；驱动按 1.398 s×2^n 取档，实际以回读为准 */
 #define GW_WDT_FEED_MS              5000u   /* 喂狗周期：30 s 档下留 6 次机会 */
 #define GW_WDT_TASK_STACK           2048u

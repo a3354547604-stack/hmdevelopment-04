@@ -2358,16 +2358,28 @@ static void gw_main_entry(void)
      * 单键遥控只有一路输出，用户不必装万用表就能判断"模块和线到底通没通"。 */
     (void)osCmdReg(CMD_TYPE_STD, "433", XARGS, (CMD_CBK_FUNC)gw_433_shell_cmd);
 
-    /* 9) 看门狗（t188）：先开狗、后建任务 —— 顺序反了就成了"卡住之前没保护"。
-     * 开关在 gw_config.h 的 GW_WATCHDOG_ENABLE（置 0 时下面的代码编译期整段消失）。 */
+    /* 9) 看门狗（t188 / t191 修顺序）。
+     *
+     * t191 现场：旧顺序是"先开狗 → 再建 gwWdt"，而 gwWdt 这次没建起来（`LOS_TaskCreate`
+     * 返回非 0），于是**狗开着却没人喂**，板子每 44 s 复位一次，联网刚成功就被打断。
+     * 顺序必须是"先确认喂狗任务活着，再让狗上岗"——建不起来就干脆不开狗，
+     * 这样最坏情况是"没有看门狗"，而不是"复位循环"。
+     *
+     * 开关在 gw_config.h 的 GW_WATCHDOG_ENABLE（t191 起默认 0；置 0 时整段编译期消失）。 */
 #if GW_WATCHDOG_ENABLE
-    if (gw_plat_wdt_start() == 0) {
-        if (task_create(wdt_task, NULL, GW_WDT_TASK_STACK, GW_WDT_TASK_PRIO, "gwWdt") != LOS_OK) {
-            printf("[%s] ⚠ 喂狗任务创建失败：%u s 后会被看门狗复位（请检查任务数/内存）\n",
-                   GW_LOG_TAG, (unsigned)GW_WDT_TIMEOUT_S);
+    {
+        UINT32 wdt_ret = task_create(wdt_task, NULL, GW_WDT_TASK_STACK, GW_WDT_TASK_PRIO, "gwWdt");
+        if (wdt_ret != LOS_OK) {
+            /* 打印 ret 码而不是只打一句中文：LOS_ERRNO_TSK_NO_MEMORY(栈分配失败/堆耗尽)、
+             * LOS_ERRNO_TSK_CNT_MAX(任务数满，本 SDK 上限 63，见 target_config.h:50)
+             * 是两种完全不同的病因，没有 ret 码只能猜。 */
+            printf("[%s] ⚠ 喂狗任务未建成：ret=0x%08x（不启动看门狗，避免无人喂狗导致复位循环）\n",
+                   GW_LOG_TAG, (unsigned)wdt_ret);
+        } else if (gw_plat_wdt_start() == 0) {
+            printf("[%s] 任务已建 gwWdt ret=0x0，看门狗上岗\n", GW_LOG_TAG);
+        } else {
+            printf("[%s] ⚠ 看门狗未能启用：卡死将无法自愈（只能断电）\n", GW_LOG_TAG);
         }
-    } else {
-        printf("[%s] ⚠ 看门狗未能启用：卡死将无法自愈（只能断电）\n", GW_LOG_TAG);
     }
 #endif
 
