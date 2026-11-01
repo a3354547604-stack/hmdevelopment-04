@@ -33,6 +33,7 @@ import { ProvisionStatus, ScanCache, WifiResult, WifiSubmit } from '../ets/model
 import { AppConfig } from '../ets/common/AppConfig';
 import { RuntimeConfig } from '../ets/common/RuntimeConfig';
 import { UserCopy } from '../ets/common/UserCopy';
+import { isRoomNodeType, onlineRoomCount, roomNodes } from '../ets/model/Types';
 import { KEY_AUTH_SEQ, KEY_USERNAME } from '../ets/service/SessionStore';
 
 /**
@@ -787,6 +788,57 @@ class Runner {
     });
 
     await this.bindCases();
+    this.offlineAndHubCases();
+  }
+
+  /**
+   * t186：离线不再宣称紧急 + 汇聚不算房间。
+   *
+   * 这两个是**展示判据**，所以判据本身被提到 `UserCopy.homeHeadline` 与
+   * `Types.roomNodes/onlineRoomCount` 里，这里直接测同一份函数——
+   * 页面只是调用方，不会出现「自检过了一套、页面跑的是另一套」。
+   */
+  private offlineAndHubCases(): void {
+    // #54 离线时只报「主机联系不上」，在线路径不误伤
+    const offLine: string = UserCopy.homeHeadline(false, 2, 3);
+    const onEmergency: string = UserCopy.homeHeadline(true, 2, 3);
+    const onPending: string = UserCopy.homeHeadline(true, 0, 3);
+    const onWell: string = UserCopy.homeHeadline(true, 0, 0);
+    const ok54: boolean = offLine === UserCopy.HOME_BOX_LOST
+      && offLine.indexOf(UserCopy.HOME_EMERGENCY) < 0
+      && onEmergency === UserCopy.HOME_EMERGENCY
+      && onPending.indexOf('3 条提醒') > 0
+      && onWell === UserCopy.HOME_ALL_WELL;
+    this.cases.push({
+      seq: 54, name: '离线只报主机联系不上、不报紧急（t186）', contract: '§6.7',
+      ok: ok54, code: 0, httpStatus: 200,
+      detail: `offline(alarm=2,pending=3)=「${offLine}」; 在线(alarm=2)=「${onEmergency}」; `
+        + `在线(pending=3)=「${onPending}」; 在线(空)=「${onWell}」`
+    });
+
+    // #55 含 hub 的 nodes：房间数与在线数只算真实房间
+    const mk = (sn: string, type: string, location: string, online: boolean): NodeItem => {
+      const n: NodeItem = {
+        sn, type, location, online, last_seen: 1793000000000
+      };
+      return n;
+    };
+    const nodes: NodeItem[] = [
+      mk('H1', 'hub', '客厅', true),
+      mk('M1', 'gas', '厨房', true),
+      mk('M2', 'fall', '卧室', true),
+      mk('M3', 'door', '门厅', false)
+    ];
+    const rooms: NodeItem[] = roomNodes(nodes);
+    const roomsOnline: number = onlineRoomCount(nodes);
+    const ok55: boolean = nodes.length === 4 && rooms.length === 3
+      && roomsOnline === 2 && !isRoomNodeType('hub') && isRoomNodeType('door');
+    this.cases.push({
+      seq: 55, name: '汇聚 H1 不算房间：4 条 nodes → 3 房间 2 在线（t186）', contract: '§6.7',
+      ok: ok55, code: 0, httpStatus: 200,
+      detail: `nodes=${nodes.length}（含 hub/H1）→ roomNodes=${rooms.length} `
+        + `[${rooms.map((n: NodeItem) => n.sn).join(',')}]、在线房间=${roomsOnline}；isRoomNodeType('hub')=${isRoomNodeType('hub')}`
+    });
   }
 
   /** t181：绑定码三条路径 + 错误码人话（拆成方法，run() 只负责调用）。 */

@@ -127,6 +127,48 @@ export interface NodeItem {
   battery?: number;
 }
 
+/**
+ * 房间行只画这四类节点（t186）。
+ *
+ * 为什么要有白名单：现场截图里「H1 汇聚」被当成一个房间画了出来
+ * （`location=客厅`、`type=hub`），于是首页写着「4 个节点 · 4 个在线」，
+ * 而真实房间只有厨房/卧室/门厅三个。汇聚是所有房间的**上游**，不是房间，
+ * 混进房间格会同时错两处：房间数虚高、掉线判断的基数也错。
+ */
+export const ROOM_NODE_TYPES: string[] = ['gas', 'fall', 'door', 'presence'];
+
+/** 这个 type 是不是房间级传感器（hub / gateway 等上游设备返回 false）。 */
+export function isRoomNodeType(type: string): boolean {
+  for (let i = 0; i < ROOM_NODE_TYPES.length; i++) {
+    if (ROOM_NODE_TYPES[i] === type) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** 只保留房间级节点，保持接口原始顺序（汇聚/网关被过滤掉）。 */
+export function roomNodes(nodes: NodeItem[]): NodeItem[] {
+  const out: NodeItem[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    if (isRoomNodeType(nodes[i].type)) {
+      out.push(nodes[i]);
+    }
+  }
+  return out;
+}
+
+/** 房间级节点里在线的个数（「N 个节点 · M 个在线」的 M）。 */
+export function onlineRoomCount(nodes: NodeItem[]): number {
+  let n: number = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    if (isRoomNodeType(nodes[i].type) && nodes[i].online) {
+      n = n + 1;
+    }
+  }
+  return n;
+}
+
 export interface DeviceStatus {
   device_id: number;
   online: boolean;

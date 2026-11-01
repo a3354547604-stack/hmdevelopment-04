@@ -366,6 +366,26 @@ export class UserCopy {
     return UserCopy.GAS_OK;
   }
 
+  /**
+   * 大字卡结论（t186，唯一真源：页面与自检共用一份判据）。
+   *
+   * 离线优先于一切：`online=false` 时服务器那份 `alarm_state` 只可能是**离线前的缓存**，
+   * 继续照着它喊「有紧急情况」，会同时出现「有紧急情况」和「主机联系不上」两张卡，
+   * 家属不知道该信哪一张。所以离线只报一件事：主机联系不上。
+   */
+  static homeHeadline(online: boolean, alarmState: number, pending: number): string {
+    if (!online) {
+      return UserCopy.HOME_BOX_LOST;
+    }
+    if (alarmState >= 2) {
+      return UserCopy.HOME_EMERGENCY;
+    }
+    if (pending > 0) {
+      return '爸妈那边有 ' + pending.toString() + ' 条提醒';
+    }
+    return UserCopy.HOME_ALL_WELL;
+  }
+
   /** 地址标题右侧的小字：`3 个节点 · 2 个在线`——规模与掉线数一眼可见。 */
   static siteSummary(total: number, online: number): string {
     return total.toString() + ' 个节点 · ' + online.toString() + ' 个在线';

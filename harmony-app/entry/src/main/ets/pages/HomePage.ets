@@ -19,7 +19,8 @@ import { UserCopy } from '../common/UserCopy';
 import { PrimaryButton } from '../components/CommonViews';
 import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
 import {
-  ActivityReport, AlertItem, AlertListResult, DeviceStatus, GatewayProperties, HourlyBucket, NodeItem
+  ActivityReport, AlertItem, AlertListResult, DeviceStatus, GatewayProperties, HourlyBucket, NodeItem,
+  roomNodes
 } from '../model/Types';
 import { ServiceHub } from '../service/ServiceHub';
 import { KEY_APP_ACTIVE, SessionStore } from '../service/SessionStore';
@@ -144,7 +145,8 @@ export struct HomePage {
 
   // ------------------------------------------------------------ 大字卡（结论）
   private hasEmergency(): boolean {
-    return this.state.status.alarm_state >= 2;
+    // 离线时 alarm_state 是离线前的缓存值，不能拿它当「现在很危险」的依据（t186）
+    return this.state.status.online && this.state.status.alarm_state >= 2;
   }
 
   private pending(): number {
@@ -152,17 +154,16 @@ export struct HomePage {
   }
 
   private headline(): string {
-    if (this.hasEmergency()) {
-      return UserCopy.HOME_EMERGENCY;
-    }
-    if (this.pending() > 0) {
-      return '爸妈那边有 ' + this.pending().toString() + ' 条提醒';
-    }
-    return UserCopy.HOME_ALL_WELL;
+    // 判据只有一份（UserCopy.homeHeadline）：离线时绝不宣称紧急，见 t186
+    return UserCopy.homeHeadline(this.state.status.online, this.state.status.alarm_state, this.pending());
   }
 
   /** 大字卡底色：用级别「深色」变体，白字才能过 WCAG AA（评审 ④）。 */
   private headlineColor(): Resource {
+    if (!this.state.status.online) {
+      // 中性灰：离线是「不知道」，不是「危险」——红色会让人以为家里正着火
+      return AppTheme.COLOR_TEXT_SECONDARY;
+    }
     if (this.hasEmergency()) {
       return AppTheme.COLOR_LEVEL2_DEEP;
     }
@@ -173,6 +174,9 @@ export struct HomePage {
   }
 
   private headlineIcon(): Resource {
+    if (!this.state.status.online) {
+      return $r('app.media.ic_status_message');
+    }
     if (this.hasEmergency()) {
       return $r('app.media.ic_status_warning');
     }
@@ -199,9 +203,8 @@ export struct HomePage {
     if (this.state.errorText.length > 0) {
       return UserCopy.HOME_NET_WEAK;
     }
-    if (!this.state.status.online) {
-      return UserCopy.HOME_BOX_LOST;
-    }
+    // 离线那句由大字卡承担（t186）；这条横幅只在「本机网络有问题」时出现，
+    // 否则同一句话会在一屏里出现两遍。
     return '';
   }
 
@@ -222,7 +225,8 @@ export struct HomePage {
   /** 按地址归组，保持节点在接口里的原始顺序（家在前、老家在后）。 */
   private siteGroups(): SiteGroup[] {
     const out: SiteGroup[] = [];
-    const nodes: NodeItem[] = this.state.status.nodes;
+    // 只把房间级节点画进格子：汇聚（hub）/网关不是房间（t186）
+    const nodes: NodeItem[] = roomNodes(this.state.status.nodes);
     for (let i = 0; i < nodes.length; i++) {
       const name: string = this.siteOf(nodes[i]);
       let hit: SiteGroup | undefined = undefined;
@@ -289,7 +293,8 @@ export struct HomePage {
 
   /** 右侧读数；节点掉线时统一显示「联系不上」，比显示旧读数安全。 */
   private sensorValue(n: NodeItem): string {
-    if (!n.online) {
+    // 主机（网关）离线时，房间行的读数是离线前的缓存值——替它背书等于撒谎（t186）
+    if (!this.state.status.online || !n.online) {
       return UserCopy.NODE_LOST;
     }
     const type: string = n.type;
@@ -316,8 +321,9 @@ export struct HomePage {
   }
 
   private sensorColor(n: NodeItem): Resource {
-    if (!n.online) {
-      return AppTheme.COLOR_LEVEL2;
+    // 联系不上就是联系不上：不染级别色，避免「灰色的红字」被读成异常告警（t186）
+    if (!this.state.status.online || !n.online) {
+      return AppTheme.COLOR_TEXT_SECONDARY;
     }
     const type: string = n.type;
     if (type === 'gas') {
