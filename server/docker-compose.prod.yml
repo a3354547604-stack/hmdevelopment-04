@@ -78,6 +78,10 @@ services:
       # 厂商侧出厂注册（t152）：可选。**留空 = 接口整体 404**（不暴露存在性）；
       # 这里刻意**不做成必填**——已有的生产部署不该因为多一条厂线接口而起不来。
       PRODUCT_KEY: ${PRODUCT_KEY:-}
+      # 只读运维后台（P1，实施计划 §7.5）：可选，**留空 = /admin 整体 404**。
+      # 刻意不做成必填：没配就当作没这个功能，不会让已有部署起不来。
+      # 不进公网：nginx 的 `location / { return 404; }` 只放通 /api/，访问走 SSH 隧道。
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       IOTDA_DISPATCH_MODE: ${IOTDA_DISPATCH_MODE:-mock}
       IOTDA_ENDPOINT: ${IOTDA_ENDPOINT:-}
       IOTDA_PROJECT_ID: ${IOTDA_PROJECT_ID:-}

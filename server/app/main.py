@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import db, middleware
+from . import admin, db, middleware
 from .config import settings
 from .errors import ApiError, ok
 from .routers import alerts, auth, devices, push, reports, vendor, webhook
@@ -147,6 +147,9 @@ app.include_router(alerts.router)
 app.include_router(reports.router)
 app.include_router(push.router)
 app.include_router(webhook.router)
+# 只读运维后台（实施计划 §7.5）：全部 include_in_schema=False，不进 /docs 与 /openapi.json；
+# 未配置 ADMIN_PASSWORD 时整体 404，且 nginx 只放通 /api/ ⇒ 天然不可达公网。
+app.include_router(admin.router)
 
 
 @app.get("/", include_in_schema=False)

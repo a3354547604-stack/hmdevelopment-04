@@ -1062,3 +1062,35 @@ curl -s http://127.0.0.1:3000/api/health        # {"code":0,... "db":"ok"}
 - 脚本用 `bash tools/db-backup.sh` 调用（仓库里模式位 644，克隆后没有执行权限）；备份产物在 `server/backups/`，默认留 14 份。
 - 硬约束：只动本项目容器；不 `docker system prune`、不改系统自带 nginx、不用 host 网络。
 - 真实公网部署需要用户确认（Q8）后再做；本机只做本地实测。
+
+## 13. 只读运维后台 `/admin`（P1，实施计划 §7.5）
+
+给运维/演示用的**只读**查询页：数据新鲜度、网关与节点在线、最新属性快照、告警流水。**只有 GET**，不做下发、改阈值、注入演示。
+
+```bash
+# 1) 打开开关（留空 = 所有 /admin 路由整体 404，不暴露存在性）
+echo "ADMIN_PASSWORD=$(openssl rand -hex 16)" >> server/.env
+docker compose up -d                            # 让 api 读到新环境变量
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/admin   # 200 = 登录页
+```
+
+**它不进公网**：生产 nginx 的 `location / { return 404; }`（[`deploy/nginx.prod.conf`](deploy/nginx.prod.conf)）只放通 `/api/`，`/admin` 与 `/docs` 一样是 404。要看线上数据，用 SSH 隧道把云机上的 api 端口拉到本地：
+
+```bash
+ssh -L 8080:127.0.0.1:3000 <user>@<云机>        # 保持这个窗口开着
+# 浏览器打开 http://127.0.0.1:8080/admin ，输 ADMIN_PASSWORD
+# 投屏/看板：http://127.0.0.1:8080/admin?fullscreen=1
+```
+
+| 路由 | 方法 | 说明 |
+|---|---|---|
+| `/admin` | GET | 未登录返回登录页；已登录返回看板（内联 HTML/CSS/JS，无 CDN，5 s 自动刷新） |
+| `/admin/login` | POST | 表单字段 `password`；成功 303 → `/admin` 并下发 `hm_admin` cookie（HttpOnly + SameSite=Strict + path=/admin） |
+| `/admin/logout` | POST | 删 cookie → 303 |
+| `/admin/data` | GET | 看板取数（JSON）；未登录 401 |
+
+- 口令只存在服务端环境变量里，cookie 存的是 `sha256("hmprogram-admin-v1:" + ADMIN_PASSWORD)`；**改口令即让所有已登录浏览器失效**，服务端不存会话表。
+- 不在 `openapi.json` 里（`include_in_schema=False`），`/docs` 上也看不到。
+- `nodes.online` 是「节点最后一次上报时说的状态」，网关离线期间它不会变 0；页面按「网关离线 → 节点状态未知」显示，节点在线数只统计在线网关下的节点，避免出现「网关 0/2、节点 8/8」这种自相矛盾的看板。
+- 验证（本机实测，2026-11-01）：`/admin`→200、未登录 `/admin/data`→401、错口令→401、对口令→303、登录后 `/admin/data`→200、`curl /openapi.json | grep -c admin`→0。
+
