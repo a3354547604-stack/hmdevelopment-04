@@ -14,3 +14,4 @@ local.properties
 # IDE 工程配置与预览构建产物：本机生成物，不入库（2026-11-01 停止跟踪，文件仍在磁盘）
 /.idea/
 /entry/.preview/
+local.properties.wsl

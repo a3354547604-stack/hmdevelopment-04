@@ -46,7 +46,14 @@ fail() {
 # file: 依赖原样交给 npm/pnpm install），所以模板里用 @TOOLCHAIN@ 占位、由本脚本替换。
 HVIGOR_CFG="$REPO/hvigor/hvigor-config.json5"
 HVIGOR_TPL="$REPO/hvigor/hvigor-config.template.json5"
-if grep -q '@TOOLCHAIN@' "$HVIGOR_CFG" 2>/dev/null || [ ! -f "$HVIGOR_CFG" ]; then
+# 判据：文件里有没有指向**本机**工具链的 file: 路径。不能只判 '@TOOLCHAIN@' 是否残留——
+# 同一份工程还会被 Windows 侧 DevEco Studio 打开，它会把这份文件写成
+#   file:C:/Program Files/Huawei/DevEco Studio/tools/hvigor/hvigor（DevEco 自带 hvigor）
+# 那种写法在 WSL 里同样是死链，只判占位符会漏掉它，接着 WSL 构建就报
+#   00308003 ENOENT .../node_modules/@ohos/hvigor/bin/hvigor.js
+# 反过来，DevEco 用 Linux 路径也一样会死链（hvigorw 把 file:/home/... 拼成 C:\home\...）。
+# 所以：谁口径不对就按模板重写谁那一侧要用的文件；已经是本机口径就跳过（幂等）。
+if ! grep -qF "$HOME/harmony-toolchain" "$HVIGOR_CFG" 2>/dev/null; then
   sed "s|@TOOLCHAIN@|$HOME/harmony-toolchain|g" "$HVIGOR_TPL" > "$HVIGOR_CFG" \
     && echo "[setup] 已由模板物化 hvigor-config.json5（工具链：$HOME/harmony-toolchain）"
 fi
@@ -55,9 +62,33 @@ source "$HOME/harmony-toolchain/env.sh" >/dev/null 2>&1
 # 工具链的 SDK 是扁平布局，hvigor 期望 sdk/<apiVersion>/<component>（见 ~/harmony-toolchain/BUILD-NOTES.md 坑 ③）
 export OHOS_BASE_SDK_HOME="$HOME/harmony-toolchain/clt/command-line-tools/sdk"
 
+# local.properties 两边共用：DevEco（Windows）写 C:/Program Files/...，WSL 构建要写
+# /home/.../harmony-toolchain/clt/command-line-tools/sdk。hvigor 优先读 local.properties，
+# 所以在**构建期间**临时改写成 WSL 口径，结束（restore_probe）再按原字节还原。
+# 不在仓库里放机器相关的 .wsl 副本：口径由 $OHOS_BASE_SDK_HOME 现算，换机器也不会错。
+LP="$REPO/local.properties"
+LP_BAK="$(mktemp /tmp/hm-local-properties.XXXXXX)"
+LP_SWAPPED=0
+if [ -f "$LP" ]; then
+  cp -f "$LP" "$LP_BAK" 2>/dev/null && LP_SWAPPED=1
+fi
+printf 'sdk.dir=%s\n' "$OHOS_BASE_SDK_HOME" > "$LP"
+
+# .hvigor/ 是 Windows 版 DevEco 与 WSL 构建共用的缓存目录：DevEco 只要在里面写过
+# C:/Program Files/Huawei/...（sync/fileCache.json、outputs/build-logs、dependencyMap …都可能），
+# WSL 侧 hvigor 就会拿它当 sdk.dir 校验，直接报「Invalid value of 'sdk.dir'」并 1 s 秒失败。
+# 只查 fileCache.json 不够（实测仍漏），这里递归查整个 .hvigor；命中就整目录清掉重建。
+if [ -d "$REPO/.hvigor" ] && grep -rqIl 'C:/Program Files/Huawei' "$REPO/.hvigor" 2>/dev/null; then
+  rm -rf "$REPO/.hvigor" "$REPO/entry/build"
+  echo "[setup] 检测到 DevEco(Windows) 的 .hvigor 缓存，已清理（两侧缓存不可共用）"
+fi
+
 restore_probe() {
   if [ -f "$PROBE_FILE.bak" ]; then
     mv -f "$PROBE_FILE.bak" "$PROBE_FILE"
+  fi
+  if [ "$LP_SWAPPED" = "1" ] && [ -f "$LP_BAK" ]; then
+    cp -f "$LP_BAK" "$LP" && rm -f "$LP_BAK"
   fi
 }
 trap restore_probe EXIT
