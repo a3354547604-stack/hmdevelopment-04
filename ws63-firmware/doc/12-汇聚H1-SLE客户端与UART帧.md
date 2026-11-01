@@ -789,7 +789,48 @@ tools/build-lock.sh python3 tools/hub-selftest.py     # 总判定 PASS
 
 ### 15.5 未做 / 待 PM 定
 
-- **当前 `out/HUB_HUB.fwpkg`（t176 产物，1476008 B / `77d638a3…`）钩子是 `ON` + `SN_LIST "M1,M2"`**，
-  与 t173 同一条遗留：**正式送审前必须另打一份 `HUB_TEST_PREBIND_ON 0` 的包**（本卡口径是"交付含
-  md5+体积"，没把它悄悄关掉换掉产物）。
-- `docs/执行/上板联调施工单.md` 仍写着旧宏 `HUB_TEST_PREBIND_SN`（照做编译不过），**不在本卡 inScope，未改**。
+- **台架包的钩子是 `ON` + `SN_LIST "M1,M2"`**：它只能用于台架联调（会把汇聚锁死只认 M1/M2 两块预绑定
+  节点）。送审/演示请改用 §15.6 的 `HUB_HUB_PROD.fwpkg`。
+- ~~`docs/执行/上板联调施工单.md` 仍写着旧宏 `HUB_TEST_PREBIND_SN`（照做编译不过）~~ ——
+  **（t178 更正）此条 t176 写错了，不是事实**：施工单 `:173-175` 用的已是新宏
+  （`HUB_TEST_PREBIND_ON 1` + `HUB_TEST_PREBIND_SN_LIST "M1,M2"`），**无需改动**。
+
+### 15.6 两个包分别什么时候用（t178）
+
+| 产物 | 钩子 | 体积 | md5 | 用在哪 |
+|---|---|---|---|---|
+| `out/HUB_HUB.fwpkg` | `ON` + `"M1,M2"` | 1476008 B | `77d638a3d68fb1a9f137287f1e96dc25` | **台架联调**：两块节点没烧到板上/只想先看汇聚能不能拉起来时用 |
+| `out/HUB_HUB_PROD.fwpkg` | 编译期 `0`（整段预绑定代码不存在） | 1475368 B | `437f8218b17897bf9ed3acc82526c760` | **送审 / 演示 / 任何真机现场**：白名单只由节点真实上报建立 |
+
+两者相差 640 B，差的就是被预处理掉的那段预绑定代码与 `"M1,M2"` 字面量（`sha256`：
+`f4c5677f…e9e0` / `e852e194…58ce`）。
+
+**为什么要有两个包**：`HUB_TEST_PREBIND_ON 1` 会把网关侧白名单预填成 M1/M2 —— 台架方便，但现场若节点
+SN 不是这两个（t176 起节点 SN 是 `M1-3F7A` 这种 die 派生串），预绑定项会变成占位幽灵，**真节点照样被拒**。
+送审包里钩子编掉，白名单只由真实上报建立。
+
+**怎么复现 PROD 包**（`node-build.sh` 的追加参数只来自 `node-targets.txt`，命令行传不了 `-def`，所以走
+"临时改宏 → 编 → 改名 → 改回 → 重编台架包"）：
+
+```bash
+cd <仓库根>
+sed -i 's/^#define HUB_TEST_PREBIND_ON     1$/#define HUB_TEST_PREBIND_ON     0/' ws63-firmware/src/hub_cfg.h
+bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh hub
+cp ws63-firmware/out/HUB_HUB.fwpkg ws63-firmware/out/HUB_HUB_PROD.fwpkg
+sed -i 's/^#define HUB_TEST_PREBIND_ON     0$/#define HUB_TEST_PREBIND_ON     1/' ws63-firmware/src/hub_cfg.h
+bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh hub   # 把台架包编回来
+md5sum ws63-firmware/out/HUB_HUB{,_PROD}.fwpkg   # 应得 77d638a3… 与 437f8218…
+```
+
+`hub_cfg.h` 的默认值**没有改**（仍是 `1`）；t178 只给这两个宏加了 `#ifndef` 守卫，让 `-D` 能覆盖，
+将来若有构建窗口，可改成 `-def=HUB_TEST_PREBIND_ON=0` 直接出 PROD 包，不必再临时改文件。
+
+**PROD 包的证据**（`grep -a -c` 直接数落地镜像里的字符串）：
+
+```
+HUB_HUB.fwpkg       M1,M2=1  prebind=6  whitelist miss=1
+HUB_HUB_PROD.fwpkg  M1,M2=0  prebind=0  whitelist miss=1
+```
+
+`whitelist miss` 两个包都在（它是 §15.3 补的诊断日志，不在 `#if` 里）——说明 PROD 包只是把预绑定那段
+编掉，诊断能力没丢。

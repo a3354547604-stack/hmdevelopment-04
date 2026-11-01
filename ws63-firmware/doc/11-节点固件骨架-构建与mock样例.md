@@ -1077,5 +1077,8 @@ bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh m1 m2 hub
 - **服务端 SN 正则会挡带 `-` 的 SN**：`server/app/services/telemetry.py` 的 `_NODE_SN_RE=^[HM]\d{1,2}$`
   不接受 `M1-3F7A`（本卡不改服务端）。要不要放宽由 PM 定（放宽后要一并考虑数据库长度与索引）。
 - 网关侧 `rk2206-gateway` 是否也有 SN 格式假设（本卡不改网关），需 PM 派单核查。
-- `docs/执行/上板联调施工单.md` 里的旧钩子写法（`HUB_TEST_PREBIND_SN "M2"` 一类）不在本卡 inScope，
-  **未改**；`doc/12` 里的同类简写已顺手改成本卡口径。
+- **（t178 更正）本条 t176 当时写错了，不是事实**：`docs/执行/上板联调施工单.md` 里并**没有**旧宏
+  `HUB_TEST_PREBIND_SN "M2"`；施工单 `:173-175` 用的是新宏（`HUB_TEST_PREBIND_ON 1` +
+  `HUB_TEST_PREBIND_SN_LIST "M1,M2"`），**无需改动**。`doc/12` 里的同类简写是本卡顺手改的口径，属实际改动。
+- 汇聚另有一个**独立产物** `out/HUB_HUB_PROD.fwpkg`（预绑定钩子在编译期关掉的送审包），
+  与台架包的分工、体积/md5、复现命令见 `doc/12` §15.6。

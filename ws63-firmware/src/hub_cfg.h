@@ -139,8 +139,13 @@
  * 解析在 hub_client.c 的 hub_prebind_next() —— 拆成纯函数是为了让 tools/hub-selftest.py
  * 能把它抠出来单独编跑（真行为断言，不是 grep 源码）。
  */
+/* 可被编译器 -D 覆盖（t178）：台架包默认 ON，送审包用 -D 关掉，不改默认值 */
+#ifndef HUB_TEST_PREBIND_ON
 #define HUB_TEST_PREBIND_ON     1
+#endif
+#ifndef HUB_TEST_PREBIND_SN_LIST
 #define HUB_TEST_PREBIND_SN_LIST "M1,M2"
+#endif
 /* 列表最多生效几项：手滑粘一整串时不静默全绑，打一次 WARN 后停。4 = 一个汇聚要挂的节点量级。 */
 #define HUB_TEST_PREBIND_SN_MAX  4u
 
