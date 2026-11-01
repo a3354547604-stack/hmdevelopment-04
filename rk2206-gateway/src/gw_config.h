@@ -312,6 +312,37 @@
  * ------------------------------------------------------------------ */
 #define GW_WIFI_CONNECT_TIMEOUT_MS  15000u  /* wifi set 同步等连接结果的上限 */
 #define GW_WIFI_CONNECT_POLL_MS     100u    /* 阻塞等待时每次轮询的间隔 */
+
+/* ------------------------------------------------------------------ *
+ * 9.1 Wi-Fi 自愈：硬件看门狗 + 连接退避（t188）
+ * ------------------------------------------------------------------ */
+/* 现场致命故障：调用 Wi-Fi 连接后 SDK 的 wifi_send_cmd 等固件事件**没有超时**，
+ * 固件不回就进 wifi_recovery_process 死循环，gwConn 永久卡在 SDK 里；此后连
+ * SetWifiModeOff() 也会卡，整板只能断电。两件事分开治：
+ *   ① 看门狗兜底「任务调度整体停摆」这类真卡死（不断电就复位）；
+ *   ② 退避让「驱动已经坏了」时别再往上加压，给 `wifi off` 和人工介入留窗口。
+ * 注意 ① 只覆盖调度停摆：gwConn 卡在 SDK 里而 gwWdt 还在跑时，狗照样被喂 ——
+ * 那条路靠 ② 与 `wifi off`（WifiDisconnect 优先），不靠复位。 */
+#define GW_WATCHDOG_ENABLE          1       /* 0 = 编译期整段去掉（对齐"关掉就不再碰狗"） */
+#define GW_WDT_TIMEOUT_S            30u     /* 请求 30 s；驱动按 1.398 s×2^n 取档，实际以回读为准 */
+#define GW_WDT_FEED_MS              5000u   /* 喂狗周期：30 s 档下留 6 次机会 */
+#define GW_WDT_TASK_STACK           2048u
+#define GW_WDT_TASK_PRIO            31u     /* 比 gwConn(30) 还低：喂狗绝不影响联网/采集 */
+
+#define GW_NET_FAIL_LIMIT           5u      /* 连续失败多少次后进入退避 */
+#define GW_NET_BACKOFF_MS           180000u /* 退避 180 s（3 分钟）不再触达 SDK */
+
+/* ---- 开机是否自动联网（t188 追加，默认关） ----
+ * 现场事故（2026-11-01 20:28）：用户改了 Wi-Fi 名字后，网关开机就拿 Flash 里的旧 SSID
+ * 发起连接 → SDK 进 recovery 死循环 → 整板静默、COM19 零输出，断电重启还是同一条路，
+ * 等于"开机即砖"。而 SDK 的 ConnectTo 一旦卡死在应用层无法恢复。
+ *
+ * 结论：**开机不主动连**。凭证仍留在 Flash 里，由用户的显式动作触发连接：
+ *   串口 `wifi set ssid=… psk=…` / `wifi net`，或长按配网键开窗用手机配网。
+ * 需要旧行为（开机自动连）时把下面这行改成 1 重编；两次构建的 md5 都会记在施工单里。 */
+#define GW_BOOT_CONNECT             0
+/* 开机不自动联网那一行的原文（施工单 §12 与主机自测都按这个字符串对，别随手改词） */
+#define GW_BOOT_NO_CONNECT_MSG      "开机不自动联网：串口 wifi set / wifi net，或长按配网键"
 #define GW_WIFI_BOOT_SETTLE_MS      8000u   /* 开机等 DHCP（沿用原 net_task 的 8 s） */
 #define GW_WIFI_RETRY_MS            30000u  /* 开机没连上时 net_task 的重试间隔 */
 #define GW_WIFI_RETRY_MAX           6u      /* 最多重试 6 次（≈3 min）后停手：

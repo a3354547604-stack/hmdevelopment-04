@@ -9,6 +9,8 @@
 
 #include <stdint.h>
 
+#include "gw_config.h"   /* t188：退避窗口/失败阈值是编译期常量，和看门狗档位放一起 */
+
 /* SoftAP：psk 非空即 WPA2（RK2206 的 SetHotspotConfig 只把 ssid/psk/channel 交给
  * WifiConfigAP，securityType/band 会被忽略，见网关技术笔记的 CAL-12 记录）。
  * 返回 0 = 成功；-1 = 失败。 */
@@ -58,6 +60,92 @@ int gw_net_radio_off(void);
 int gw_net_radio_on(void);
 /* reason 码 → 一句中文（`wifi set` 与 net_task 共用，避免两处措辞分叉） */
 const char *gw_net_reason_text(const char *reason);
+
+/* ---- t188：连接失败退避（纯逻辑，主机可测；状态语义全在这里，gw_net.c 只喂 rc） ----
+ * 为什么要有：SDK 的连接接口一旦卡进 recovery 就是整板断电级别的事故；连续失败说明
+ * 射频/驱动已经坏了，再连只会再打死一次。退避 N 次后停 3 分钟，期间 gw_net_sta_connect_wait
+ * 直接返回 busy、**完全不碰 SDK**，给现场 `wifi off` 和看门狗留出干净的窗口。
+ * 成功一次就清零，避免"偶发失败攒到 5 次"把正常网络也停掉。 */
+typedef struct {
+    uint8_t  fails;      /* 连续失败次数（成功一次清零） */
+    uint8_t  paused;     /* 1 = 正在退避窗口内 */
+    uint32_t until_ms;   /* 退避到什么时候（调用方时基，ms） */
+    uint32_t pauses;     /* 一共进过几次退避（只增，诊断用） */
+} gw_net_backoff_t;
+
+static inline void gw_net_backoff_init(gw_net_backoff_t *b)
+{
+    if (b == NULL) {
+        return;
+    }
+    b->fails = 0u;
+    b->paused = 0u;
+    b->until_ms = 0u;
+    b->pauses = 0u;
+}
+
+/* 1 = 现在不许连（调用方必须立刻返回、不许触达 SDK）；窗口到期时顺手把 paused 清掉。
+ * 用有符号差值比较：LiteOS 的 ms 计数会回绕（49 天），直接比大小会退避到永远。 */
+static inline int gw_net_backoff_blocked(gw_net_backoff_t *b, uint32_t now_ms)
+{
+    if (b == NULL || b->paused == 0u) {
+        return 0;
+    }
+    if ((int32_t)(now_ms - b->until_ms) < 0) {
+        return 1;
+    }
+    b->paused = 0u;
+    b->until_ms = 0u;
+    return 0;
+}
+
+/* 记一次失败。返回 1 = 这次刚好把连续失败攒到上限并进入退避（调用方据此打印原因）。 */
+static inline int gw_net_backoff_fail(gw_net_backoff_t *b, uint32_t now_ms)
+{
+    if (b == NULL) {
+        return 0;
+    }
+    if (b->fails < 0xFFu) {
+        b->fails++;
+    }
+    if (b->fails >= (uint8_t)GW_NET_FAIL_LIMIT) {
+        b->fails = 0u;                              /* 重新计：下一轮退避要再攒够 N 次 */
+        b->paused = 1u;
+        b->until_ms = now_ms + GW_NET_BACKOFF_MS;
+        b->pauses++;
+        return 1;
+    }
+    return 0;
+}
+
+/* 连上就清零：退避是"连续失败"的判据，偶发失败不该累积到上限。 */
+static inline void gw_net_backoff_ok(gw_net_backoff_t *b)
+{
+    if (b == NULL) {
+        return;
+    }
+    b->fails = 0u;
+    b->paused = 0u;
+    b->until_ms = 0u;
+}
+
+/* `wifi off` 的两条路（t188）。先 WifiDisconnect(0)：它走正常断开流程，不会重新触发
+ * wifi_send_cmd 的重发；返回非 0（含"本来就没连"）再退回 SetWifiModeOff 硬关射频。
+ * 纯逻辑：rc 由 gw_net.c 喂进来，主机侧只测分支选择。 */
+typedef enum {
+    GW_NET_OFF_DISCONNECT = 0,   /* WifiDisconnect 成功 */
+    GW_NET_OFF_HARD       = 1    /* 退回 SetWifiModeOff */
+} gw_net_off_path_t;
+
+static inline gw_net_off_path_t gw_net_off_pick(int disconnect_rc)
+{
+    return (disconnect_rc == 0) ? GW_NET_OFF_DISCONNECT : GW_NET_OFF_HARD;
+}
+
+static inline const char *gw_net_off_path_text(gw_net_off_path_t p)
+{
+    return (p == GW_NET_OFF_DISCONNECT) ? "WifiDisconnect" : "SetWifiModeOff";
+}
 
 /* t168 FIX-1：把 wlan0 装成 lwip 的默认网卡（set_up + set_link_up + set_default）。
  *

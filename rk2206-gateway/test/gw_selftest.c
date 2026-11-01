@@ -29,6 +29,7 @@
 #include "gw_scan.h"      /* t166：扫描重试口径与排版（纯逻辑） */
 #include "gw_uart_guard.h" /* t174：UART 自愈判定（纯逻辑，不碰硬件） */
 #include "gw_timesync.h"  /* t168：pick_epoch 键名白名单 + errno 符号名（纯函数，主机可测） */
+#include "gw_net.h"       /* t188：连接退避 + `wifi off` 分支（纯逻辑，不触达 SDK） */
 #include "cJSON.h"
 
 #include <errno.h>      /* t168：EHOSTUNREACH 等符号名在主机与板端同值 */
@@ -533,6 +534,80 @@ static uint32_t garbage_lcg(uint32_t *st)
 {
     *st = (*st) * 1103515245u + 12345u;
     return (*st >> 16) & 0x7FFFu;
+}
+
+/* ============================== t188：看门狗 + 连接退避 ==============================
+ * 两件事都不碰 SDK：看门狗只验"开关宏与周期口径"，退避/关闭路径验的是纯逻辑状态机。
+ * 板端真复位要上板看（施工单 §看门狗行为），主机侧能证明的是"判定没写错"。 */
+static void test_wdt_and_backoff(void)
+{
+    gw_net_backoff_t b;
+    uint32_t i;
+    uint32_t base = 123456u;
+
+    t_start("t188 开机不自动联网（GW_BOOT_CONNECT 默认 0）");
+    /* 现场事故是"开机拿 Flash 里的旧 SSID 自动连 → SDK 卡死 → 整板静默"。开关必须是 0/1，
+     * 且提示语里必须写明可执行的下一步（否则现场看到一行话也不知道该敲什么）。 */
+    t_ok(GW_BOOT_CONNECT == 0 || GW_BOOT_CONNECT == 1, "GW_BOOT_CONNECT 是 0/1 布尔宏");
+    t_ok(strstr(GW_BOOT_NO_CONNECT_MSG, "wifi set") != NULL,
+         "开机日志原文里写明用 `wifi set` 联网（来自 gw_config.h 的 GW_BOOT_NO_CONNECT_MSG）");
+
+    t_start("t188 看门狗开关与周期口径");
+    /* 开关宏必须是 0/1（写成 2 之类会让 #if 与运行期判断分叉） */
+    t_ok(GW_WATCHDOG_ENABLE == 0 || GW_WATCHDOG_ENABLE == 1, "GW_WATCHDOG_ENABLE 是 0/1 布尔宏");
+    /* 喂狗周期必须明显小于超时：至少留 2 次机会，否则一次调度抖动就复位 */
+    t_ok((GW_WDT_FEED_MS * 2u) < (GW_WDT_TIMEOUT_S * 1000u),
+         "喂狗周期 < 超时的一半（30 s 档下留足 2 次以上机会）");
+    /* 关掉看门狗时头文件必须给空宏，不能留一个"未定义"的调用点 */
+#if GW_WATCHDOG_ENABLE
+    t_ok(1, "GW_WATCHDOG_ENABLE=1：gw_plat_wdt_start/feed 为真实现");
+#else
+    t_ok(gw_plat_wdt_start() == 1, "GW_WATCHDOG_ENABLE=0：start 退化为常量 1（未启用）");
+#endif
+
+    t_start("t188 连续失败退避：累计/触发/到期/清零");
+    gw_net_backoff_init(&b);
+    t_ok(gw_net_backoff_blocked(&b, base) == 0, "初始不拦");
+
+    for (i = 0u; i + 1u < GW_NET_FAIL_LIMIT; i++) {
+        (void)gw_net_backoff_fail(&b, base + i * 1000u);
+    }
+    t_ok(b.fails == (uint8_t)(GW_NET_FAIL_LIMIT - 1u), "失败 4 次只累计，不进退避");
+    t_ok(gw_net_backoff_blocked(&b, base + 4000u) == 0, "失败未到上限时仍允许再连");
+
+    t_ok(gw_net_backoff_fail(&b, base + 5000u) == 1, "第 5 次失败返回 1（调用方据此打印原因）");
+    t_ok(b.paused == 1u && b.fails == 0u, "进入退避：paused=1 且计数归零（下一轮重新攒）");
+    t_ok(b.pauses == 1u, "退避次数 +1（只增，诊断用）");
+    t_ok(gw_net_backoff_blocked(&b, base + 5000u + GW_NET_BACKOFF_MS - 1u) == 1,
+         "窗口内（到期前 1 ms）一律拦：此时 gw_net_sta_connect_wait 直接返回 busy");
+    t_ok(gw_net_backoff_blocked(&b, base + 5000u + GW_NET_BACKOFF_MS) == 0,
+         "到期那一刻放行");
+    t_ok(b.paused == 0u, "放行时把 paused 清掉（不然下一次又拦）");
+
+    /* 成功一次清零：偶发失败不能攒成退避 */
+    gw_net_backoff_init(&b);
+    (void)gw_net_backoff_fail(&b, base);
+    (void)gw_net_backoff_fail(&b, base);
+    gw_net_backoff_ok(&b);
+    t_ok(b.fails == 0u && b.paused == 0u, "连上一次即清零（4 次偶发失败不会变退避）");
+    b.pauses = 7u;
+    (void)gw_net_backoff_fail(&b, base);   /* 一次失败不该动 pauses */
+    t_ok(b.pauses == 7u, "单次失败不动 pauses 计数");
+
+    /* 回绕安全：时基到 0xFFFFFFFF 附近时退避仍然按差值判定，不能"退避到永远" */
+    gw_net_backoff_init(&b);
+    b.fails = (uint8_t)(GW_NET_FAIL_LIMIT - 1u);
+    t_ok(gw_net_backoff_fail(&b, 0xFFFFF000u) == 1, "临近回绕时照样进入退避");
+    t_ok(gw_net_backoff_blocked(&b, 0xFFFFF000u + 1000u) == 1, "回绕后的 now 仍在窗口内");
+    t_ok(gw_net_backoff_blocked(&b, 0xFFFFF000u + GW_NET_BACKOFF_MS + 1u) == 0,
+         "回绕后窗口到期仍能放行（有符号差值比较）");
+
+    t_start("t188 wifi off：WifiDisconnect 优先，失败才退回硬关");
+    t_ok(gw_net_off_pick(0) == GW_NET_OFF_DISCONNECT, "WifiDisconnect 返回 0 → 走软断开");
+    t_ok(gw_net_off_pick(-1) == GW_NET_OFF_HARD, "WifiDisconnect 非 0 → 退回 SetWifiModeOff");
+    t_ok(strcmp(gw_net_off_path_text(GW_NET_OFF_DISCONNECT), "WifiDisconnect") == 0 &&
+         strcmp(gw_net_off_path_text(GW_NET_OFF_HARD), "SetWifiModeOff") == 0,
+         "两条路的日志名分开（现场一眼看出走的是哪条）");
 }
 
 static void test_parser_garbage_flood(void)
@@ -3123,6 +3198,7 @@ int main(void)
     test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */
     test_hw_adc();                   /* t140 ADC 链路：幂等复用 / 已初始化 / 读失败留痕 */
     test_parser();
+    test_wdt_and_backoff();          /* t188：看门狗口径 + 退避 + off 分支 */
     test_parser_garbage_flood();     /* t183：200 KB 垃圾流不断言越界/不失步 */
     test_json_depth_guard();          /* t183：cJSON 递归深度预检 */
     test_crypto_auth();

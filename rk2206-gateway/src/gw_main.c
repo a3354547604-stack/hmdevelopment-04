@@ -1529,6 +1529,20 @@ static void net_wifi_boot(void)
 
     ssid[0] = '\0';
     psk[0] = '\0';
+#if !GW_BOOT_CONNECT
+        /* t188：默认不在开机时发起连接。现场事故是"Flash 里留着旧 SSID，开机就拿它连，
+         * SDK 进 recovery 卡死 → 整板静默、断电重启还是同一条路"，等于开机即砖。
+         * 凭证只用来告诉用户"现在存的是哪个网"，连不连由显式动作决定
+         * （串口 `wifi set` / `wifi net`，或长按配网键开窗用手机配网）。 */
+        if (gw_store_cred_load(ssid, (uint32_t)sizeof(ssid), psk, (uint32_t)sizeof(psk)) == 0) {
+            printf("[%s] %s（Flash 里存的是 ssid=%s，口令不回显）\n", GW_LOG_TAG,
+                   GW_BOOT_NO_CONNECT_MSG, ssid);
+        } else {
+            printf("[%s] %s（Flash 里还没有家庭 Wi-Fi）\n", GW_LOG_TAG, GW_BOOT_NO_CONNECT_MSG);
+        }
+        memset(psk, 0, sizeof(psk));   /* 口令不在栈上多留一秒 */
+        return;
+#endif
     if (gw_store_cred_load(ssid, (uint32_t)sizeof(ssid), psk, (uint32_t)sizeof(psk)) != 0) {
         printf("[%s] 未配置家庭 Wi-Fi：正在等首次配网自动开窗（见稍后的 [PROV] 首次配网 行），"
                "串口 `wifi set ssid=<名称> psk=<口令>` 也可直接配\n", GW_LOG_TAG);
@@ -2195,6 +2209,25 @@ int gw_prov_cmd(const char *line, char *out, uint32_t cap)
  * 每 GW_433_IDLE_PRINT_MS 打一行 pb0=…：用户不装万用表也能确认线接没接上
  * （模块断电/没接线时电平恒定不变，edges 一直是 0）。
  */
+/* ------------------------------ 看门狗喂狗任务（t188） ------------------------------
+ * 为什么单开任务而不是塞进 tick：喂狗必须能证明"整机调度还活着"。塞进 tick 的话，
+ * tick 一旦被某个 SDK 调用拖住，喂狗也跟着停 —— 那就分不清"Wi-Fi 卡了"还是"调度停了"，
+ * 看门狗的价值全没了。这里只做一件事：按 GW_WDT_FEED_MS 喂一口，别的都不碰。
+ *
+ * 为什么优先级最低（31，低于 gwConn 的 30）：喂狗晚几毫秒没关系，绝不能抢
+ * UART(24)/tick(25)/net(26) 的时间片。优先级低也意味着"被饿死"本身就是异常信号 ——
+ * 如果它长期排不上队，狗会咬（这正是我们要的）。 */
+#if GW_WATCHDOG_ENABLE
+static void wdt_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        gw_plat_wdt_feed();
+        LOS_Msleep(GW_WDT_FEED_MS);
+    }
+}
+#endif
+
 static void gw_433_task(void *arg)
 {
     uint32_t now;
@@ -2325,7 +2358,20 @@ static void gw_main_entry(void)
      * 单键遥控只有一路输出，用户不必装万用表就能判断"模块和线到底通没通"。 */
     (void)osCmdReg(CMD_TYPE_STD, "433", XARGS, (CMD_CBK_FUNC)gw_433_shell_cmd);
 
-    /* 9) 任务 */
+    /* 9) 看门狗（t188）：先开狗、后建任务 —— 顺序反了就成了"卡住之前没保护"。
+     * 开关在 gw_config.h 的 GW_WATCHDOG_ENABLE（置 0 时下面的代码编译期整段消失）。 */
+#if GW_WATCHDOG_ENABLE
+    if (gw_plat_wdt_start() == 0) {
+        if (task_create(wdt_task, NULL, GW_WDT_TASK_STACK, GW_WDT_TASK_PRIO, "gwWdt") != LOS_OK) {
+            printf("[%s] ⚠ 喂狗任务创建失败：%u s 后会被看门狗复位（请检查任务数/内存）\n",
+                   GW_LOG_TAG, (unsigned)GW_WDT_TIMEOUT_S);
+        }
+    } else {
+        printf("[%s] ⚠ 看门狗未能启用：卡死将无法自愈（只能断电）\n", GW_LOG_TAG);
+    }
+#endif
+
+    /* 10) 任务 */
     if (task_create(uart_task, NULL, GW_TASK_STACK_UART, GW_TASK_PRIO_UART, "gwUart") != LOS_OK) {
         printf("[%s] uart 任务创建失败\n", GW_LOG_TAG);
     }

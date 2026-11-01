@@ -21,6 +21,7 @@
 #include "gw_net.h"
 #include "gw_scan.h"          /* 扫描重试口径与排版（t166：厂商 SetWifiScan 同序） */
 #include "config_network.h"  /* SetWifiModeOff：`wifi off` 复位射频用（SDK 板级） */
+#include "lz_hardware/wifi.h" /* t188：WifiDisconnect(reasonCode)——先软断开，避免再进 recovery */
 
 #include "lwip/ip_addr.h"
 #include "lwip/netif.h"
@@ -128,6 +129,15 @@ static char     s_conn_reason[16];
 static uint32_t s_conn_timeout_ms;
 static UINT32   s_conn_task = 0u;
 
+/* t188：连接退避（语义在 gw_net.h 的 gw_net_backoff_*，这里只把结果喂进去）。
+ * 为什么状态放在板级层而不是配网状态机：`wifi set`、开机自动连、页面配网三条路都
+ * 从这里走，退避必须对三条路一致；放进状态机就会各算各的。 */
+static gw_net_backoff_t s_backoff;
+
+/* 时基（实现与注释在下面"扫描缓存"一节：与 gw_main.c 的 gw_now_ms 同一算式，
+ * 两边口径必须一致，否则 /api/scan 的 age_ms 会算成负数）。退避要用到，先声明。 */
+static uint32_t net_now_ms(void);
+
 static void net_conn_finish(int state, const char *reason)
 {
     if (reason != NULL && reason[0] != '\0') {
@@ -136,6 +146,18 @@ static void net_conn_finish(int state, const char *reason)
         s_conn_reason[0] = '\0';
     }
     s_conn_state = state;
+}
+
+/* t188：记一次"真的碰到 SDK 才失败"的连接失败。
+ * 只统计会消耗驱动的失败（timeout/auth/internal/stuck）——busy/internal 这类本地拒绝
+ * 不记，否则页面连点两下就能把退避骗开。攒够 GW_NET_FAIL_LIMIT 次立刻进退避并打印，
+ * 之后 gw_net_sta_connect_wait 在窗口内直接返回 busy、不触达 SDK。 */
+static void net_backoff_note_fail(void)
+{
+    if (gw_net_backoff_fail(&s_backoff, net_now_ms()) != 0) {
+        printf("[NET] 连续失败 %u 次，暂停 %u s 再试\n",
+               (unsigned)GW_NET_FAIL_LIMIT, (unsigned)(GW_NET_BACKOFF_MS / 1000u));
+    }
 }
 
 /* worker 里跑的就是原来的同步流程：发起 + 轮询到出结果 */
@@ -218,6 +240,11 @@ int gw_net_sta_connect_wait(const char *ssid, const char *psk,
         net_set_reason(reason, cap, "internal");
         return -1;
     }
+    /* t188：退避窗口内直接返回 busy —— 一个 SDK 接口都不碰（重复失败只会再把驱动打死） */
+    if (gw_net_backoff_blocked(&s_backoff, net_now_ms()) != 0) {
+        net_set_reason(reason, cap, "busy");
+        return -1;
+    }
     /* 上一次还卡在 SDK 里（stuck）或正在连：不再叠一发，SDK 的发起接口不可重入 */
     if (s_conn_state == GW_CONN_RUNNING || s_conn_state == GW_CONN_STUCK) {
         net_set_reason(reason, cap, (s_conn_state == GW_CONN_STUCK) ? "stuck" : "busy");
@@ -246,13 +273,16 @@ int gw_net_sta_connect_wait(const char *ssid, const char *psk,
             printf("[NET] 连接 %u ms 无结果：worker 卡在 SDK 里（recovery），命令先返回\n",
                    (unsigned)waited);
             net_set_reason(reason, cap, "stuck");
+            net_backoff_note_fail();
             return -1;
         }
     }
     if (s_conn_state == GW_CONN_OK) {
+        gw_net_backoff_ok(&s_backoff);   /* 成功一次即清零：偶发失败不该攒成退避 */
         return 1;
     }
     net_set_reason(reason, cap, (s_conn_reason[0] != '\0') ? s_conn_reason : "internal");
+    net_backoff_note_fail();
     return -1;
 }
 
@@ -266,7 +296,19 @@ int gw_net_sta_connect_wait(const char *ssid, const char *psk,
  */
 int gw_net_radio_off(void)
 {
-    WifiErrorCode rc = SetWifiModeOff();
+    /* t188：先软断开再硬关射频。
+     * 为什么改顺序：SetWifiModeOff() 直接进驱动，卡进 recovery 之后它自己也会跟着卡；
+     * WifiDisconnect(0) 走的是正常的断开流程（有超时/事件路径），能成功就不必硬关。
+     * 字段口径不变：无论走哪条路，都等价于"射频已关"，调用方（wifi off / 配网收尾）不用区分。 */
+    unsigned int rc_disc = WifiDisconnect(0);
+    gw_net_off_path_t path = gw_net_off_pick((rc_disc == (unsigned int)WIFI_SUCCESS) ? 0 : -1);
+    WifiErrorCode rc_off = (WifiErrorCode)0;
+    int rc = 0;
+
+    if (path == GW_NET_OFF_HARD) {
+        rc_off = SetWifiModeOff();
+        rc = (int)rc_off;
+    }
 
     s_wifi_on = 0u;
     s_sta_pending = 0u;
@@ -275,7 +317,14 @@ int gw_net_radio_off(void)
         s_conn_state = GW_CONN_IDLE;    /* 允许重开一次；worker 若还在里面，它的结论会被忽略 */
         s_conn_reason[0] = '\0';
     }
-    printf("[NET] 射频已关（SetWifiModeOff rc=%d）\n", (int)rc);
+    /* 两条路分开打：现场看到哪一行就知道这次自救走的是软断开还是硬关射频
+     * （软断开成功 = 驱动还有救；退回硬关 = 很可能是 recovery 状态）。 */
+    if (path == GW_NET_OFF_DISCONNECT) {
+        printf("[NET] 射频已关（WifiDisconnect rc=%u，未走硬关）\n", rc_disc);
+    } else {
+        printf("[NET] 射频已关（WifiDisconnect rc=%u → 退回 SetWifiModeOff rc=%d）\n",
+               rc_disc, rc);
+    }
     return 0;
 }
 

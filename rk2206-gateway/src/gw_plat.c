@@ -22,6 +22,7 @@
 #include "los_task.h"
 
 #include <string.h>
+#include <stdio.h>      /* t188：看门狗启动/失败各打一行，现场只认串口 */
 
 /* 诊断用：最近一次 UART0 初始化与写入的原始返回值（`uinfo` 命令打印）。
  * LzUartWrite 的返回值语义是「写出的字节数，失败 0」——不是 LZ_HARDWARE_SUCCESS(0)，
@@ -199,6 +200,49 @@ int gw_plat_flash_init(void)
     }
     return (FlashInit() == LZ_HARDWARE_SUCCESS) ? 0 : -1;
 }
+
+/* ------------------------------- 硬件看门狗（t188） -------------------------------
+ * 档位不是秒：LzWatchdogSetTimeout(sec) 交给 HAL_WDT_SetTimeout，后者在
+ * 2^16 … 2^31 个计数之间挑最接近的一档（实测反汇编见施工单「看门狗行为」），
+ * 所以请求 30 s 实际会落在 ≥30 s 的那一档上。启动后用 LzWatchdogGetTimeout()
+ * **回读**真实秒数再打印，不拿请求值糊弄现场。 */
+#if GW_WATCHDOG_ENABLE
+static volatile int s_wdt_started = 0;
+
+int gw_plat_wdt_start(void)
+{
+    unsigned int rc;
+    unsigned int eff;
+
+    LzWatchdogInit();                       /* 复位并清计数 */
+    rc = LzWatchdogSetTimeout((unsigned int)GW_WDT_TIMEOUT_S);
+    if (rc != LZ_HARDWARE_SUCCESS) {
+        printf("[WDT] ⚠ SetTimeout(%u) 返回 %u\n", (unsigned)GW_WDT_TIMEOUT_S, rc);
+        return -1;
+    }
+    rc = LzWatchdogStart((unsigned int)LZ_WATCHDOG_REBOOT_MODE_FIRST);
+    if (rc != LZ_HARDWARE_SUCCESS) {
+        printf("[WDT] ⚠ Start 返回 %u（看门狗未生效，卡死只能断电）\n", rc);
+        return -1;
+    }
+    eff = LzWatchdogGetTimeout();
+    if (eff == 0u) {
+        eff = (unsigned int)GW_WDT_TIMEOUT_S;   /* 回读不可用就退回请求值 */
+    }
+    s_wdt_started = 1;
+    LzWatchdogKeepAlive();                  /* 起来先喂一口，别让启动流程自己超时 */
+    printf("[WDT] 已启动 timeout=%us（喂狗周期 %u ms）\n", eff, (unsigned)GW_WDT_FEED_MS);
+    return 0;
+}
+
+void gw_plat_wdt_feed(void)
+{
+    if (s_wdt_started == 0) {
+        return;                             /* 没起来就别喂：喂了反而掩盖启动失败 */
+    }
+    LzWatchdogKeepAlive();
+}
+#endif /* GW_WATCHDOG_ENABLE */
 
 int gw_plat_flash_read(uint32_t off, void *buf, uint32_t len)
 {

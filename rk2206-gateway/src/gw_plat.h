@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 
+#include "gw_config.h"   /* t188：GW_WATCHDOG_ENABLE 等编译期开关；单独包含本头也不能算错 */
+
 /* ------------------------------- UART0（E53 座，接汇聚 H1） ------------------------------- */
 /* 帧的切分在 gw_proto.c，这里只管字节搬进搬出。read 非阻塞：返回 0 就是当前没数据。 */
 int gw_plat_uart0_init(void);
@@ -50,5 +52,27 @@ int gw_plat_flash_init(void);
 int gw_plat_flash_read(uint32_t off, void *buf, uint32_t len);
 int gw_plat_flash_write(uint32_t off, const void *buf, uint32_t len);
 int gw_plat_flash_erase(uint32_t off, uint32_t len);
+
+/* ------------------------------- 硬件看门狗（t188，默认开） -------------------------------
+ * 现场致命故障是「Wi-Fi 驱动卡进 SDK 的 recovery → gwConn 永久卡死 → 连 SetWifiModeOff
+ * 也卡」，整板只能断电。看门狗治的是更彻底的一种：任务调度整体停摆（ISR 还在跑、任务
+ * 一个都不再切换）时，没人喂狗就复位，不必等人到现场拔电。
+ *
+ * 口径（务必照这个理解，别当成"Wi-Fi 卡了就重启"）：
+ *   - 喂狗在独立的 gwWdt 任务里（优先级 31，比 gwConn 的 30 还低），每 GW_WDT_FEED_MS 一次；
+ *   - gwConn 卡在 SDK 里时 gwWdt 照常跑 → 狗照样被喂 → **不会**复位。
+ *     那片故障由连接退避 + `wifi off`（WifiDisconnect 优先）处理，不靠复位；
+ *   - 只有"调度真的停了"（死循环关中断/系统调用永久阻塞导致所有任务不再推进）才复位。
+ *
+ * GW_WATCHDOG_ENABLE=0 时这里只剩空宏，gw_plat.c 的实现整段不编译、gw_main.c 也不建任务。 */
+#if GW_WATCHDOG_ENABLE
+/* 0 = 已启动（并已打印 `[WDT] 已启动 timeout=Ns`）；-1 = SDK 初始化/启动失败 */
+int gw_plat_wdt_start(void);
+/* 喂狗。任何时候都能调（幂等、不阻塞），但只允许 gwWdt 任务调。 */
+void gw_plat_wdt_feed(void);
+#else
+#define gw_plat_wdt_start()  (1)     /* 1 = "未启用"（与 -1「启用失败」区分） */
+#define gw_plat_wdt_feed()   ((void)0)
+#endif
 
 #endif /* GW_PLAT_H */
