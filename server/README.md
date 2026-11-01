@@ -1063,9 +1063,18 @@ curl -s http://127.0.0.1:3000/api/health        # {"code":0,... "db":"ok"}
 - 硬约束：只动本项目容器；不 `docker system prune`、不改系统自带 nginx、不用 host 网络。
 - 真实公网部署需要用户确认（Q8）后再做；本机只做本地实测。
 
-## 13. 只读运维后台 `/admin`（P1，实施计划 §7.5）
+## 13. 商家后台 `/admin`（P1，实施计划 §7.5）
 
-给运维/演示用的**只读**查询页：数据新鲜度、网关与节点在线、最新属性快照、告警流水。**只有 GET**，不做下发、改阈值、注入演示。
+**给卖设备的人用的，不是给用户用的。** 用户端只有手机 App；这里管的是设备资产：录了哪些台、哪台还没被绑、每台的绑定码是多少、服务器还活着没有。
+
+用户家里的东西一概不进来——没有读数、没有告警、没有在线节点数、没有房间名。这一条是用户 2026-11-01 亲自划的线（`docs/项目章程.md` §11 变更记录）。
+
+页面四块：
+
+1. **六个数字**：设备总数 / 已绑定 / 未激活 / 最后收到数据（多久以前 + 具体时刻）/ 库大小 / 读数总量。
+2. **出厂录入**：一行一个 SN，提交即建 `devices` 行并生成 6 位绑定码。已存在的 SN 不报错——缺码补一个，有码原样返回（幂等，产线上多点一次不该是错误）。
+3. **设备台账**：SN / 名称 / 状态 / 绑定码 / 在线 / 最后活跃 / 固件 / 出厂时间 / 重发码。状态只有**未激活 / 已绑定**两种。
+4. **重发绑定码**：贴错标签、码被泄露、客户弄丢贴纸时用；已绑定的设备拒绝（409），因为码是一次性的、绑完就清空。
 
 ```bash
 # 1) 打开开关（留空 = 所有 /admin 路由整体 404，不暴露存在性）
@@ -1079,18 +1088,20 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/admin   # 200 = �
 ```bash
 ssh -L 8080:127.0.0.1:3000 <user>@<云机>        # 保持这个窗口开着
 # 浏览器打开 http://127.0.0.1:8080/admin ，输 ADMIN_PASSWORD
-# 投屏/看板：http://127.0.0.1:8080/admin?fullscreen=1
 ```
 
 | 路由 | 方法 | 说明 |
 |---|---|---|
-| `/admin` | GET | 未登录返回登录页；已登录返回看板（内联 HTML/CSS/JS，无 CDN，5 s 自动刷新） |
+| `/admin` | GET | 未登录返回登录页；已登录返回台账页（内联 HTML/CSS/JS，无 CDN，10 s 自动刷新） |
 | `/admin/login` | POST | 表单字段 `password`；成功 303 → `/admin` 并下发 `hm_admin` cookie（HttpOnly + SameSite=Strict + path=/admin） |
 | `/admin/logout` | POST | 删 cookie → 303 |
-| `/admin/data` | GET | 看板取数（JSON）；未登录 401 |
+| `/admin/data` | GET | 台账取数（JSON）；未登录 401 |
+| `/admin/devices` | POST | 出厂录入：`{"items":[{"sn","name"}]}`，≤200 条；回 `{created,existing,failed}` |
+| `/admin/devices/{id}/bind-code` | POST | 重发 6 位码；已绑定回 409（码 1202） |
 
+- **为什么绑定码在后台生成**：`routers/devices.py` 的 `new_bind_code()` 注释写着「生产由施工流程写入」，而那条施工流程并不存在——出厂建档把 `bind_code` 写成 `NULL`，客户拿到机器绑不上。本页面的「出厂录入」就是那条缺失的施工流程：录一台、发一个码、印在机器上随货走。有效期取 `Settings.bind_code_ttl_days`（默认 3650 天，`app/config.py` 里的业务常量，不读环境变量），不是 App 邀请家人用的那 10 分钟（`bind_code_ttl_min`）——否则贴纸出厂当天就失效。
 - 口令只存在服务端环境变量里，cookie 存的是 `sha256("hmprogram-admin-v1:" + ADMIN_PASSWORD)`；**改口令即让所有已登录浏览器失效**，服务端不存会话表。
-- 不在 `openapi.json` 里（`include_in_schema=False`），`/docs` 上也看不到。
-- `nodes.online` 是「节点最后一次上报时说的状态」，网关离线期间它不会变 0；页面按「网关离线 → 节点状态未知」显示，节点在线数只统计在线网关下的节点，避免出现「网关 0/2、节点 8/8」这种自相矛盾的看板。
-- 验证（本机实测，2026-11-01）：`/admin`→200、未登录 `/admin/data`→401、错口令→401、对口令→303、登录后 `/admin/data`→200、`curl /openapi.json | grep -c admin`→0。
+- 不在 `openapi.json` 里（`include_in_schema=False`），`/docs` 上也看不到；App 与验收脚本看到的契约面不会多出后台接口。
+- 「在线」只表示这台设备最近有没有连上服务器，不涉及任何用户数据；从未上报过的设备显示 `—`，而不是「离线」。
+- 验证（本机实测，2026-11-01）：`/admin`→200、未登录 `/admin/data`→401、错口令→401、对口令→303、登录后 `/admin/data`→200、`curl /openapi.json | grep -c admin`→0；`ADMIN_PASSWORD` 置空后三条路由全 404。写入链路端到端：`POST /admin/devices` 建 `10-dc-b6-91-00-00` 得码 `100034` → `POST /api/devices/bind`（App 接口，带该码）→ `{"device_id":3,"sn":"10-dc-b6-91-00-00","role":"owner"}` → 后台状态翻「已绑定」、码显示「已用完」。`python -m pytest tests -q` 148 项全绿。
 

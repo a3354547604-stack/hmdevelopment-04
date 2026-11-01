@@ -114,7 +114,10 @@ def bind_device(payload: BindIn, user: CurrentUser) -> dict:
         if other_owner:
             raise ApiError(1202)
         raise ApiError(1201, field="bind_code", note="设备未预置绑定码或绑定码已使用")
-    if dt_to_ms(device["bind_code_expire_at"]) < now_ms():
+    # dt_to_ms(None) 返回 None，`None < int` 在 Python 3 里直接 TypeError → 500。
+    # 出厂贴纸码的有效期可能长到无需过期，所以「没有有效期」必须是合法状态，不是异常。
+    expire_ms = dt_to_ms(device["bind_code_expire_at"])
+    if expire_ms is not None and expire_ms < now_ms():
         raise ApiError(1203, field="bind_code")
 
     role = "owner" if not other_owner else "family"
