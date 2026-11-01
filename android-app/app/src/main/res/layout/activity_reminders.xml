@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   提醒列表（对齐鸿蒙 pages/AlertListPage.ets）：
-  顶部条（老人守护 + 在线点）→ 摘要卡（还有 N 条没处理 / 都处理完了）
+  顶部条（云擎守护 + 在线点）→ 摘要卡（还有 N 条没处理 / 都处理完了）
   → 两段筛片（全部 / 未处理）→ 按 今天/昨天/更早 分组的提醒行 → 末尾两个出口 → 底部页签
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"

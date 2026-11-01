@@ -13,8 +13,8 @@
 
 export class UserCopy {
   // ---------- 通用 ----------
-  static readonly APP_NAME: string = '老人守护';
-  // 标语与登录副标题目前都不显示：2026-10-29 用户要求去掉「老人守护」下方的小字。
+  static readonly APP_NAME: string = '云擎守护';
+  // 标语与登录副标题目前都不显示：2026-10-29 用户要求去掉「云擎守护」下方的小字。
   // 常量留着是为了以后在别处复用，不要在页面里硬编码这两句话。
   static readonly SLOGAN: string = '家里有异常，手机会提醒';
   static readonly OK: string = '好的';
@@ -129,7 +129,7 @@ export class UserCopy {
   static readonly REPORT_MAX_QUIET: string = '最长没动静';
 
   // ---------- 登录 / 注册 ----------
-  static readonly LOGIN_TITLE: string = '老人守护';
+  static readonly LOGIN_TITLE: string = '云擎守护';
   static readonly LOGIN_SUBTITLE: string = '家里有异常，手机会提醒';
   static readonly LABEL_PHONE: string = '手机号';
   static readonly LABEL_PASSWORD: string = '密码';
@@ -178,7 +178,7 @@ export class UserCopy {
   static readonly HELP_Q_PUSH_TITLE: string = '提醒会发到哪';
   static readonly HELP_Q_PUSH_BODY: string = '只发到已登录的家人手机。\n关掉「有情况时在手机上提醒我」之后，提醒只在 App 里显示。';
   static readonly HELP_Q_NOPUSH_TITLE: string = '收不到提醒怎么办';
-  static readonly HELP_Q_NOPUSH_BODY: string = '先看手机系统设置里，「老人守护」的通知权限是不是开着。\n再看「我的」页里「有情况时在手机上提醒我」有没有被关掉；关着的时候提醒只记在 App 里，不会响。';
+  static readonly HELP_Q_NOPUSH_BODY: string = '先看手机系统设置里，「云擎守护」的通知权限是不是开着。\n再看「我的」页里「有情况时在手机上提醒我」有没有被关掉；关着的时候提醒只记在 App 里，不会响。';
   static readonly HELP_Q_DATA_TITLE: string = '我的数据存在哪';
   static readonly HELP_Q_DATA_BODY: string = '传感数据存在家里的主机上，不上传云端。\n换手机登录同一个账号，看到的是同一份数据。';
   static readonly HELP_Q_PHONE_TITLE: string = '换手机怎么用';
