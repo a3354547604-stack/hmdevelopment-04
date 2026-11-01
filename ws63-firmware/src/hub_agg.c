@@ -118,6 +118,95 @@ int hub_wl_index_mac(const hub_agg_t *a, const uint8_t mac[HUB_MAC_BYTES])
     return -1;
 }
 
+/* ================================================================== */
+/* t176：SN 形态与型号前缀匹配                                          */
+/* ================================================================== */
+
+int hub_sn_model_match(const char *entry, const char *sn)
+{
+    size_t i = 0;
+
+    if (entry == NULL || sn == NULL || entry[0] == '\0' || sn[0] == '\0') {
+        return 0;
+    }
+    for (;;) {
+        /* '-' 是「型号」与「Die ID 后缀」的分界：任一侧到这里就算比完了型号段 */
+        int e_end = (entry[i] == '\0' || entry[i] == '-') ? 1 : 0;
+        int s_end = (sn[i] == '\0' || sn[i] == '-') ? 1 : 0;
+
+        if (e_end != 0 && s_end != 0) {
+            return 1;               /* "M1" vs "M1" / "M1" vs "M1-3F7A" 都到这里 */
+        }
+        if (e_end != 0 || s_end != 0) {
+            return 0;               /* "M1" vs "M12"：一边型号段结束、另一边还有字符 */
+        }
+        if (entry[i] != sn[i]) {
+            return 0;
+        }
+        i++;
+        if (i >= HUB_SN_LEN) {
+            return 1;               /* 防御：两侧都顶到上限，视作同在型号段内相等 */
+        }
+    }
+}
+
+int hub_wl_index_prebound(const hub_agg_t *a, const char *sn)
+{
+    uint8_t i;
+
+    if (a == NULL || sn == NULL) {
+        return -1;
+    }
+    for (i = 0; i < a->wl_count; i++) {
+        if (a->node[i].pre_bound != 0u && hub_sn_model_match(a->node[i].sn, sn) != 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+void hub_wl_mark_prebound(hub_agg_t *a, const char *sn)
+{
+    int idx;
+
+    if (a == NULL || sn == NULL) {
+        return;
+    }
+    idx = hub_wl_index(a, sn);
+    if (idx >= 0) {
+        a->node[idx].pre_bound = 1u;
+    }
+}
+
+int hub_wl_describe(const hub_agg_t *a, char *out, size_t cap)
+{
+    size_t pos = 0;
+    uint8_t i;
+
+    if (out == NULL || cap == 0u) {
+        return -1;
+    }
+    out[0] = '\0';
+    if (a == NULL) {
+        return 0;
+    }
+    for (i = 0; i < a->wl_count; i++) {
+        size_t k = 0;
+        if (pos > 0u && pos + 1u < cap) {
+            out[pos++] = ',';
+        }
+        while (a->node[i].sn[k] != '\0' && (pos + 1u) < cap) {
+            out[pos++] = a->node[i].sn[k];
+            k++;
+        }
+        out[pos] = '\0';
+        if ((pos + 1u) >= cap) {
+            break;                  /* 缓冲满：截断即可，日志用不着完整 */
+        }
+    }
+    return (int)a->wl_count;
+}
+
 /**
  * 绑定：契约 §3.4 的 0x23 result 只有 0 / 10（白名单已满）/ 11（MAC 已被别的 SN 占用）。
  * 同一个 sn 重新绑（换 MAC）按「就地更新」处理，返回 0，不占新槽位。
@@ -125,12 +214,19 @@ int hub_wl_index_mac(const hub_agg_t *a, const uint8_t mac[HUB_MAC_BYTES])
 int hub_wl_add(hub_agg_t *a, const char *sn, const uint8_t mac[HUB_MAC_BYTES], int64_t now_ms)
 {
     int idx;
+    int up_idx;
     uint8_t i;
 
     if (a == NULL || !hub_sn_valid(sn) || mac == NULL) {
         return HUB_R_NOT_CONN;      /* 参数不合法：用「不支持的指令」以外最近的码表示失败 */
     }
+    /* t176：台架预绑定占位（"M1"）遇到真实 SN（"M1-3F7A"）就地升级 —— 占位的存在意义就是
+     * 「这块型号的板还没来」，来了就换名字，不新占槽位（否则 "M1,M2" 两个占位 + 两真板 = 4 槽）。 */
+    up_idx = hub_wl_index_prebound(a, sn);
     for (i = 0; i < a->wl_count; i++) {
+        if ((int)i == up_idx) {
+            continue;               /* 正在被升级的那条不算「别人的 MAC」，否则它自己撞自己 */
+        }
         if (a->node[i].have_mac && memcmp(a->node[i].mac, mac, HUB_MAC_BYTES) == 0 &&
             strncmp(a->node[i].sn, sn, HUB_SN_LEN) != 0) {
             return (int)HUB_R_MAC_TAKEN;      /* §3.4：MAC 已被别的 SN 占用 */
@@ -141,6 +237,23 @@ int hub_wl_add(hub_agg_t *a, const char *sn, const uint8_t mac[HUB_MAC_BYTES], i
         (void)memcpy(a->node[idx].mac, mac, HUB_MAC_BYTES);
         a->node[idx].have_mac = 1u;
         a->list_dirty = 1u;
+        return (int)HUB_R_OK;
+    }
+    if (up_idx >= 0) {
+        /* 就地升级：SN 换成真实值、清 pre_bound、MAC/状态重写。槽位数不变。 */
+        size_t k;
+
+        idx = up_idx;
+        (void)memset(a->node[idx].sn, 0, sizeof(a->node[idx].sn));
+        for (k = 0; (k + 1u) < sizeof(a->node[idx].sn) && sn[k] != '\0'; k++) {
+            a->node[idx].sn[k] = sn[k];
+        }
+        (void)memcpy(a->node[idx].mac, mac, HUB_MAC_BYTES);
+        a->node[idx].have_mac = 1u;
+        a->node[idx].pre_bound = 0u;
+        a->node[idx].state = HUB_SLOT_BOUND;
+        a->list_dirty = 1u;
+        a->next_scan_ms = now_ms;   /* 真实节点已就位，赶紧去连 */
         return (int)HUB_R_OK;
     }
     if (a->wl_count >= HUB_MAX_SLOTS) {

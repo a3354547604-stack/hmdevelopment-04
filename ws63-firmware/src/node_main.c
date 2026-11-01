@@ -21,6 +21,7 @@
 #include "common_def.h"
 #include "app_init.h"
 #include "tcxo.h"
+#include "efuse.h"          /* uapi_efuse_init / uapi_efuse_get_die_id（t176 身份派生） */
 
 #include "node_cfg.h"
 #include "node_json.h"
@@ -129,6 +130,56 @@ static void handle_downlink(const char *js, int len, const node_snapshot_t *s)
     }
 }
 
+/* ---- 运行期身份（t176）：定义在这里，读取在 node_identity_init() ----------------
+ * 为什么全局：广播参数（sle_hub_adv.c）、上报帧（node_link.c）、串口日志三处必须看到
+ * 同一个 SN/MAC；各自算一遍迟早分裂成「广播叫 M1-3F7A、帧里写 M1」。
+ * 为什么在 node_link_init() 之前算：SLE 广播参数在初始化时就取走了 MAC 与名字。 */
+char    node_cfg_sn[NODE_SN_MAX];
+uint8_t node_cfg_mac[NODE_MAC_BYTES];
+char    node_cfg_adv_name[NODE_ADV_NAME_MAX];
+
+static void node_identity_init(void)
+{
+    uint8_t die[NODE_DIE_ID_LEN] = {0};
+    int die_ok = 0;
+    int unique;
+
+#if (NODE_SN_UNIQUE != 0)
+    {
+        errcode_t ret;
+
+        /* 顺序不能反：不先 init，get_die_id 会直接返回 ERRCODE_EFUSE_NOT_INIT（t151 实测）。 */
+        (void)uapi_efuse_init();
+        ret = uapi_efuse_get_die_id(die, (uint16_t)sizeof(die));
+        if (ret == ERRCODE_SUCC) {
+            die_ok = 1;
+        } else {
+            osal_printk("[CFG] die_id read fail: ret=0x%x\r\n", (unsigned)ret);
+        }
+    }
+#endif
+
+    unique = node_identity_derive(die, die_ok, NODE_SN_MODEL,
+                                  node_cfg_sn, sizeof(node_cfg_sn),
+                                  node_cfg_adv_name, sizeof(node_cfg_adv_name),
+                                  node_cfg_mac);
+    if (unique != 0) {
+        /* 这行是「这块板到底是谁」的唯一权威来源：三块同型号板烧同一份固件时，
+         * 只能靠它区分。形如：[CFG] die=1a2b3c3f7a sn=M1-3F7A mac=11:22:33:1a:2b:01 */
+        osal_printk("[CFG] die=%02x%02x%02x%02x%02x sn=%s mac=%02x:%02x:%02x:%02x:%02x:%02x\r\n",
+            die[0], die[1], die[2], die[3], die[4],
+            node_cfg_sn,
+            node_cfg_mac[0], node_cfg_mac[1], node_cfg_mac[2],
+            node_cfg_mac[3], node_cfg_mac[4], node_cfg_mac[5]);
+    } else {
+        osal_printk("[CFG] die_id fail, fallback legacy\r\n");
+        osal_printk("[CFG] sn=%s mac=%02x:%02x:%02x:%02x:%02x:%02x (legacy)\r\n",
+            node_cfg_sn,
+            node_cfg_mac[0], node_cfg_mac[1], node_cfg_mac[2],
+            node_cfg_mac[3], node_cfg_mac[4], node_cfg_mac[5]);
+    }
+}
+
 static void *node_task(const char *arg)
 {
     uint32_t boot_ms;
@@ -140,13 +191,16 @@ static void *node_task(const char *arg)
     boot_ms = uapi_tcxo_get_ms();
     next_beat_ms = boot_ms + 30000u;
 
+    node_identity_init();                       /* t176：先定身份，再初始化 SLE（广播参数要用 MAC） */
     node_link_init();
     node_sensor_init();
     /* 这一行是「镜像角色」的唯一权威来源：构建脚本用 grep -a 在 .fwpkg 里断言它。
      * 烧板前先看串口这一行，能立刻发现「烧反了」或「角色宏没生效」（两块板同角色会永远连不上）。 */
     osal_printk("[%s] %s\r\n", NODE_SN_STR, NODE_BUILD_TAG);
-    osal_printk("[%s] node up: fw=%s type=%s mac=11:22:33:44:55:%02X adv=%s proto=0x%02X\r\n",
-        NODE_SN_STR, NODE_FW_VER, NODE_ROLE_NAME, (unsigned)NODE_MAC_LAST,
+    osal_printk("[%s] node up: fw=%s type=%s mac=%02x:%02x:%02x:%02x:%02x:%02x adv=%s proto=0x%02X\r\n",
+        NODE_SN_STR, NODE_FW_VER, NODE_ROLE_NAME,
+        node_cfg_mac[0], node_cfg_mac[1], node_cfg_mac[2],
+        node_cfg_mac[3], node_cfg_mac[4], node_cfg_mac[5],
         NODE_ADV_NAME, (unsigned)NODE_PROTO_VER);
 #if (NODE_MOCK != 0)
     osal_printk("[%s] *** MOCK 模式：数据为伪造，只验证链路与格式，不代表真实环境 ***\r\n",

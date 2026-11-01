@@ -23,6 +23,11 @@
 #ifndef NODE_CFG_H
 #define NODE_CFG_H
 
+/* 只有这两个标准头：下面的身份派生函数要用 uint8_t / size_t，且必须能在主机上单独编
+ * （SDK 的驱动头一律不引，否则主机自测就编不动了）。 */
+#include <stdint.h>
+#include <stddef.h>
+
 /* ================================================================== */
 /* 1. 角色与身份                                                       */
 /* ================================================================== */
@@ -49,26 +54,141 @@
 #define NODE_FW_VER             "0.1.0"
 
 #if (NODE_ROLE == NODE_ROLE_M1)
-#define NODE_SN_STR             "M1"
+#define NODE_SN_MODEL           "M1"
 #define NODE_ROLE_NAME          "gas"
 #elif (NODE_ROLE == NODE_ROLE_M2)
-#define NODE_SN_STR             "M2"
+#define NODE_SN_MODEL           "M2"
 #define NODE_ROLE_NAME          "fall"
 #else
-#define NODE_SN_STR             "M4"
+#define NODE_SN_MODEL           "M4"
 #define NODE_ROLE_NAME          "door+presence"
 #endif
 
-/* §2.7：MAC 前 4 字节固定 11:22:33:44、第 5 字节固定 0x55、第 6 字节 = SN 编号 */
+/* ================================================================== */
+/* 1b. 运行期身份：SN / MAC 由 Die ID 派生（t176）                      */
+/* ================================================================== */
+/*
+ * 为什么不再写死：同型号几块板烧同一份固件时，SN 都是 "M1"、星闪 MAC 都是
+ * 11:22:33:44:55:01，汇聚按 MAC 认白名单 → 命中第一块就把后到的拒掉，
+ * 同型号永远只可能有一块在线。芯片的 Die ID 每颗不同且出厂已烧，用它派生最省事。
+ *
+ *   成功：SN = "<型号>-<die3die4 四位大写 hex>"（例 M1-3F7A，7 字节）
+ *         MAC = 11:22:33:<die0>:<die1>:<role>   ← 前 3 字节仍是 11:22:33，末字节仍是角色号
+ *   失败：efuse 读不出 / die 全 0 / 全 FF → 原样回到旧值（SN="M1"、MAC=11:22:33:44:55:01…），
+ *         行为与 t175 及之前逐位一致，绝不因为读不到 efuse 就起不来。
+ *
+ * 只用 die[0..1] 和 die[3..4]：卡面口径是「前 3 字节固定 11:22:33、末字节固定 role」，
+ * 只剩中间两字节可放 die，SN 的 4 位 hex 也是同一颗芯片的另外两个字节 —— 碰撞空间各 16 位。
+ * 这两者都不够大，同型号量产时会撞（65536 分之 1 量级），当前台架规模（同型号 ≤3 块）
+ * 足够；真要扩量得改成 die[0..4] 全用 + 服务端录入查重（见 t176 报告与方案笔记）。
+ */
+#define NODE_SN_UNIQUE          1       /* 0 = 关掉派生，回到「同型号同 SN」的旧行为（排障/对照用） */
+#define NODE_SN_MAX             13u     /* "M1-3F7A" = 7 字节 + NUL；上限 12 字符是卡面口径 */
+#define NODE_MAC_BYTES          6u
+#define NODE_DIE_ID_LEN         5u      /* 真正读 5 字节：die[0..1] 进 MAC、die[3..4] 进 SN */
+#define NODE_ADV_NAME_MAX       17u     /* "EC-" + 13 + NUL；契约 §2.7 要求广播名 ≤16 字节 */
+
+/* §2.7：MAC 前 3 字节固定 11:22:33；LEGACY3/4 只在 efuse 失败回落时用（旧固定值）。 */
 #define NODE_MAC_PREFIX0        0x11
 #define NODE_MAC_PREFIX1        0x22
 #define NODE_MAC_PREFIX2        0x33
-#define NODE_MAC_PREFIX3        0x44
-#define NODE_MAC_PREFIX4        0x55
+#define NODE_MAC_LEGACY3        0x44    /* 回落用：改号前的第 4 字节 */
+#define NODE_MAC_LEGACY4        0x55    /* 回落用：改号前的第 5 字节 */
 #define NODE_MAC_LAST           ((uint8_t)(NODE_ROLE))
 
-/* §2.7：扫描应答名固定 EC-<SN>（≤16 字节），现场人工核对用 */
-#define NODE_ADV_NAME           ("EC-" NODE_SN_STR)
+/* 运行期身份缓冲：定义在 node_main.c（每份固件只有它一个 owner）。
+ * 用「全局数组 + 启动时算一次」而不是「每处自己算」：广播参数、上报帧、日志都必须
+ * 看到同一个值；算两次就可能出现「广播叫 M1-3F7A、帧里写 M1」的分裂。 */
+extern char    node_cfg_sn[NODE_SN_MAX];
+extern uint8_t node_cfg_mac[NODE_MAC_BYTES];
+extern char    node_cfg_adv_name[NODE_ADV_NAME_MAX];
+
+/* 兼容旧名字：`NODE_SN_STR` / `NODE_ADV_NAME` 在几十处 `%s` 里用着，改成运行期数组后
+ * 调用点一行都不用动（数组退化成指针；`NODE_SN_STR[0]` 这种下标也仍然有效）。 */
+#define NODE_SN_STR             node_cfg_sn
+#define NODE_ADV_NAME           node_cfg_adv_name
+
+static inline char node_hexdigit(unsigned v)
+{
+    return "0123456789ABCDEF"[v & 0x0Fu];
+}
+
+/* Die ID 是否可信：全 0（没烧过）与全 FF（读坏/未编程）都不能拿来派生 ——
+ * 全 0 会让所有板子算出同一个 MAC，比写死还糟（写死至少肉眼能看出来）。 */
+static inline int node_die_plausible(const uint8_t *die, uint16_t len)
+{
+    uint16_t i;
+    uint8_t all0 = 1u;
+    uint8_t allf = 1u;
+
+    if (die == NULL || len == 0u) {
+        return 0;
+    }
+    for (i = 0; i < len; i++) {
+        if (die[i] != 0x00u) {
+            all0 = 0u;
+        }
+        if (die[i] != 0xFFu) {
+            allf = 0u;
+        }
+    }
+    return ((all0 == 0u) && (allf == 0u)) ? 1 : 0;
+}
+
+/* 纯函数：die + 是否读成功 → SN / 广播名 / MAC 三个输出。
+ * 返回 1 = 派生了唯一身份；0 = 回落到 legacy。输出一律以 NUL 结尾、绝不越界。
+ * 放在头文件里的原因：它零 SDK 依赖，主机自测（ws63-firmware/test/hub_selftest.c）
+ * include 本头就能测**固件里跑的同一份代码**，而不是测一份抄来的副本。 */
+static inline int node_identity_derive(const uint8_t die[NODE_DIE_ID_LEN], int die_ok,
+                                       const char *model,
+                                       char *sn, size_t sn_cap,
+                                       char *adv, size_t adv_cap,
+                                       uint8_t mac[NODE_MAC_BYTES])
+{
+    size_t n = 0;
+    size_t k;
+    int unique;
+
+    if (sn == NULL || mac == NULL || sn_cap == 0u) {
+        return 0;
+    }
+    unique = ((die_ok != 0) && node_die_plausible(die, NODE_DIE_ID_LEN)) ? 1 : 0;
+    if (model == NULL) {
+        model = "M?";
+    }
+    /* 型号最多占到 sn_cap-5（后面留给 "-XXXX"），这样任何型号都不会撑爆缓冲 */
+    while (model[n] != '\0' && (n + 5u) < sn_cap) {
+        sn[n] = model[n];
+        n++;
+    }
+    if (unique != 0) {
+        sn[n++] = '-';
+        sn[n++] = node_hexdigit((unsigned)(die[3] >> 4));
+        sn[n++] = node_hexdigit((unsigned)die[3]);
+        sn[n++] = node_hexdigit((unsigned)(die[4] >> 4));
+        sn[n++] = node_hexdigit((unsigned)die[4]);
+    }
+    sn[n] = '\0';
+
+    mac[0] = (uint8_t)NODE_MAC_PREFIX0;
+    mac[1] = (uint8_t)NODE_MAC_PREFIX1;
+    mac[2] = (uint8_t)NODE_MAC_PREFIX2;
+    mac[3] = (unique != 0) ? die[0] : (uint8_t)NODE_MAC_LEGACY3;
+    mac[4] = (unique != 0) ? die[1] : (uint8_t)NODE_MAC_LEGACY4;
+    mac[5] = (uint8_t)NODE_ROLE;        /* 末字节仍是角色号：§0.7 的可读性保留 */
+
+    if (adv != NULL && adv_cap > 4u) {
+        adv[0] = 'E';
+        adv[1] = 'C';
+        adv[2] = '-';
+        k = 3;
+        for (n = 0; sn[n] != '\0' && (k + 1u) < adv_cap; n++) {
+            adv[k++] = sn[n];
+        }
+        adv[k] = '\0';
+    }
+    return unique;
+}
 
 /* §2.7：厂商自定义 AD 结构（type 0xFF、len 0x06）: 'E','C', sn(2 ASCII), role, proto_ver */
 #define NODE_PROTO_VER          0x01
@@ -238,8 +358,12 @@
 /* 每块板一个唯一字符串，编进镜像。用途有两个：
  *   1) 烧录前后 grep 镜像即可确认「这块板烧的是哪个角色的固件」——烧错角色是 D1 最贵的错误；
  *   2) 上电首行打印，串口日志里一眼看出板子身份。
- * 注意：断言脚本要用带引号的完整串（镜像里字符串是明文，见 tools/node-build.sh）。 */
-#define NODE_BUILD_TAG          ("EC-NODE-ROLE=" NODE_SN_STR " type=" NODE_ROLE_NAME " fw=" NODE_FW_VER)
+ * 注意：断言脚本要用带引号的完整串（镜像里字符串是明文，见 tools/node-build.sh）。
+ * t176 起身份分两层，别混：
+ *   - 编译期：NODE_SN_MODEL（型号 "M1"/"M2"/"M4"）—— 构建脚本靠它在镜像里认角色；
+ *   - 运行期：node_cfg_sn（"M1-3F7A"，由 Die ID 派生）—— 上报/广播/日志用它。
+ *   构建标识故意仍用型号：它要能 grep、要能逐字节复现，不能随板子的 die 变。 */
+#define NODE_BUILD_TAG          ("EC-NODE-ROLE=" NODE_SN_MODEL " type=" NODE_ROLE_NAME " fw=" NODE_FW_VER)
 
 /* 节点本地可 set 的键（键名必须与 §6.7 / §8.x 的 settings 键名逐字一致）：
  *   presence_hold_s  §2.4.4 明确「阈值可由命令 set 调整」  —— M4

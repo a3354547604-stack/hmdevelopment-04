@@ -1397,9 +1397,17 @@ static void hub_pump_events(int64_t now)
             hub_dump_mac("connected", ev.mac);
             slot = hub_agg_on_connected(&g_agg, ev.conn_id, ev.mac, now);
             if (slot < 0) {
-                /* §2.7：非白名单节点**不产生业务数据**，连接直接断掉，别留着一个陌生链路 */
+                /* §2.7：非白名单节点**不产生业务数据**，连接直接断掉，别留着一个陌生链路。
+                 * t176：这行日志以前只有「stranger connected」，现场根本查不出是谁 ——
+                 * 把 MAC 与当前白名单一起打出来，才能一眼看出是「没绑」还是「绑错了 SN」。 */
                 sle_addr_t addr = {0};
-                HUB_LOG("WARN: stranger connected, disconnecting");
+                char wl[64];
+
+                (void)hub_wl_describe(&g_agg, wl, sizeof(wl));
+                HUB_LOG("WARN: whitelist miss conn=0x%x mac=%02x:%02x:%02x:%02x:%02x:%02x (%d bound: \"%s\") -> disconnect",
+                    (unsigned)ev.conn_id,
+                    ev.mac[0], ev.mac[1], ev.mac[2], ev.mac[3], ev.mac[4], ev.mac[5],
+                    hub_wl_count(&g_agg), wl);
                 addr.type = 0;
                 (void)memcpy_s(addr.addr, sizeof(addr.addr), ev.mac, HUB_MAC_BYTES);
                 (void)sle_disconnect_remote_device(&addr);
@@ -1811,8 +1819,11 @@ static int hub_prebind_apply(const char *list, int64_t now)
             continue;
         }
         HUB_LOG("WARN: TEST HOOK prebind %s (no gateway on this bench)", sn);
-        (void)hub_wl_add(&g_agg, sn, mac, now);
-        added++;
+        if (hub_wl_add(&g_agg, sn, mac, now) == (int)HUB_R_OK) {
+            /* 占位标记：真实 SN（"M1-3F7A"）来绑定时会就地升级掉这条，不另占槽位（t176）。 */
+            hub_wl_mark_prebound(&g_agg, sn);
+            added++;
+        }
     }
     return added;
 }

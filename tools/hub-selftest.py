@@ -869,6 +869,7 @@ PREBIND_CASE_SRC = r"""
 
 #include "hub_adv.h"
 #include "hub_agg.h"
+#include "hub_frame.h"      /* t176：hub_prebind_apply 只认 hub_wl_add()==HUB_R_OK 才 mark */
 #include "hub_cfg.h"
 
 #define HUB_LOG(fmt, ...) do { printf("      log| " fmt "\n", ##__VA_ARGS__); } while (0)
@@ -1306,6 +1307,281 @@ def check_board_log(path, node_log=None):
     return bad
 
 
+
+def _compile_raw(cc, name, csrc, extra_sources, td, incs):
+    """按给定 include 顺序编一份源码，返回 (exe, err)。
+
+    与 _compile_one 的区别只有一个：include 顺序由调用方给。
+    变异检验必须能把「变异副本目录」压在 SRC 之前，否则改的是副本、编的还是原件。
+    """
+    exe = os.path.join(td, "bin_" + name)   # 不能与变异副本目录同名
+    cmd = [cc, "-std=c99", "-Wall", "-Wextra", "-Werror", "-O1"]
+    for d in incs:
+        cmd += ["-I", d]
+    cmd += ["-o", exe, csrc] + list(extra_sources)
+    cp = subprocess.run(cmd, capture_output=True, text=True)
+    if cp.returncode != 0:
+        print(cp.stdout)
+        print(cp.stderr, file=sys.stderr)
+        return None, "编译失败：%s" % os.path.basename(csrc)
+    return exe, None
+
+
+# t176：跟着产物走的三份镜像（info.txt 由 node-build.sh 写，不入库的是 fwpkg 之外的东西）
+SN_IMAGES = [
+    # 目标, 镜像文件, info 文件, 角色标记前缀, 是否节点镜像
+    ("m1", "NODE_M1.fwpkg", "m1.info.txt", "EC-NODE-ROLE=M1 type=gas", 1),
+    ("m2", "NODE_M2.fwpkg", "m2.info.txt", "EC-NODE-ROLE=M2 type=fall", 1),
+    ("hub", "HUB_HUB.fwpkg", "hub.info.txt", "HUB-ROLE=CENTRAL sn=H1", 0),
+]
+
+SN_TEST = os.path.join(ROOT, "ws63-firmware", "test", "hub_selftest.c")
+
+
+def check_sn_unique(cc):
+    """t176：节点 SN/MAC 由 Die ID 派生 + 汇聚按型号前缀认预绑定 + efuse 失效安全回落。
+
+    分五层，缺一层这套断言就可能是摆设：
+      1) 头文件：NODE_SN_UNIQUE 默认开、SN 上限够装 "M1-3F7A"、legacy MAC 常量在、派生是 static inline；
+      2) 源码：node_main.c 里 **node_identity_init() 必须排在 node_link_init() 之前**
+         （广播地址/本机地址在 SLE 初始化时就被取走，顺序反了等于没改）；且必须调
+         uapi_efuse_get_die_id()、**绝不能**调 uapi_efuse_get_chip_id()（v151 的 HAL 函数表里
+         那个指针是 NULL，一调就崩 —— 方案笔记坑 ①）；hub_json.c 的 hub_sn_valid 要放行中间的 '-'；
+         hub_pump_events() 里白名单不命中要有 "whitelist miss" 日志（t176 之前的静默 return -1
+         是这次排障最痛的点）。
+      3) 行为：真编真跑 ws63-firmware/test/hub_selftest.c（链真实 hub_agg/hub_json/hub_adv），
+         覆盖 SN 格式化/MAC 派生/型号前缀/占位升级/legacy 回落/全 0/全 FF 共 60 条断言。
+      4) 变异：三条反例各自必须变红（die[3..4]→die[0..1] / 前缀匹配改全等 / 去掉占位跳过），
+         否则第 3 层就是"抄了一份能自证的副本"。
+      5) 产物：三份 out/*.info.txt 的角色标记必须与当前 fwpkg 一致，且**镜像里必须真的带本次
+         新加的日志字面量**（节点镜像带 "[CFG] die_id read fail"、汇聚镜像带 "whitelist miss"）。
+         这一条是"改了宏没重编就交"唯一的硬拦：字面量只在对应 #if 分支编进去，改源码不重编，
+         镜像里就没有它。
+    """
+    print("\n== 节点唯一 SN / 型号前缀预绑定（t176）==")
+    cfg_path = os.path.join(SRC, "node_cfg.h")
+    main_path = os.path.join(SRC, "node_main.c")
+    agg_path = os.path.join(SRC, "hub_agg.c")
+    json_path = os.path.join(SRC, "hub_json.c")
+    cli_path = os.path.join(SRC, "hub_client.c")
+    for path in (cfg_path, main_path, agg_path, json_path, cli_path, SN_TEST):
+        if not os.path.isfile(path):
+            print("  FAIL  没有 %s" % path)
+            return 1
+    with open(cfg_path, encoding="utf-8") as f:
+        cfg_raw = f.read()
+    with open(main_path, encoding="utf-8") as f:
+        main_raw = f.read()
+    with open(agg_path, encoding="utf-8") as f:
+        agg_raw = f.read()
+    with open(json_path, encoding="utf-8") as f:
+        json_raw = f.read()
+    with open(cli_path, encoding="utf-8") as f:
+        cli_raw = f.read()
+    main_src = _strip_comments(main_raw)
+    cli_src = _strip_comments(cli_raw)
+    json_src = _strip_comments(json_raw)
+    bad = 0
+
+    # ---- 第 1 层：头文件契约 ----
+    m = re.search(r"#define\s+NODE_SN_UNIQUE\s+(\S+)", cfg_raw)
+    if m is None or m.group(1).strip() not in ("1", "1u"):
+        print("  FAIL  NODE_SN_UNIQUE 默认必须是 1，现在是 %s" % (m.group(1) if m else "未定义"))
+        bad += 1
+    m = re.search(r"#define\s+NODE_SN_MAX\s+(\d+)", cfg_raw)
+    if m is None or int(m.group(1)) < 13:
+        print("  FAIL  NODE_SN_MAX 必须容得下 \"M1-3F7A\"+NUL（≥13），现在是 %s"
+              % (m.group(1) if m else "未定义"))
+        bad += 1
+    for name, want in (("NODE_MAC_LEGACY3", "0x44"), ("NODE_MAC_LEGACY4", "0x55"),
+                       ("NODE_MAC_PREFIX0", "0x11"), ("NODE_MAC_PREFIX1", "0x22"),
+                       ("NODE_MAC_PREFIX2", "0x33")):
+        m = re.search(r"#define\s+%s\s+(0x[0-9A-Fa-f]+|\d+)" % name, cfg_raw)
+        if m is None or int(m.group(1), 0) != int(want, 0):
+            print("  FAIL  %s 应为 %s，现在是 %s" % (name, want, m.group(1) if m else "未定义"))
+            bad += 1
+    if "static inline int node_identity_derive(" not in cfg_raw:
+        print("  FAIL  node_cfg.h 里没有 static inline int node_identity_derive() —— "
+              "派生逻辑不能只写在 .c 里，主机侧就测不到同一份代码了")
+        bad += 1
+    if not re.search(r"extern\s+uint8_t\s+node_cfg_mac\s*\[", cfg_raw):
+        print("  FAIL  node_cfg.h 没有 extern node_cfg_mac[]：广播/本机地址要从运行期值取")
+        bad += 1
+
+    # ---- 第 2 层：源码接线（顺序是最容易搞错的一条）----
+    task = _func_body(main_src, "node_task")
+    if task is None:
+        print("  FAIL  找不到 node_task()")
+        return bad + 1
+    i_id = task.find("node_identity_init(")
+    i_link = task.find("node_link_init(")
+    if i_id < 0:
+        print("  FAIL  node_task() 里没有调用 node_identity_init() —— 身份根本没初始化")
+        bad += 1
+    elif i_link < 0:
+        print("  FAIL  node_task() 里找不到 node_link_init()（链路初始化被挪走了？）")
+        bad += 1
+    elif i_id > i_link:
+        print("  FAIL  node_identity_init() 排在 node_link_init() 之后 —— "
+              "SLE 初始化时已经把老地址取走了，改号等于没改")
+        bad += 1
+    if "uapi_efuse_get_die_id(" not in main_src:
+        print("  FAIL  node_main.c 没有调 uapi_efuse_get_die_id()")
+        bad += 1
+    if "uapi_efuse_get_chip_id" in main_src:
+        print("  FAIL  node_main.c 调了 uapi_efuse_get_chip_id —— v151 HAL 里这个指针是 NULL，"
+              "一调就崩（方案笔记坑 ①）")
+        bad += 1
+    if "die_id fail, fallback legacy" not in main_src:
+        print("  FAIL  没有 \"[CFG] die_id fail, fallback legacy\" 日志 —— "
+              "efuse 失效时现场分不清是回落还是真拿到了 die")
+        bad += 1
+    if "uapi_efuse_init(" not in main_src:
+        print("  FAIL  没有先调 uapi_efuse_init()（不 init 读 die 必返回 ERRCODE_EFUSE_NOT_INIT）")
+        bad += 1
+    hv = _func_body(json_src, "hub_sn_valid")
+    if hv is None:
+        print("  FAIL  找不到 hub_sn_valid()")
+        bad += 1
+    elif "'-'" not in hv and "\"-\"" not in hv:
+        print("  FAIL  hub_sn_valid() 不放行 '-' —— M1-3F7A 进不了白名单")
+        bad += 1
+    pump = _func_body(cli_src, "hub_pump_events")
+    if pump is None:
+        print("  FAIL  找不到 hub_pump_events()")
+        bad += 1
+    elif "whitelist miss" not in pump:
+        print("  FAIL  hub_pump_events() 的白名单不命中分支没有 \"whitelist miss\" 日志 —— "
+              "又是静默 return -1，现场查不出是哪块板")
+        bad += 1
+
+    # ---- 第 3/4 层：真编真跑 + 变异 ----
+    def run_case(tag, header=None, agg=None):
+        d = os.path.join(td, tag)
+        os.makedirs(d)
+        incs = [SRC]
+        extras = [os.path.join(SRC, "hub_json.c"), os.path.join(SRC, "hub_adv.c")]
+        if header is not None:
+            with open(os.path.join(d, "node_cfg.h"), "w", encoding="utf-8") as f:
+                f.write(header)
+            incs.insert(0, d)
+        if agg is not None:
+            with open(os.path.join(d, "hub_agg.c"), "w", encoding="utf-8") as f:
+                f.write(agg)
+            extras.insert(0, os.path.join(d, "hub_agg.c"))
+        else:
+            extras.insert(0, os.path.join(SRC, "hub_agg.c"))
+        exe, err = _compile_raw(cc, tag, SN_TEST, extras, td, incs)
+        if exe is None:
+            return None, err
+        return subprocess.run([exe], capture_output=True, text=True), None
+
+    with tempfile.TemporaryDirectory() as td:
+        rp, err = run_case("snunique")
+        if rp is None:
+            print("  FAIL  唯一 SN 用例台架：" + err)
+            return bad + 1
+        print(rp.stdout, end="")
+        if rp.stderr.strip():
+            print(rp.stderr, file=sys.stderr)
+        if rp.returncode != 0 or "RESULT=OK" not in rp.stdout:
+            print("  FAIL  唯一 SN/型号前缀用例没有全绿（见上面的 FAIL 行）")
+            bad += 1
+        else:
+            print("  PASS  唯一 SN/型号前缀用例全绿（真编真跑 ws63-firmware/test/hub_selftest.c）")
+
+        # 变异 1：SN 取 die[3]/die[4] 改成 die[0]/die[1]
+        mut_h = cfg_raw.replace("die[3]", "die[0]").replace("die[4]", "die[1]")
+        mrp, err = run_case("snmut_die", header=mut_h)
+        if mrp is None:
+            print("  FAIL  变异 1 的副本编不过（测试台自己坏了）：" + err)
+            bad += 1
+        elif mrp.returncode == 0:
+            print("  FAIL  变异 1 没变红：把 SN 的 die[3]/die[4] 换成 die[0]/die[1] 后断言仍然通过")
+            bad += 1
+        else:
+            print("  PASS  变异 1 变红（SN 取错 die 字节 → 两块板会撞同一个 SN）")
+
+        # 变异 2：型号前缀匹配改成全等比较
+        body = _func_body(agg_raw, "hub_sn_model_match")
+        if body is None:
+            print("  FAIL  找不到 hub_sn_model_match()")
+            bad += 1
+        else:
+            exact = ('hub_sn_model_match(const char *entry, const char *sn)\n'
+                     '{\n'
+                     '    return (strcmp(entry, sn) == 0) ? 1 : 0;\n'
+                     '}')
+            mrp, err = run_case("snmut_prefix", agg=agg_raw.replace(body, exact, 1))
+            if mrp is None:
+                print("  FAIL  变异 2 的副本编不过（测试台自己坏了）：" + err)
+                bad += 1
+            elif mrp.returncode == 0:
+                print("  FAIL  变异 2 没变红：前缀匹配改成全等比较后断言仍然通过 —— "
+                      "\"M1\" 命中不了 \"M1-3F7A\" 这件事没被测住")
+                bad += 1
+            else:
+                print("  PASS  变异 2 变红（前缀匹配改全等 → 占位 \"M1\" 命中不了 \"M1-3F7A\"）")
+
+            # 变异 3：去掉"正在被升级的那条不算别人占 MAC"的跳过
+            mrp, err = run_case("snmut_guard",
+                                agg=agg_raw.replace("if ((int)i == up_idx)", "if (0)", 1))
+            if mrp is None:
+                print("  FAIL  变异 3 的副本编不过（测试台自己坏了）：" + err)
+                bad += 1
+            elif mrp.returncode == 0:
+                print("  FAIL  变异 3 没变红：去掉占位跳过之后断言仍然通过 —— "
+                      "真实板一绑就会被判成 MAC 冲突这件事没被测住")
+                bad += 1
+            else:
+                print("  PASS  变异 3 变红（去掉占位跳过 → 占位自己撞自己，真实板绑不上）")
+
+    # ---- 第 5 层：产物与当前源码一致 ----
+    for target, fw, info, marker, is_node in SN_IMAGES:
+        fw_path = os.path.join(OUT, fw)
+        info_path = os.path.join(OUT, info)
+        if not os.path.isfile(fw_path) or not os.path.isfile(info_path):
+            print("  FAIL  %s：缺 %s 或 %s —— 先跑 node-build.sh %s 再跑本脚本"
+                  % (target, fw, info, target))
+            bad += 1
+            continue
+        with open(info_path, encoding="utf-8") as f:
+            info_txt = f.read()
+        m = re.search(r"role_marker=(.*) count=(\d+)", info_txt)
+        if m is None or marker not in m.group(1):
+            print("  FAIL  %s：info.txt 的角色标记对不上（期望含 %r，实际 %r）"
+                  % (target, marker, m.group(0) if m else "没有 role_marker 行"))
+            bad += 1
+        elif int(m.group(2)) < 1:
+            print("  FAIL  %s：镜像里角色标记出现 %s 次（≥1 才行）" % (target, m.group(2)))
+            bad += 1
+        with open(fw_path, "rb") as f:
+            blob = f.read()
+        die_tag = blob.count(b"[CFG] die_id read fail")
+        wl_tag = blob.count(b"whitelist miss")
+        if is_node:
+            if die_tag < 1:
+                print("  FAIL  %s：镜像里没有 \"[CFG] die_id read fail\" —— "
+                      "要么 NODE_SN_UNIQUE=0，要么改了源码没重编" % target)
+                bad += 1
+            else:
+                print("  PASS  %s：镜像带 die-id 日志字面量 ×%d（%d 字节）"
+                      % (target, die_tag, len(blob)))
+        else:
+            if die_tag != 0:
+                print("  FAIL  %s：汇聚镜像里出现了节点身份日志 ×%d —— 编进节点代码了？"
+                      % (target, die_tag))
+                bad += 1
+            if wl_tag < 1:
+                print("  FAIL  %s：镜像里没有 \"whitelist miss\" —— 白名单不命中日志没编进去"
+                      % target)
+                bad += 1
+            else:
+                print("  PASS  %s：汇聚镜像带 whitelist miss ×%d（%d 字节）"
+                      % (target, wl_tag, len(blob)))
+    return bad
+
+
 def main():
     in_docker = "--inside-docker" in sys.argv
     board_log, node_log = None, None
@@ -1342,9 +1618,10 @@ def main():
     pffail = check_pump_forwards()
     txfail = check_uart_tx_path()
     pbfail = check_prebind_list(cc)
+    snfail = check_sn_unique(cc)
     blfail = check_board_log(board_log, node_log)
     total_bad = ((1 if rc != 0 else 0) + cfail + fwfail + hfail + sfail + ssfail
-                 + pafail + upfail + pffail + txfail + pbfail + blfail)
+                 + pafail + upfail + pffail + txfail + pbfail + snfail + blfail)
     print("\n==== hub-selftest 总判定：%s ====" % ("PASS" if total_bad == 0 else "FAIL"))
     print("日志：ws63-firmware/out/hub-selftest.log；mock 聚合证据：ws63-firmware/out/hub-mock-agg.log")
     return 0 if total_bad == 0 else 1

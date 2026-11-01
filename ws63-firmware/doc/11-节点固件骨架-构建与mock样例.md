@@ -949,3 +949,133 @@ python3 tools/node-compile-check.py
   「模块接法（t175）」。
 - **`node-build.sh` 的三处改动不在卡面 inScope 的 4 个文件里**：但不改会让无参全量构建在新目标上 die，
   属「最小必要联动」；已在本节 §15.2 与提交说明里单独登记，请 PM 追认（或另开卡把它正式纳入）。
+
+## 16. t176 记录：节点自报唯一 SN（Die ID 派生）+ 汇聚按型号前缀预绑定
+
+> 任务卡 **t176**。卡面 inScope：`src/node_cfg.h`、`src/node_main.c`、`src/hub_agg.c/.h`、
+> `src/hub_client.c`、本文、`doc/12-汇聚H1-SLE客户端与UART帧.md`、新增 `test/hub_selftest.c`、
+> `out/{NODE_M1,NODE_M2,HUB_HUB}.fwpkg` 与三份 `out/*.info.txt`。
+> **越界但必要**（与 t175 同一惯例，提交里单独登记，请 PM 追认）：`src/sle_hub_adv.c`、`src/sle_hub.c`
+> （广播地址/本机地址必须读运行期 MAC，不改这两处「板上 MAC 唯一」就是空话）、
+> `src/hub_json.c`（`hub_sn_valid()` 必须放行中间的 `-`，否则 `M1-3F7A` 进不了白名单）、
+> `tools/hub-selftest.py`（断言入口）。
+> **别人的未提交改动（`NODE_REED_CH_COUNT` 单通道版：`node_cfg.h` / `node_sensor_door.c` /
+> `node-targets.txt`）没回退、没提交**，本卡的 diff 只加身份/预绑定相关代码。
+
+### 16.1 一句话结论
+
+三块同型号板烧同一份固件再也不会有两个 `M1`：节点上电先读 **Die ID**，SN 变成 `M1-3F7A`、
+星闪 MAC 变成 `11:22:33:<die0>:<die1>:01`，广播名 `EC-M1-3F7A`；**efuse 读失败/全 0/全 FF 一律回落**
+成旧行为（SN=`M1`、MAC=`11:22:33:44:55:01`），不阻塞启动。汇聚侧白名单的台架占位 `"M1"` 按
+**型号前缀**命中真实 SN，命中后就地升级成一个槽位（不再留下幽灵节点），真实节点来连时不会再被
+`MAC_TAKEN` 挡住；白名单不命中时打一行带 MAC 与当前白名单的日志，不再静默 `return -1`。
+
+### 16.2 改了什么
+
+| 文件 | 改动 | 为什么 |
+|---|---|---|
+| `src/node_cfg.h` | ①身份段：`NODE_SN_UNIQUE`(默认 **1**)、`NODE_SN_MAX 13`、`NODE_MAC_BYTES 6`、`NODE_DIE_ID_LEN 5`、`NODE_ADV_NAME_MAX 17`、`NODE_MAC_PREFIX0..2`=11/22/33、`NODE_MAC_LEGACY3/4`=44/55；②`extern char node_cfg_sn[]` / `extern uint8_t node_cfg_mac[]` / `extern char node_cfg_adv_name[]`，并保留 `NODE_SN_STR`→`node_cfg_sn`、`NODE_ADV_NAME`→`node_cfg_adv_name` 的兼容宏（40 多处调用点不用改）；③新增 `static inline int node_identity_derive()`（**纯函数**，主机侧可编）；④`NODE_BUILD_TAG` 改用编译期字面量 `NODE_SN_MODEL` | 派生逻辑放头文件才能被主机自测测到**同一份**代码；构建标识必须留在编译期（构建脚本靠 grep 镜像认角色，改成运行期变量就拼不进字符串，`node-compile-check` 当场就会红） |
+| `src/node_main.c` | 新增三个全局缓冲 + `node_identity_init()`：`uapi_efuse_init()` → `uapi_efuse_get_die_id(die,5)` → `node_identity_derive()`；成功打 `[CFG] die=%02x… sn=%s mac=…`，失败打 `[CFG] die_id fail, fallback legacy`；调用点在 **`node_link_init()` 之前**；上线横幅改成打真实 `node_cfg_mac` 六字节 | 广播参数/本机地址在 SLE 初始化时就被取走，晚于 `node_link_init()` 再改等于没改 |
+| `src/sle_hub_adv.c` | `sle_set_default_announce_param()` 的 `own_addr` 由 `memcpy_s(mac, …, node_cfg_mac, 6)` 得到（原为 `NODE_MAC_PREFIX0..4`+`NODE_MAC_LAST` 初始化列表） | 广播地址不跟着 die 变，板上 MAC 就还是同一个 |
+| `src/sle_hub.c` | `sle_set_local_addr_init()` 同上 | 同上（本机地址与广播地址必须同源） |
+| `src/hub_json.c` | `hub_sn_valid()` 放行**串中间**的 `-`（首字符仍必须是字母数字） | 不放行的话 `M1-3F7A` 会被自己拒掉，白名单永远加不进去 |
+| `src/hub_agg.h` | `hub_node_t` 加 `uint8_t pre_bound`；声明 `hub_sn_model_match` / `hub_wl_index_prebound` / `hub_wl_mark_prebound` / `hub_wl_describe` | 需要区分「台架占位」与「真绑过的节点」 |
+| `src/hub_agg.c` | 新增 `hub_sn_model_match()`（逐字符比到 `-` 或 `\0`：两侧同到界=命中，一侧先到界=不命中，`i≥HUB_SN_LEN` 视作到界）；`hub_wl_index_prebound()`；`hub_wl_mark_prebound()`；`hub_wl_describe()`（逗号拼白名单）；`hub_wl_add()` 里**先算占位槽**、MAC 冲突循环**跳过正在被升级的那一条**、在「精确命中更新」之后插入**就地升级**分支 | 不跳过自己 → 占位自己撞自己 → 真实板一绑就 `MAC_TAKEN`（t176 的核心坑）；不就地升级 → 占位留成幽灵槽，两块同型号板抢一个槽 |
+| `src/hub_client.c` | ①`hub_prebind_apply()` 只在 `hub_wl_add()==HUB_R_OK` 时 `hub_wl_mark_prebound()`；②`hub_pump_events()` 的白名单不命中分支打 `WARN: whitelist miss conn=0x.. mac=.. (N bound: "…") -> disconnect` | ①只 mark 真正进表的项；②**t176 之前这里是静默 `return -1`**，现场根本查不出是哪块板连不上（本次排障最痛的点） |
+| `test/hub_selftest.c`（新增） | 61 条断言：SN 格式化与 hex 大写、MAC 派生、两块板不同、legacy 回落、全 0、全 FF、tiny 缓冲不越界、型号前缀匹配 12 组、`hub_sn_valid` 4 组、占位升级 7 组 | 「真编真跑」才算证据；放 `test/` 而不是 `src/`，因为它不参与固件构建 |
+| `tools/hub-selftest.py` | 新增 `check_sn_unique()`（五层：头文件/源码接线/行为/变异/产物）+ `_compile_raw()`（可变 include 顺序）+ `PREBIND_CASE_SRC` 补 `#include "hub_frame.h"` | 变异检验必须能把「改过的副本目录」压在 `-I src` 之前，否则改的是副本、编的是原件；t173 的用例台因为抠出的函数体新增了 `HUB_R_OK` 也要跟着补头 |
+
+### 16.3 身份口径（连同**已知代价**一起写清楚）
+
+| 项 | 规则 | 依据 |
+|---|---|---|
+| SN | `<型号>-<die[3]die[4] 4 位大写 hex>`，例 `M1-3F7A`（7 字符 ≤ `NODE_SN_MAX-1`） | 卡面 t176 一.2 |
+| MAC | `11:22:33:<die[0]>:<die[1]>:<role>` | 卡面 t176 一.2 |
+| 广播名 | `EC-` + SN，例 `EC-M1-3F7A`（10 字节 ≤ 16） | 卡面 t176 一.2 |
+| 回落 | efuse 读失败 / die 全 0 / die 全 FF → SN=型号、MAC=`11:22:33:44:55:<role>`，**与 t175 之前逐字节一致** | 卡面 t176 一.3 |
+
+**已知代价（必须说，否则下一个人会以为 MAC = 全板唯一）**：
+
+- MAC 只吃 `die[0]/die[1]`、SN 只吃 `die[3]/die[4]` → **两块板若只差 die[2..4]，MAC 会撞、SN 不撞**。
+  `test/hub_selftest.c` 里把这条钉成了断言（`同一 die[0..1]、不同 die[3..4] 时 MAC 必然相同`），
+  不是为了"证明正确"，是为了**防止以后有人改回全等比较或误以为已全覆盖**。
+- 碰撞空间 = 单个 16 位域（每对板 1/65536 量级）；真出量级问题要改成 `die[0..4]` 全用（方案笔记的甲方案）
+  并配合服务端录入查重。
+- 方案笔记甲方案写的是 `mac[0..4]=die[0..4]`，本卡按**卡面**口径实现（`11:22:33:die0:die1:role`）。
+  差异与代价记在此节，别按方案笔记去"修正"代码。
+
+### 16.4 怎么看这块板自己的 SN（3 步）
+
+1. 烧对应角色的固件（`NODE_M1.fwpkg` / `NODE_M2.fwpkg` / `NODE_M4.fwpkg` …），烧完复位。
+2. 串口 **115200 8N1**，看启动首几行里的 `[CFG] die=… sn=M1-3F7A mac=11:22:33:1a:2b:01`。
+   - 看到 `[CFG] die_id fail, fallback legacy` ⇒ 这块板 efuse 读不出来（或 `NODE_SN_UNIQUE=0`），
+     SN 会退回 `M1`、MAC 退回 `11:22:33:44:55:01`，与旧固件行为一致。
+3. 之后的上报帧 `sn` 字段、广播名 `EC-M1-3F7A`、汇聚日志里的白名单文本，用的都是同一个值。
+   （镜像里能 grep 到的 `EC-NODE-ROLE=M1 type=gas` 仍是**型号级**构建标识，不含 die —— 它是认角色用的，不是认板子用的。）
+
+### 16.5 无板验证（本轮实跑，全部可复现）
+
+```bash
+# ① SDK 编译器真编（47 个 目标×文件组合，-Werror 级）
+tools/build-lock.sh python3 tools/node-compile-check.py
+#   → 共 47 个（目标 × 文件）编译，失败 0 个
+
+# ② 主机自测（真编真跑 + 三条变异 + 产物字面量）
+tools/build-lock.sh python3 tools/hub-selftest.py
+#   → 总判定：PASS（原有契约帧 11/11、mock、CCCD、poll、上行、UART、t173 多 SN 全绿）
+#     t176 段：61 条断言全过；变异 1/2/3 全部变红；三份镜像字面量检查 PASS
+
+# ③ 出镜像（连编两轮比 md5，fwpkg 走「可复现」口径）
+bash tools/build-lock.sh bash ws63-firmware/scripts/node-build.sh m1 m2 hub
+```
+
+| 目标 | 产物 | 体积 | md5 | sha256（当次，不作防伪） |
+|---|---|---|---|---|
+| m1 | `out/NODE_M1.fwpkg` | **1469288 B**（较 t169 基线 +704） | `d4f62d975ff24058aa1c4dabd177130e` | `18cbe8f0e6d6eb4180ca69df74ec3c9fffa66fb993d9b89177bc5711cfd21796` |
+| m2 | `out/NODE_M2.fwpkg` | **1468776 B**（+640） | `444bd6b39f5bf6c98b29b4754cb5e8e6` | `bb9260f82921d7772f327793422c8a6b09df0869629b9d3a6d3563a6af50fb78` |
+| hub | `out/HUB_HUB.fwpkg` | **1476008 B**（+512） | `77d638a3d68fb1a9f137287f1e96dc25` | `f4c5677fc2f65e873e2217c87e7553e7ed6a4b6dcffc0e54537c293038f7e9e0` |
+
+- **连编三轮逐位同哈希**：round1 16:58、round2 16:59、以及「修 CRLF 换行后再编」第三轮，
+  三个 fwpkg 的 md5 全部相同 ⇒ `.fwpkg` 的可复现口径在本卡继续成立。
+- 构建脚本自带的**角色断言**每轮都过：`'EC-NODE-ROLE=M1 type=gas'×1，其它角色标记 0`、
+  `'HUB-ROLE=CENTRAL sn=H1 fw=0.1.0 mock=0'×1，节点角色标记 0`。
+
+**「改了宏没重编就交」这一层是见过红的**（本轮真实输出，不是假设）：
+
+```
+== 节点唯一 SN / 型号前缀预绑定（t176）==
+  PASS  唯一 SN/型号前缀用例全绿（真编真跑 ws63-firmware/test/hub_selftest.c）
+  PASS  变异 1 变红（SN 取错 die 字节 → 两块板会撞同一个 SN）
+  PASS  变异 2 变红（前缀匹配改全等 → 占位 "M1" 命中不了 "M1-3F7A"）
+  PASS  变异 3 变红（去掉占位跳过 → 占位自己撞自己，真实板绑不上）
+  FAIL  m1：镜像里没有 "[CFG] die_id read fail" —— 要么 NODE_SN_UNIQUE=0，要么改了源码没重编
+  FAIL  m2：镜像里没有 "[CFG] die_id read fail" —— 要么 NODE_SN_UNIQUE=0，要么改了源码没重编
+  FAIL  hub：镜像里没有 "whitelist miss" —— 白名单不命中日志没编进去
+```
+
+（这是**重编之前**跑的，三条 FAIL 正是它该报的；重编后同一脚本全 PASS。字面量只在对应
+`#if` 分支里存在，所以"改源码不重编"骗不过它。）
+
+三条变异各自的反例（红在哪，供复核对照）：
+
+| 变异 | 改法 | 红在哪 |
+|---|---|---|
+| 1 | `node_cfg.h` 里 `die[3]→die[0]`、`die[4]→die[1]` | `SN 应为 M1-3F7A` / `两个不同 die 的 SN 必须不同` |
+| 2 | `hub_sn_model_match()` 体换成 `strcmp(entry, sn)==0` | `"M1" 应命中 "M1-3F7A"` |
+| 3 | `hub_wl_add()` 里 `if ((int)i == up_idx)` 改成 `if (0)` | `同一 MAC 从占位升级到真实 SN 应成功` |
+
+自测写完后**先红后绿地发现两处自己的错**（留作记录）：①第二块板的假 die 只改了 `die[3..4]`，
+按卡面口径 MAC 必然相同 → 断言报红，改成五字节都不同；②`tiny` 缓冲的越界检查从 `strlen()` 开始数，
+把函数自己写的 NUL 当成"被踩"，改成从 `strlen()+1` 起。两处都不是固件缺陷，是测试写错。
+
+### 16.6 未做 / 待用户实测 / 跨目录待办（**不得写成已验证**）
+
+- **未上板**：`uapi_efuse_get_die_id()` 在本项目的三块板上没有实测过取值（本卡只读代码 + 编译 +
+  主机自测）。现场第一块板刷入后请回传首行 `[CFG] die=… sn=… mac=…`；若打的是
+  `[CFG] die_id fail, fallback legacy`，说明该板 efuse 读不出，需把返回值一并回传。
+- **两块同型号板同时在线的端到端**（SLE 侧真连接）未实测，属上板阶段。
+- **服务端 SN 正则会挡带 `-` 的 SN**：`server/app/services/telemetry.py` 的 `_NODE_SN_RE=^[HM]\d{1,2}$`
+  不接受 `M1-3F7A`（本卡不改服务端）。要不要放宽由 PM 定（放宽后要一并考虑数据库长度与索引）。
+- 网关侧 `rk2206-gateway` 是否也有 SN 格式假设（本卡不改网关），需 PM 派单核查。
+- `docs/执行/上板联调施工单.md` 里的旧钩子写法（`HUB_TEST_PREBIND_SN "M2"` 一类）不在本卡 inScope，
+  **未改**；`doc/12` 里的同类简写已顺手改成本卡口径。

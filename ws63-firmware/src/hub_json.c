@@ -250,10 +250,18 @@ int hub_sn_valid(const char *sn)
     if (!(sn[0] >= 'A' && sn[0] <= 'Z')) {
         return 0;
     }
+    /* t176：节点 SN 现在是「型号-DieID 后缀」形态（M1-3F7A），必须放行 '-'。
+     * 只允许出现在串中间：开头 '-' 说不出来源（契约 §0.7 的 SN 以型号字母开头），
+     * 结尾 '-' 后面没有后缀，两种都当非法，避免把 "M1-" 这种半截值放进白名单。 */
     for (i = 1; i < n; i++) {
-        if (!((sn[i] >= 'A' && sn[i] <= 'Z') || (sn[i] >= '0' && sn[i] <= '9'))) {
-            return 0;
+        int mid = (i + 1u < n);
+        if ((sn[i] >= 'A' && sn[i] <= 'Z') || (sn[i] >= '0' && sn[i] <= '9')) {
+            continue;
         }
+        if (sn[i] == '-' && mid) {
+            continue;
+        }
+        return 0;
     }
     return 1;
 }

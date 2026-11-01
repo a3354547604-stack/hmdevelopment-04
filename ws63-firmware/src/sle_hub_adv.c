@@ -103,11 +103,11 @@ static void sle_build_adv_payloads(void)
 static int sle_set_default_announce_param(void)
 {
     sle_announce_param_t param = {0};
-    /* 契约 §2.7 必须改点 1：原实现把三块节点写成同一个 11:22:33:44:55:66，汇聚无法区分 */
-    uint8_t mac[SLE_ADDR_LEN] = {
-        NODE_MAC_PREFIX0, NODE_MAC_PREFIX1, NODE_MAC_PREFIX2,
-        NODE_MAC_PREFIX3, NODE_MAC_PREFIX4, NODE_MAC_LAST
-    };
+    /* 契约 §2.7 必须改点 1：节点地址由 Die ID 派生（t176），同型号多块板才可能同时在线。
+     * 这里只做拷贝 —— 派生在 node_main.c 的 node_identity_init() 里做一次，
+     * 三处（广播参数 / 本地地址 / 上报帧）共用同一个 node_cfg_mac，避免各算各的。 */
+    uint8_t mac[SLE_ADDR_LEN] = {0};
+    (void)memcpy_s(mac, (size_t)SLE_ADDR_LEN, node_cfg_mac, (size_t)NODE_MAC_BYTES);
     param.announce_mode = SLE_ANNOUNCE_MODE_CONNECTABLE_SCANABLE;
     param.announce_handle = SLE_ADV_HANDLE_DEFAULT;
     param.announce_gt_role = SLE_ANNOUNCE_ROLE_T_CAN_NEGO;

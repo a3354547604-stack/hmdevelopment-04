@@ -730,3 +730,66 @@ addr:11:**:**:**:55:99, conn_id:00
   `[HUB] seek hit #… mac=11:22:33:44:55:01 sn=M1 role=1 rssi=-3` 与 `seek stop`，
   `grep -icE "prebind|hub_test_prebind|CONNECTED|-> 0x01"` = **0** ⇒ 钩子确实不在镜像里（没有网关配对就不连）。
 - 两块板都不是钩子/调试镜像；**COM14 / COM15 已释放**（无残留抓包进程）。
+
+## 15 t176 记录：白名单按「型号前缀」认预绑定 + 白名单不命中日志
+
+> 任务卡 **t176**。§10.4 / §12 / §13 / §14 里出现的 `HUB_TEST_PREBIND_ON 1 / SN "M1"` 是**当时的单 SN 钩子
+> 记录**（t59--t85），属于历史证据，故意不改写；**现行口径**以本节的 `HUB_TEST_PREBIND_SN_LIST` 为准。
+
+### 15.1 为什么要改
+
+t176 让节点 SN 由 Die ID 派生（`M1` → `M1-3F7A`，见 `doc/11-...md` §16）。而台架钩子预置的白名单项
+只有型号（`"M1"`、`"M2"`），`hub_wl_add()` 又用 `strncmp(..., HUB_SN_LEN)` **全等**匹配
+（`hub_agg.c:hub_wl_index`），于是：
+
+1. 真实节点 `M1-3F7A` 的白名单查询必然不命中 → 连上就被断开（现象与「没绑」一样，历史上很难查）；
+2. 就算放行，台架占位还会占掉一个槽，两块同型号板永远只能上一块。
+
+### 15.2 现行规则（`hub_agg.c`）
+
+| 函数 | 行为 |
+|---|---|
+| `hub_sn_model_match(entry, sn)` | 逐字符比较，任一侧遇到 `-` 或 `\0` 视为「型号段结束」：两侧同到界=命中；一侧先到界=不命中；`i ≥ HUB_SN_LEN` 也按到界处理（超长表项不会越界读）。实测：`"M1"` 命中 `"M1"`/`"M1-3F7A"`，不命中 `"M12"`/`"M2-1C09"`；`"M1-3F"` 命中 `"M1-3F7A"` |
+| `hub_wl_index_prebound(a, sn)` | 返回「`pre_bound=1` 且型号前缀命中」的槽位；用于判断这次绑定是不是升级占位 |
+| `hub_wl_add()` | ①先算 `up_idx`；②MAC 冲突循环里**跳过 `up_idx` 自己**（否则占位自己撞自己 → 真实板一绑就 `MAC_TAKEN`）；③精确命中则就地更新；④`up_idx >= 0` 则**就地升级**：重写 SN、清 `pre_bound`、写 MAC、`state=BOUND`、`next_scan_ms=now_ms`（槽位数不变） |
+| `hub_wl_mark_prebound(a, sn)` | 只由 `hub_client.c:hub_prebind_apply()` 在 `hub_wl_add()==HUB_R_OK` 后调用 —— 没真正进表的项不会被 mark |
+| `hub_wl_describe(a, buf, cap)` | 逗号拼当前白名单 SN（截断保护），只给日志用 |
+
+MAC 冲突判定（§3.4 的 `MAC_TAKEN`）与槽位上限 8 保持不动；变的是「占位不算别人占 MAC」这一条。
+
+### 15.3 白名单不命中日志（t176 之前是静默 `return -1`）
+
+```
+[HUB] WARN: whitelist miss conn=0x2 mac=11:22:33:1a:2b:01 (2 bound: "M1-3F7A,M1-1C09") -> disconnect
+```
+
+现场怎么读：
+
+- `mac=` 就是那块连上来的板的**广播地址**（t176 起由 die 派生），可直接对照节点板首行
+  `[CFG] … mac=` 判断是不是同一块板；
+- `N bound:` 后面是当前白名单原文 —— 若里面是 `M1`（占位）而 `mac` 对应一块已升级的板，
+  说明钩子没升级成功；若是 `""`，说明白名单是空的（没网关也没钩子）；
+- 日志出现后连接**照旧被断开**（§2.7：非白名单节点不产生业务数据），只是不再无声无息。
+
+### 15.4 验证（本轮实跑）
+
+```bash
+tools/build-lock.sh python3 tools/hub-selftest.py     # 总判定 PASS
+```
+
+- `check_sn_unique()` 的「源码层」断言：`hub_pump_events()` 的白名单不命中分支**必须**含
+  `whitelist miss`（原先静默 return -1 的那条）；
+- 「行为层」61 条断言里的 7 条专测占位升级：占位 1 项 → 升级后仍 1 项、旧占位 SN 消失、
+  `pre_bound` 清零、MAC 换成真实值；第二块同型号板再占 1 项（共 2 项，两块同时在线）；
+  `describe` 输出 `"M1-3F7A,M1-1C09"`；陌生 MAC `hub_agg_on_connected()` 返回 `<0`；
+  同一 MAC 从占位升级到真实 SN 返回 `HUB_R_OK`；
+- 「变异层」把 `if ((int)i == up_idx)` 改成 `if (0)` 后，`同一 MAC 从占位升级到真实 SN 应成功`
+  必须变红（本轮实测变红）；
+- 「产物层」`out/HUB_HUB.fwpkg` 里必须能 grep 到 `whitelist miss`（只在真的重编后才有）。
+
+### 15.5 未做 / 待 PM 定
+
+- **当前 `out/HUB_HUB.fwpkg`（t176 产物，1476008 B / `77d638a3…`）钩子是 `ON` + `SN_LIST "M1,M2"`**，
+  与 t173 同一条遗留：**正式送审前必须另打一份 `HUB_TEST_PREBIND_ON 0` 的包**（本卡口径是"交付含
+  md5+体积"，没把它悄悄关掉换掉产物）。
+- `docs/执行/上板联调施工单.md` 仍写着旧宏 `HUB_TEST_PREBIND_SN`（照做编译不过），**不在本卡 inScope，未改**。

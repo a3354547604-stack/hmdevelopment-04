@@ -518,15 +518,15 @@ void sle_ssaps_set_info(void)
     ssaps_set_info(g_server_id, &info);
 }
 
-/* 本地地址按 SN 派生（契约 §2.7 第 1 点）：11:22:33:44:55:<SN 编号>。
- * 原实现把三块节点写成同一个 11:22:33:44:55:66，汇聚扫描时无法区分 → 绑定必然失败。 */
+/* 本地地址按 Die ID 派生（契约 §2.7 第 1 点，t176）：11:22:33:<die0>:<die1>:<角色号>。
+ * 改号前是写死的 11:22:33:44:55:66/01 —— 同型号几块板因此互相顶掉。
+ * 派生只在 node_main.c 的 node_identity_init() 做一次，这里只拷贝。 */
 void sle_set_local_addr_init(void)
 {
     sle_addr_t addr = {0};
-    uint8_t mac[SLE_ADDR_LEN] = {
-        NODE_MAC_PREFIX0, NODE_MAC_PREFIX1, NODE_MAC_PREFIX2,
-        NODE_MAC_PREFIX3, NODE_MAC_PREFIX4, NODE_MAC_LAST
-    };
+    uint8_t mac[SLE_ADDR_LEN] = {0};
+
+    (void)memcpy_s(mac, (size_t)SLE_ADDR_LEN, node_cfg_mac, (size_t)NODE_MAC_BYTES);
     addr.type = 0;      /* 0 = 公有地址（星闪设备地址类型，与 §2.7 的「每个节点唯一」配套） */
     (void)memcpy_s(addr.addr, SLE_ADDR_LEN, mac, SLE_ADDR_LEN);
     (void)sle_set_local_addr(&addr);

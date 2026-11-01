@@ -77,6 +77,11 @@ typedef struct {
     char     sn[HUB_SN_LEN];
     uint8_t  mac[HUB_MAC_BYTES];
     uint8_t  have_mac;
+    /* t176：这是「台架预绑定占位」而不是真实绑定 —— SN 只有型号（"M1"），MAC 是按型号派生的
+     * 假值。真实节点用自己的 SN（"M1-3F7A"）来绑定时，就地把它升级掉，不另占槽位。
+     * 为什么需要这个标记：没有它，"M1" 与 "M1-3F7A" 会是两个槽，8 槽上限里白扔两个，
+     * 而且占位那条永远状态 BOUND 却没人连，0x24 列表里显示成幽灵节点。 */
+    uint8_t  pre_bound;
     uint8_t  state;            /* HUB_SLOT_* */
     uint8_t  proc;             /* HUB_PROC_* */
     uint8_t  proc_try;
@@ -215,6 +220,22 @@ int hub_wl_index(const hub_agg_t *a, const char *sn);
 int hub_wl_index_mac(const hub_agg_t *a, const uint8_t mac[HUB_MAC_BYTES]);
 int hub_wl_count(const hub_agg_t *a);
 int hub_wl_slots_free(const hub_agg_t *a);
+
+/* ---- t176：唯一 SN 配套（型号前缀匹配 / 预绑定占位升级 / 白名单文本） ----
+ * 都是纯字符串/数组运算，主机自测直接编本文件即覆盖（不碰 SDK）。 */
+
+/* 型号前缀匹配：entry="M1" 命中 "M1"、"M1-3F7A"；不命中 "M12"、"M2-1C09"。
+ * 比较到 '-' 或字符串末尾为止 —— 这就是「SN = 型号[-DieID 后缀]」的判定口径。 */
+int hub_sn_model_match(const char *entry, const char *sn);
+
+/* 找「型号前缀命中 + 是预绑定占位」的槽位下标，没有返回 -1（供 hub_wl_add 就地升级）。 */
+int hub_wl_index_prebound(const hub_agg_t *a, const char *sn);
+
+/* 把某个已存在槽位标成预绑定占位（hub_client 的台架钩子用完就调）。 */
+void hub_wl_mark_prebound(hub_agg_t *a, const char *sn);
+
+/* 把白名单拼成 "M1-3F7A,M2-1C09"（上限内截断），给「连不上」日志用；返回槽位数。 */
+int hub_wl_describe(const hub_agg_t *a, char *out, size_t cap);
 
 /* ---- 扫描 ---- */
 /** 记一条扫描结果（自动去重、累加 rssi 为最新值） */
