@@ -177,10 +177,18 @@
     <string name="action_prev_step">上一步</string>
     <string name="action_retry">再试一次</string>
     <string name="add_bind_title">把设备绑到我的账号</string>
-    <string name="hint_device_sn">设备编号（盒子上贴着）</string>
-    <string name="hint_bind_code">绑定码（6 位）</string>
+    <string name="hint_device_sn">设备编号（机身上贴的那串，字母加数字）</string>
+    <string name="hint_bind_code">绑定码（6 位数字）</string>
     <string name="action_bind_account">绑定</string>
     <string name="err_bind_sn_code">设备编号和绑定码都要填</string>
+    <string name="err_bind_sn_missing">请先填设备编号（机身上贴的那串）</string>
+    <string name="err_bind_code_missing">请先填 6 位绑定码</string>
+    <string name="err_bind_code_len">绑定码是 6 位数字，请再核对一下</string>
+    <string name="err_bind_not_found">没找到这台设备，请核对机身上的设备编号</string>
+    <string name="err_bind_code_wrong">绑定码不对，请重新看机身上的 6 位数字</string>
+    <string name="err_bind_taken">这台设备已经被别人绑了，需要管理员重新生成绑定码</string>
+    <string name="err_bind_code_expired">绑定码过期了，请让管理员重新生成</string>
+    <string name="err_bind_generic">绑定没成功，请稍后再试</string>
     <string name="msg_bind_ok">绑定成功</string>
 
     <!-- ===== 维护设置（21 项，藏在高级里） ===== -->

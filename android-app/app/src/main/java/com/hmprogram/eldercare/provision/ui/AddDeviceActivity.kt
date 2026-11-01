@@ -7,6 +7,7 @@ import android.widget.ArrayAdapter
 import androidx.activity.result.contract.ActivityResultContracts
 import com.hmprogram.eldercare.provision.R
 import com.hmprogram.eldercare.provision.core.ApiResult
+import com.hmprogram.eldercare.provision.core.ContractErrors
 import com.hmprogram.eldercare.provision.core.SessionStore
 import com.hmprogram.eldercare.provision.databinding.ActivityAddDeviceBinding
 import com.hmprogram.eldercare.provision.wifi.WifiHelper
@@ -53,6 +54,9 @@ class AddDeviceActivity : BaseActivity() {
         vb.groupStep2.visibility = visible(step == 2)
         vb.groupStep3.visibility = visible(step == 3)
         vb.groupStep4.visibility = visible(step == 4)
+        // 「把设备绑到我的账号」只在结果页出现：设备还没连上网时填绑定码没有意义
+        // （说出来也没用，用户会以为填完就通了）。这一行曾漏写，导致卡片永远 GONE、用户输不了绑定码。
+        vb.groupBind.visibility = visible(step == 4)
         vb.btnPrev.visibility = visible(step in 2..3)
         vb.btnNext.visibility = visible(step in 1..2)
         vb.tvStepTitle.text = getString(
@@ -90,7 +94,8 @@ class AddDeviceActivity : BaseActivity() {
                 is ApiResult.Ok -> {
                     val mode = res.data.mode
                     if (mode == "ap" || mode == "ap_sta" || mode == "sta") {
-                        res.data.device_sn.takeIf { it.isNotBlank() }?.let { vb.etSn.setText(it) }
+                        // 故意不把探测到的 device_sn 预填进输入框：SN + 绑定码是现场凭据，
+                        // 预填会让用户以为「已经填好了」，也容易把不属于本账号的编号带进截图
                         vb.tvGatewayTip.text = getString(R.string.gateway_found, session.gatewayBase)
                         goStep(2)
                     } else {
@@ -263,8 +268,17 @@ class AddDeviceActivity : BaseActivity() {
     private fun bindToAccount() {
         val sn = vb.etSn.text.toString().trim()
         val code = vb.etCode.text.toString().trim()
-        if (sn.isEmpty() || code.isEmpty()) {
-            toast(getString(R.string.err_bind_sn_code))
+        // 分开报错：只说「都要填」时用户不知道该补哪一个
+        if (sn.isEmpty()) {
+            toast(getString(R.string.err_bind_sn_missing))
+            return
+        }
+        if (code.isEmpty()) {
+            toast(getString(R.string.err_bind_code_missing))
+            return
+        }
+        if (code.length != 6) {
+            toast(getString(R.string.err_bind_code_len))
             return
         }
         launchUi {
@@ -276,10 +290,49 @@ class AddDeviceActivity : BaseActivity() {
                     finish()
                 }
                 is ApiResult.Err -> {
-                    vb.tvResult.text = res.display()
+                    vb.tvResult.text = bindProblem(res)
                     handleFailure(res, vb.tvOfflineBanner)
                 }
             }
+        }
+    }
+
+    /**
+     * 绑定失败按契约 §9.2 的码翻译成人话。
+     *
+     * 为什么不用 `display()` 直接显示：1201/1202/1203 的原始文案长得像（都是「绑定码…」），
+     * 而用户此刻要做的事完全不同（重看贴纸 / 找管理员 / 找管理员重发），必须分开说。
+     */
+    private fun bindProblem(res: ApiResult.Err): String = when (res.code) {
+        ContractErrors.DEVICE_NOT_FOUND -> getString(R.string.err_bind_not_found)
+        ContractErrors.BAD_BIND_CODE -> getString(R.string.err_bind_code_wrong)
+        ContractErrors.DEVICE_ALREADY_BOUND -> getString(R.string.err_bind_taken)
+        ContractErrors.BIND_CODE_EXPIRED -> getString(R.string.err_bind_code_expired)
+        ContractErrors.MISSING_PARAM -> missingText(res)
+        ContractErrors.BAD_PARAM, ContractErrors.PARAM_OUT_OF_RANGE -> fieldText(res)
+        else -> res.display()
+    }
+
+    /** 1000：服务器说少了哪些字段，逐条说成「请补哪个」。 */
+    private fun missingText(res: ApiResult.Err): String {
+        val missing = res.details?.missing.orEmpty()
+        val needSn = missing.isEmpty() || missing.any { it.equals("sn", true) }
+        val needCode = missing.isEmpty() || missing.any { it.equals("bind_code", true) || it.equals("code", true) }
+        return when {
+            needSn && needCode -> getString(R.string.err_bind_sn_code)
+            needSn -> getString(R.string.err_bind_sn_missing)
+            needCode -> getString(R.string.err_bind_code_missing)
+            else -> getString(R.string.err_bind_generic)
+        }
+    }
+
+    /** 1001/1002：服务器指出是哪个字段不合格（field/allowed），照字段说话。 */
+    private fun fieldText(res: ApiResult.Err): String {
+        val field = res.details?.field.orEmpty()
+        return when {
+            field.equals("bind_code", true) || field.equals("code", true) -> getString(R.string.err_bind_code_len)
+            field.equals("sn", true) -> getString(R.string.err_bind_not_found)
+            else -> getString(R.string.err_bind_generic)
         }
     }
 
