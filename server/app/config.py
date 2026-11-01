@@ -75,12 +75,15 @@ class Settings:
     product_key: str = ""
     product_key_rate_limit: int = 5        # 出厂注册：同一 IP 每秒最多 5 次
     product_key_rate_window_s: int = 1
-    # 只读运维后台（/admin，实施计划 §7.5）：留空 = 所有 /admin 路由整体 404（同 product_key 口径）。
+    # 商家后台（/admin，实施计划 §7.5）：留空 = 所有 /admin 路由整体 404（同 product_key 口径）。
     # 它不对外网开放——nginx 只放通 /api/，访问走 SSH 隧道或局域网；改口令即让已登录浏览器失效。
     admin_password: str = ""
 
     # 业务常量（契约 §8）
-    bind_code_ttl_min: int = 10          # §6.6 绑定码有效期 10 分钟
+    bind_code_ttl_min: int = 10          # §6.6 绑定码有效期 10 分钟（App 内临时邀请家人用）
+    # 出厂贴纸码：由 /admin 录入设备时生成，印在机器上随货发。客户可能几个月后才开箱，
+    # 所以不能用 §6.6 的 10 分钟——那会让贴纸在出厂当天就失效。
+    bind_code_ttl_days: int = 3650
     gateway_offline_timeout_s: int = 180  # §8.7 网关离线判定
     clock_source: str = "server"          # §6.20 / CAL-09：未校时前必须是 server
     login_rate_limit: int = 100           # §9.1：同一 IP 5 分钟 >100 次登录尝试 → 429
