@@ -1,21 +1,21 @@
 HMProgram 应用端（harmony-app）HAP 构建日志
-生成时间（UTC+8）：2026-10-20 22:37:50
+生成时间（UTC+8）：2026-11-01 17:44:18
 工具链：5.8.9　Node：v18.20.1
 SDK：12 default 
 
 ==============================================================
 [1/2] 编译门禁自证：注入未定义常量，必须 BUILD FAILED（hvigor --max-workers=2，见 AGENTS.md 资源上限）
 ==============================================================
-[31m1 ERROR: [31mArkTS:ERROR File: /mnt/c/Users/Administrator/Desktop/HMProgram/harmony-app/entry/src/main/ets/pages/HomePage.ets:26:28
+[31m1 ERROR: [31mArkTS:ERROR File: /mnt/c/Users/Administrator/Desktop/HMProgram-merge/harmony-app/entry/src/main/ets/pages/HomePage.ets:29:28
  Cannot find name 'NOT_DEFINED_CONST_FOR_GATE_PROBE'.
-> hvigor [91mERROR: BUILD FAILED in 21 s 28 ms [39m
+> hvigor [91mERROR: BUILD FAILED in 18 s 334 ms [39m
 自证断言：hvigor rc=255（应≠0）；日志 BUILD FAILED=2 处、ArkTS 错误=2 处（都应≥1）；回退注入 grep 计数=0（应为 0）
 
 ==============================================================
 [2/2] 正式构建：hvigorw --no-daemon --no-analyze --max-workers=2 assembleHap
 ==============================================================
-清理上一轮产物（保证下面列出的必是本轮产出）：/mnt/c/Users/Administrator/Desktop/HMProgram/harmony-app/entry/build/default/outputs/default/entry-default-unsigned.hap
-构建起始时间戳（epoch，新鲜度基准）：1792507094
+构建前 /mnt/c/Users/Administrator/Desktop/HMProgram-merge/harmony-app/entry/build/default/outputs/default 下无 HAP 产物
+构建起始时间戳（epoch，新鲜度基准）：1793526278
 > hvigor [33mWARN: Command line '--no-analyze' is deprecated, please use '--analyze=false' instead.[39m
 > hvigor [32mUP-TO-DATE :entry:default@PreBuild...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@GenerateMetadata...  [39m
@@ -23,35 +23,42 @@ SDK：12 default
 > hvigor [32mUP-TO-DATE :entry:default@MergeProfile...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@CreateBuildProfile...  [39m
 > hvigor [32mFinished :entry:default@PreCheckSyscap... after 2 ms [39m
-> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 3 ms [39m
-> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 10 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgContextInfo... after 4 ms [39m
+> hvigor [32mFinished :entry:default@ProcessIntegratedHsp... after 11 ms [39m
 > hvigor [32mFinished :entry:default@BuildNativeWithCmake... after 1 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@MakePackInfo...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessProfile...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@SyscapTransform...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessRouterMap...  [39m
-> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 8 ms [39m
+> hvigor [32mFinished :entry:default@BuildNativeWithNinja... after 9 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessResource...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@GenerateLoaderJson...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@ProcessLibs...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@CompileResource...  [39m
 > hvigor [32mUP-TO-DATE :entry:default@DoNativeStrip...  [39m
-> hvigor [32mFinished :entry:default@BuildJS... after 57 ms [39m
+> hvigor [32mFinished :entry:default@BuildJS... after 76 ms [39m
 > hvigor [32mUP-TO-DATE :entry:default@CacheNativeLibs...  [39m
-> hvigor [32mFinished :entry:default@CompileArkTS... after 15 s 987 ms [39m
-> hvigor [32mFinished :entry:default@GeneratePkgModuleJson... after 43 ms [39m
-> hvigor [32mFinished :entry:default@PackageHap... after 1 s 55 ms [39m
+> hvigor [32m[33mWARN: [33mArkTS:WARN File: /mnt/c/Users/Administrator/Desktop/HMProgram-merge/harmony-app/entry/src/main/ets/pages/RegisterPage.ets:19:1
+ It's not a recommended way to export struct with @Entry decorator, which may cause ACE Engine error in component preview mode.[39m
+[33mWARN: [33mArkTS:WARN File: /mnt/c/Users/Administrator/Desktop/HMProgram-merge/harmony-app/entry/src/main/ets/pages/AddNodePage.ets:39:1
+ It's not a recommended way to export struct with @Entry decorator, which may cause ACE Engine error in component preview mode.[39m
+[33mWARN: [33mArkTS:WARN File: /mnt/c/Users/Administrator/Desktop/HMProgram-merge/harmony-app/entry/src/main/ets/pages/HelpPage.ets:26:1
+ It's not a recommended way to export struct with @Entry decorator, which may cause ACE Engine error in component preview mode.[39m
+[39m
+> hvigor [32mFinished :entry:default@CompileArkTS... after 19 s 21 ms [39m
+> hvigor [32mFinished :entry:default@GeneratePkgModuleJson... after 40 ms [39m
+> hvigor [32mFinished :entry:default@PackageHap... after 1 s 176 ms [39m
 > hvigor [33mWARN: No signingConfig found for product default[39m
-> hvigor [32mFinished :entry:default@SignHap... after 25 ms [39m
+> hvigor [32mFinished :entry:default@SignHap... after 9 ms [39m
 > hvigor [32mFinished :entry:assembleHap... after 1 ms [39m
-> hvigor [32mBUILD SUCCESSFUL in 20 s 378 ms [39m
+> hvigor [32mBUILD SUCCESSFUL in 24 s 26 ms [39m
 正式构建 hvigor rc=0（应为 0）
 
 ==============================================================
 产物
 ==============================================================
-1013964 bytes  mtime=2026-10-20 22:38:35.082967400 +0800  /mnt/c/Users/Administrator/Desktop/HMProgram/harmony-app/entry/build/default/outputs/default/entry-default-unsigned.hap
-新鲜度判据：HAP mtime(epoch)=1792507115 ≥ 构建起始 epoch=1792507094 ⇒ 本轮产出
+1139109 bytes  mtime=2026-11-01 17:45:03.584391100 +0800  /mnt/c/Users/Administrator/Desktop/HMProgram-merge/harmony-app/entry/build/default/outputs/default/entry-default-unsigned.hap
+新鲜度判据：HAP mtime(epoch)=1793526303 ≥ 构建起始 epoch=1793526278 ⇒ 本轮产出
 
 说明：本机无 hdc 设备、CLT 内无模拟器、/dev/kvm 不可写，
       因此只做到「编译产 HAP」；安装/上架/真机运行标注为「待用户实测」。

@@ -155,7 +155,6 @@ export struct SegmentedBar {
           .height(AppTheme.BADGE_HEIGHT + 8)
           .layoutWeight(1)
           .textAlign(TextAlign.Center)
-          .accessibilitySelected(index === this.selectedIndex)
           .onClick(() => this.onSelect(index))
       }, (label: string, index: number) => `${label}-${index}`)
     }

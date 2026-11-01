@@ -67,7 +67,6 @@ struct ReportPage {
           .constraintSize({ minHeight: 36 })
           .layoutWeight(1)
           .borderRadius(AppTheme.BTN_RADIUS)
-          .accessibilitySelected(this.periodIndex === index)
           .onClick(() => this.switchTo(index))
       }, (label: string) => label)
     }
