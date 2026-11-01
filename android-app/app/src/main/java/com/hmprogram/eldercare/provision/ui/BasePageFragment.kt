@@ -17,6 +17,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.viewbinding.ViewBinding
 import com.hmprogram.eldercare.provision.ProvisionApp
 import com.hmprogram.eldercare.provision.R
 import com.hmprogram.eldercare.provision.core.ApiResult
@@ -76,17 +77,20 @@ abstract class BasePageFragment : Fragment() {
 
     protected fun toast(msg: String) = Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
 
-    protected fun <VB> addRow(
+    /**
+     * 同 [BaseActivity.addRow]：`inflate()` 返回 View，旧写法 `as VB` 强转后在本页面
+     * `bind(typed)` 处必崩（线上栈：ClassCastException: LinearLayout → ItemAlertRowBinding）。
+     * 现在由生成类的静态 inflate 直接产出绑定类，无强转。
+     */
+    protected fun <VB : ViewBinding> addRow(
         parent: LinearLayout,
-        @LayoutRes layout: Int,
+        inflate: (LayoutInflater, ViewGroup?, Boolean) -> VB,
         bind: (VB) -> Unit,
     ): VB {
-        val vb = LayoutInflater.from(requireContext()).inflate(layout, parent, false)
-        @Suppress("UNCHECKED_CAST")
-        val typed = vb as VB
-        parent.addView(vb as View)
-        bind(typed)
-        return typed
+        val vb = inflate(LayoutInflater.from(parent.context), parent, false)
+        parent.addView(vb.root)
+        bind(vb)
+        return vb
     }
 
     // ------------------------------------------------------------------

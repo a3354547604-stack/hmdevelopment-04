@@ -148,7 +148,7 @@ class SmokeActivity : BaseActivity() {
     }
 
     private fun row(name: String, ok: Boolean, detail: String) {
-        addRow<ItemSmokeBinding>(vb.listSmoke, R.layout.item_smoke) { b ->
+        addRow(vb.listSmoke, ItemSmokeBinding::inflate) { b ->
             b.tvSmokeName.text = (if (ok) "✓ " else "✗ ") + name
             b.tvSmokeDetail.text = detail
         }

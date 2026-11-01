@@ -77,7 +77,7 @@ class SettingsActivity : BaseActivity() {
         rows.clear()
 
         SettingsSchema.SPECS.forEach { spec ->
-            val b = addRow<ItemSettingBinding>(vb.listSettings, R.layout.item_setting) { row ->
+            val b = addRow(vb.listSettings, ItemSettingBinding::inflate) { row ->
                 row.tvSettingLabel.text = if (spec.unit.isBlank()) spec.label else "${spec.label}（${spec.unit}）"
                 row.tvSettingRange.text = buildString {
                     append("允许 ").append(SettingsSchema.allowedText(spec))
@@ -91,7 +91,7 @@ class SettingsActivity : BaseActivity() {
             rows += Row(spec.key, b, false)
         }
 
-        val arrayRow = addRow<ItemSettingBinding>(vb.listSettings, R.layout.item_setting) { row ->
+        val arrayRow = addRow(vb.listSettings, ItemSettingBinding::inflate) { row ->
             row.tvSettingLabel.text = "${SettingsSchema.ARRAY_LABEL}（${SettingsSchema.ARRAY_UNIT}，逗号分隔）"
             row.tvSettingRange.text = "允许 0-300，例：0,60,300"
             row.etSettingValue.setText(arrayText(items))

@@ -8,14 +8,15 @@ import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.annotation.LayoutRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.viewbinding.ViewBinding
 import com.hmprogram.eldercare.provision.ProvisionApp
 import com.hmprogram.eldercare.provision.R
 import com.hmprogram.eldercare.provision.core.ApiResult
@@ -67,21 +68,21 @@ abstract class BaseActivity : AppCompatActivity() {
      * 本工程最长列表是「附近 Wi-Fi / 14 个属性 / 21 个设置项」（现场一般几十条），LinearLayout 足够；
      * 上 RecyclerView 要写 Adapter + ViewHolder 三份样板，收益为负。
      *
-     * 泛型参数是**绑定类**而不是 View：调用方拿到 VB 就能按 id 直接点字段（`vb.tvName`），
-     * 比自己 findViewById 少一层出错空间。这里刻意不给 VB 加上界——
-     * 生成类的 `inflate(LayoutInflater)` 是静态方法，靠它返回值的类型推断即可。
+     * 为什么参数是 `ItemXxxBinding::inflate` 而不是 layoutId：`inflate()` 返回的是 **View**，
+     * 旧写法把它 `as VB` 强转——泛型在运行时被擦除，强转当场「成功」，真正的检查发生在
+     * `bind(typed)` 的实参上，于是线上报 `ClassCastException: LinearLayout cannot be cast to
+     * ItemAlertRowBinding`（t185）。改成传生成类的静态 inflate 之后，绑定类由它直接产出，
+     * 类型由编译器保证，**代码里不再有强转**。
      */
-    protected fun <VB> addRow(
+    protected fun <VB : ViewBinding> addRow(
         parent: LinearLayout,
-        @LayoutRes layout: Int,
+        inflate: (LayoutInflater, ViewGroup?, Boolean) -> VB,
         bind: (VB) -> Unit,
     ): VB {
-        val vb = LayoutInflater.from(this).inflate(layout, parent, false)
-        @Suppress("UNCHECKED_CAST")
-        val typed = vb as VB
-        parent.addView(vb as View)
-        bind(typed)
-        return typed
+        val vb = inflate(LayoutInflater.from(parent.context), parent, false)
+        parent.addView(vb.root)
+        bind(vb)
+        return vb
     }
 
     // ------------------------------------------------------------------

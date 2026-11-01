@@ -140,7 +140,7 @@ class RemindersFragment : BasePageFragment() {
             if (group.isEmpty()) continue
             vb.containerGroups.addView(groupHeader(groupLabel(g), group.size))
             group.forEach { alert ->
-                addRow<ItemAlertRowBinding>(vb.containerGroups, R.layout.item_alert_row) { row ->
+                addRow(vb.containerGroups, ItemAlertRowBinding::inflate) { row ->
                     bindRow(row, alert)
                 }
                 // 行间距 8dp（鸿蒙 List({ space: 8 })）
