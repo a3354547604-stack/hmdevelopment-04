@@ -2,6 +2,7 @@ package com.hmprogram.eldercare.provision
 
 import android.app.Application
 import android.content.Context
+import com.hmprogram.eldercare.provision.core.CrashReport
 import com.hmprogram.eldercare.provision.core.SessionStore
 import com.hmprogram.eldercare.provision.data.api.GatewayApi
 import com.hmprogram.eldercare.provision.data.api.ServerApi
@@ -67,6 +68,19 @@ open class ProvisionApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        installCrashHandler()
+    }
+
+    /**
+     * 闪退留档：写一份栈到私有目录，下次打开应用时弹给用户截图。
+     * 装完仍然交回系统默认处理器——不能自己吞掉，否则系统不会回收这个进程。
+     */
+    private fun installCrashHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching { CrashReport.save(this, error) }
+            previous?.uncaughtException(thread, error)
+        }
     }
 
     companion object {

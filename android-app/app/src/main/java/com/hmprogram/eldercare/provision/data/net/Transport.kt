@@ -1,5 +1,7 @@
 package com.hmprogram.eldercare.provision.data.net
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -45,7 +47,12 @@ class OkHttpTransport(
 
     private val json = "application/json; charset=utf-8".toMediaType()
 
-    override suspend fun execute(method: String, url: String, jsonBody: String?): TransportResponse {
+    override suspend fun execute(method: String, url: String, jsonBody: String?): TransportResponse =
+        // 必须切到 IO：OkHttp 的 execute() 是阻塞调用，跑在主线程上会被
+        // BlockGuard 直接判 NetworkOnMainThreadException（vivo/Android 16 实测闪退，
+        // 栈顶是 OkHttpTransport.execute → RealCall.execute）。
+        // 这里是唯一出口，切一次就管住服务器 API 和网关本地 API 两条链路。
+        withContext(Dispatchers.IO) {
         val builder = Request.Builder().url(url)
         // JWT 只加在服务器 API 上：网关本地 API 无鉴权（契约 §12.1），
         // 但带上也无害（网关忽略）。头统一加，省掉「哪些接口要 token」的记忆负担。
@@ -58,7 +65,7 @@ class OkHttpTransport(
             "DELETE" -> builder.delete()
             else -> throw IllegalArgumentException("unsupported method $method")
         }
-        return try {
+        try {
             client.newCall(builder.build()).execute().use { resp ->
                 TransportResponse(resp.code, resp.body?.string().orEmpty())
             }

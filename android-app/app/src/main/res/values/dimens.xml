@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  尺寸/字号令牌：取自鸿蒙 AppTheme.ets 的同名常量（vp → dp、fp → sp 一一对应）。
+  为什么单独列出来：两端要「完全复刻」，间距和字号必须同源，否则改一处就得在 XML 里到处找魔数。
+-->
+<resources>
+    <dimen name="page_padding">16dp</dimen>
+    <dimen name="card_padding">16dp</dimen>
+    <dimen name="card_radius">12dp</dimen>
+    <dimen name="card_gap">12dp</dimen>
+    <dimen name="btn_height">48dp</dimen>
+    <dimen name="btn_radius">8dp</dimen>
+    <dimen name="input_height">48dp</dimen>
+    <dimen name="touch_min">44dp</dimen>
+    <dimen name="line_width">1dp</dimen>
+    <dimen name="icon_xs">16dp</dimen>
+    <dimen name="icon_sm">20dp</dimen>
+    <dimen name="icon_md">24dp</dimen>
+    <dimen name="icon_lg">28dp</dimen>
+    <dimen name="icon_xl">40dp</dimen>
+
+    <!-- 字号：FONT_TITLE 22 / FONT_SECTION 19 / FONT_BODY 17 / FONT_CAPTION 14 / FONT_LABEL 13 / FONT_BADGE 11 -->
+    <dimen name="font_title">22sp</dimen>
+    <dimen name="font_section">19sp</dimen>
+    <dimen name="font_body">17sp</dimen>
+    <dimen name="font_caption">14sp</dimen>
+    <dimen name="font_label">13sp</dimen>
+    <dimen name="font_badge">11sp</dimen>
+    <dimen name="font_number_lg">32sp</dimen>
+    <dimen name="font_number_md">22sp</dimen>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 页签切换：新页从一侧滑入，旧页朝同方向滑出（模拟左右翻页）。 -->
+<translate xmlns:android="http://schemas.android.com/apk/res/android"
+    android:duration="220"
+    android:fromXDelta="0"
+    android:interpolator="@android:interpolator/decelerate_cubic"
+    android:toXDelta="100%p" />

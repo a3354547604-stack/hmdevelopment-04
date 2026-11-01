@@ -18,7 +18,7 @@ object LifeText {
     fun gasText(smoke: Double?): String = when {
         smoke == null -> "—"
         smoke >= GAS_ALARM_MV -> "很高"
-        smoke >= GAS_WARN_MV -> "偏高"
+        smoke >= GAS_WARN_MV -> "有点高"
         else -> "正常"
     }
 
@@ -81,14 +81,14 @@ object LifeText {
     }
 
     fun yesNo(value: Boolean?): String = when (value) {
-        true -> "是"
-        false -> "否"
+        true -> "有人"
+        false -> "没人"
         null -> "—"
     }
 
     fun doorText(open: Boolean?): String = when (open) {
-        true -> "开"
-        false -> "关"
+        true -> "开着"
+        false -> "关着"
         null -> "—"
     }
 

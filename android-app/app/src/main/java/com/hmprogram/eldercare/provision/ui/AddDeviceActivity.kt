@@ -7,8 +7,10 @@ import android.widget.ArrayAdapter
 import androidx.activity.result.contract.ActivityResultContracts
 import com.hmprogram.eldercare.provision.R
 import com.hmprogram.eldercare.provision.core.ApiResult
+import com.hmprogram.eldercare.provision.core.SessionStore
 import com.hmprogram.eldercare.provision.databinding.ActivityAddDeviceBinding
 import com.hmprogram.eldercare.provision.wifi.WifiHelper
+import kotlinx.coroutines.delay
 
 /**
  * 添加设备向导，四步：连小盒子的 Wi-Fi → 选家里的 Wi-Fi → 等它连上 → 结果。
@@ -33,6 +35,8 @@ class AddDeviceActivity : BaseActivity() {
         setContentView(vb.root)
 
         vb.btnOpenWifi.setOnClickListener { WifiHelper.openWifiSettings(this) }
+        vb.etGateway.setText(session.gatewayBase)
+        vb.btnProbeGateway.setOnClickListener { launchUi { probeGateway(showToast = true) } }
         vb.btnLoadWifi.setOnClickListener { loadWifiList() }
         vb.btnNext.setOnClickListener { onNext() }
         vb.btnPrev.setOnClickListener { goStep(step - 1) }
@@ -79,19 +83,55 @@ class AddDeviceActivity : BaseActivity() {
     /** 第 1 步：先问一下小盒子「你在吗」，能答上来就说明手机确实连在它的热点上。 */
     private fun checkHotspot() {
         launchUi {
+            // 地址不对时先自动找一遍：契约 §12.3 说 AP 地址由驱动决定，
+            // 192.168.4.1 只是占位，写死一个地址等于赌板子用的是它
+            val found = probeGateway(showToast = false)
             when (val res = container.gatewayApi.status()) {
                 is ApiResult.Ok -> {
                     val mode = res.data.mode
                     if (mode == "ap" || mode == "ap_sta" || mode == "sta") {
                         res.data.device_sn.takeIf { it.isNotBlank() }?.let { vb.etSn.setText(it) }
+                        vb.tvGatewayTip.text = getString(R.string.gateway_found, session.gatewayBase)
                         goStep(2)
                     } else {
                         toast(getString(R.string.err_not_connected))
                     }
                 }
-                is ApiResult.Err -> toast(getString(R.string.err_not_connected))
+                is ApiResult.Err -> {
+                    // 地址没错但小盒子没应答，和「手机没连上热点」是两件事，分开说
+                    vb.tvGatewayTip.text = getString(
+                        if (found) R.string.gateway_not_responding else R.string.gateway_not_found,
+                    )
+                    toast(getString(R.string.err_not_connected))
+                }
             }
         }
+    }
+
+    /**
+     * 自动找小盒子：按候选地址逐个试 `/api/provision/status`，谁答上来就用谁。
+     *
+     * 为什么不是让用户自己填：家属不知道板子的 AP 地址，契约里也写明这个地址由驱动决定、
+     * 上板实测后才回填。手填只是兜底，自动探测才是默认路径。
+     */
+    private suspend fun probeGateway(showToast: Boolean): Boolean {
+        val candidates = (listOf(session.gatewayBase) + GATEWAY_CANDIDATES.map { "http://$it/api" })
+            .map { SessionStore.normalizeGatewayBase(it) }
+            .distinct()
+        vb.tvGatewayTip.text = getString(R.string.gateway_probing)
+        for (base in candidates) {
+            session.gatewayBase = base
+            if (container.gatewayApi.status() is ApiResult.Ok) {
+                vb.etGateway.setText(session.gatewayBase)
+                vb.tvGatewayTip.text = getString(R.string.gateway_found, session.gatewayBase)
+                if (showToast) toast(getString(R.string.gateway_found, session.gatewayBase))
+                return true
+            }
+        }
+        // 都没答上来：把地址还原成用户原本填的，避免「探测把配置改坏了」
+        vb.tvGatewayTip.text = getString(R.string.gateway_not_found)
+        if (showToast) toast(getString(R.string.gateway_not_found))
+        return false
     }
 
     /** 第 2 步：网关缓存里的 Wi-Fi 列表；拿不到就静默留给手输，不弹错误。 */
@@ -138,9 +178,9 @@ class AddDeviceActivity : BaseActivity() {
         launchUi {
             when (val res = container.gatewayApi.submitWifi(ssid, password)) {
                 is ApiResult.Ok -> {
+                    // 200 只是「已受理」，真连没连上要再确认（见 verifyConnected）
                     session.rememberSsid(ssid)
-                    vb.tvResult.text = getString(R.string.msg_wifi_ok)
-                    goStep(4)
+                    verifyConnected()
                 }
                 is ApiResult.Err -> {
                     vb.tvResult.text = wifiProblem(res)
@@ -148,6 +188,63 @@ class AddDeviceActivity : BaseActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * 第 3 步：提交之后确认「真的连上了」。
+     *
+     * 为什么不能收到 200 就算成功：网关返回的 200 只是「已受理」，密码错 / 路由器拒绝
+     * 是之后才失败的。用户先看到「连上了！」再发现主机离线，会以为 App 骗人。
+     *
+     * 三种真实结局（与鸿蒙 pages/NetConfigPage.ets 的 verifyConnected 一致）：
+     *  · 轮询到 mode=sta 或 sta_ssid 非空 → 真连上了，进第 4 步；
+     *  · 轮询到 last_error → 如实说原因，退回第 2 步让用户改；
+     *  · 请求开始失败（热点消失）→ 主机已切 STA，这是**预期**行为（§12.6），
+     *    不是故障，只能提示「回首页看设备有没有上线」。
+     */
+    private fun verifyConnected() {
+        vb.tvStepHint.text = getString(R.string.add_verify_waiting)
+        launchUi {
+            val deadline = System.currentTimeMillis() + VERIFY_TOTAL_MS
+            var sawGateway = false
+            while (System.currentTimeMillis() < deadline) {
+                delay(VERIFY_POLL_MS)
+                when (val res = container.gatewayApi.status()) {
+                    is ApiResult.Err -> {
+                        if (sawGateway) {
+                            vb.tvResult.text = getString(R.string.add_verify_ap_gone)
+                            goStep(4)
+                            return@launchUi
+                        }
+                    }
+                    is ApiResult.Ok -> {
+                        sawGateway = true
+                        val lastError = res.data.last_error.orEmpty()
+                        if (lastError.isNotEmpty()) {
+                            vb.tvResult.text = reasonText(lastError)
+                            goStep(2)
+                            return@launchUi
+                        }
+                        if (res.data.mode == "sta" || res.data.sta_ssid.orEmpty().isNotEmpty()) {
+                            vb.tvResult.text = getString(R.string.msg_wifi_ok)
+                            goStep(4)
+                            return@launchUi
+                        }
+                    }
+                }
+            }
+            vb.tvResult.text = getString(R.string.add_verify_timeout)
+            goStep(4)
+        }
+    }
+
+    /** §9.2 / §12 的 reason → 用户能懂的一句话（不把 auth / not_found 这种词抛给用户）。 */
+    private fun reasonText(reason: String): String = when (reason) {
+        "auth" -> getString(R.string.wifi_reason_auth)
+        "not_found" -> getString(R.string.wifi_reason_not_found)
+        "timeout" -> getString(R.string.wifi_reason_timeout)
+        "open_not_supported" -> getString(R.string.wifi_reason_open)
+        else -> getString(R.string.wifi_reason_unknown)
     }
 
     /** 配网失败原因翻成一句人话（契约 §9.2 的 reason 值域）。 */
@@ -187,4 +284,19 @@ class AddDeviceActivity : BaseActivity() {
     }
 
     private fun visible(show: Boolean): Int = if (show) View.VISIBLE else View.GONE
+
+    private companion object {
+        /**
+         * 网关 SoftAP 的候选地址（契约 §12.3 / CAL-12）：仓库里读不到确定值，
+         * 官方样例实测 192.168.2.1、驱动常量串 192.168.237.1、adapter 死代码 192.168.5.1，
+         * 占位是 192.168.4.1。按「最可能的排前面」的顺序试。
+         */
+        val GATEWAY_CANDIDATES = listOf("192.168.2.1", "192.168.4.1", "192.168.237.1", "192.168.5.1")
+
+        /** 轮询间隔，与鸿蒙 VERIFY_POLL_MS 一致 */
+        const val VERIFY_POLL_MS = 2_000L
+
+        /** 最长确认时间，与鸿蒙 CONNECT_VERIFY_MS 一致 */
+        const val VERIFY_TOTAL_MS = 30_000L
+    }
 }

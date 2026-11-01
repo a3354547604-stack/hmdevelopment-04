@@ -1,15 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  颜色令牌：与鸿蒙版 entry/src/main/ets/common/AppTheme.ets + resources/base/element/color.json 一一对应。
+  两端的界面要「完全复刻」，颜色就不能各写各的——这里改成同一套绿系，下面每个名字都标了鸿蒙那边的键名。
+
+  旧名字（brand/muted/surface_alt…）保留：其它页面还在用，逐个改布局时再换成新名字。
+-->
 <resources>
-    <color name="brand">#1565C0</color>
-    <color name="brand_dark">#0D47A1</color>
-    <color name="ok">#2E7D32</color>
-    <color name="warn">#EF6C00</color>
-    <color name="danger">#C62828</color>
-    <color name="muted">#616161</color>
-    <color name="surface_alt">#F5F5F5</color>
+    <!-- color_primary / color_primary_fill -->
+    <color name="brand">#0E7C66</color>
+    <color name="color_primary">#0E7C66</color>
+    <color name="color_primary_fill">#0E7C66</color>
+    <color name="color_primary_press">#0A5E4E</color>
+    <color name="color_on_primary">#FFFFFF</color>
+
+    <!-- 底色 / 卡片 -->
+    <color name="page_bg">#F2F5F4</color>
+    <color name="color_bg">#F2F5F4</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="color_surface">#FFFFFF</color>
+    <color name="surface_alt">#F2F5F4</color>
+    <color name="color_disabled_bg">#E8EDEB</color>
+
+    <!-- 文字 -->
+    <color name="text_primary">#1B2A26</color>
+    <color name="text_secondary">#5C6B66</color>
+    <color name="text_hint">#6E7C77</color>
+    <color name="color_text_primary">#1B2A26</color>
+    <color name="color_text_secondary">#5C6B66</color>
+    <color name="color_text_hint">#6E7C77</color>
+
+    <!-- 分隔线 -->
+    <color name="divider">#E3E9E7</color>
+    <color name="color_divider">#E3E9E7</color>
+
+    <!-- 三档级别色（底色用 deep，文字用 text） -->
+    <color name="ok">#2E9E5B</color>
+    <color name="warn">#E6A23C</color>
+    <color name="danger">#D64545</color>
+    <color name="level0">#2E9E5B</color>
+    <color name="level1">#E6A23C</color>
+    <color name="level2">#D64545</color>
+    <color name="level0_deep">#1E7A44</color>
+    <color name="level1_deep">#8A5A00</color>
+    <color name="level2_deep">#B02A2A</color>
+    <color name="level0_text">#1E7A44</color>
+    <color name="level1_text">#8A5A00</color>
+    <color name="level2_text">#B02A2A</color>
+    <color name="offline">#9AA5A1</color>
+    <color name="on_accent_subtle">#E6EFEA</color>
+
+    <!-- 旧名字（其它页面仍在引用） -->
+    <color name="brand_dark">#1B2A26</color>
+    <color name="muted">#5C6B66</color>
     <color name="warn_bg">#FFF3E0</color>
     <color name="ok_bg">#E8F5E9</color>
     <color name="err_bg">#FFEBEE</color>
     <color name="white">#FFFFFFFF</color>
     <color name="black">#FF000000</color>
+    <color name="on_accent">#FFFFFF</color>
 </resources>

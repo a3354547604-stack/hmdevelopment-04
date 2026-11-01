@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 页签未读数角标：与鸿蒙 MainTabs 的角标同规格（16dp 高、圆角 8、级别 2 底色、11sp 白字） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/level2" />
+    <corners android:radius="8dp" />
+</shape>

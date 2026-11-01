@@ -75,6 +75,9 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name=".ui.HelpActivity"
+            android:exported="false" />
+        <activity
             android:name=".ui.AdvancedActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
@@ -84,6 +87,9 @@
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".ui.SmokeActivity"
+            android:exported="false" />
+            <activity
+            android:name=".ui.AddNodeActivity"
             android:exported="false" />
     </application>
 </manifest>

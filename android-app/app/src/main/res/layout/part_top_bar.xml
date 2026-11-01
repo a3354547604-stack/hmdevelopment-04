@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  顶部条：只放 App 名字。
+  为什么不放「● 在线」：首页大字卡已经用颜色和一句话回答了「在不在线」，
+  右上角再挂一个状态点属于同一信息说两遍，提醒页/我的页更是与内容无关。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/surface"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="@dimen/page_padding"
+    android:paddingTop="10dp"
+    android:paddingEnd="@dimen/page_padding"
+    android:paddingBottom="10dp">
+
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="@string/app_title"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/font_body"
+        android:textStyle="bold" />
+
+</LinearLayout>

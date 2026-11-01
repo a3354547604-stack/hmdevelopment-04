@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 与鸿蒙 app.media.ic_tab_profile 同一份路径（24x24 视口），保证两个端图标形状一致 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M12 2.6a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0 10c-4.1 0-7.4 2.4-7.4 5.6v3.2h14.8v-3.2c0-3.2-3.3-5.6-7.4-5.6Z" />
+</vector>

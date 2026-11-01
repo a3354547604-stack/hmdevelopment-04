@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 与鸿蒙 app.media.ic_device_box 同一路径：一台方盒子主机 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF000000"
+        android:pathData="M4 5.2h16a1.6 1.6 0 0 1 1.6 1.6v10.4a1.6 1.6 0 0 1-1.6 1.6H4a1.6 1.6 0 0 1-1.6-1.6V6.8A1.6 1.6 0 0 1 4 5.2Zm2.4 4v5.6h6.2V9.2Zm8.4 1.2v1.4h3.6v-1.4Zm0 3v1.4h3.6v-1.4Z" />
+</vector>

@@ -142,6 +142,84 @@
             android:textColor="@color/muted"
             android:textSize="14sp" />
 
+        <!-- 无活动时长：鸿蒙「我的 → 关于 → 版本号连点 5 次」里的同一项（契约 §6.9 no_motion_min） -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/no_motion_label"
+            android:textColor="@color/black"
+            android:textSize="17sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/no_motion_hint"
+            android:textColor="@color/muted"
+            android:textSize="14sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnNoMotionMinus"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:backgroundTint="@color/surface_alt"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:text="－"
+                android:textColor="@color/brand_dark"
+                android:textSize="20sp" />
+
+            <TextView
+                android:id="@+id/tvNoMotionValue"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textColor="@color/black"
+                android:textSize="17sp" />
+
+            <Button
+                android:id="@+id/btnNoMotionPlus"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:backgroundTint="@color/surface_alt"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minWidth="0dp"
+                android:text="＋"
+                android:textColor="@color/brand_dark"
+                android:textSize="20sp" />
+
+            <Button
+                android:id="@+id/btnSaveNoMotion"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginStart="12dp"
+                android:backgroundTint="@color/color_primary_fill"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="@string/action_save"
+                android:textColor="@color/on_accent"
+                android:textSize="15sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvNoMotionTip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/muted"
+            android:textSize="14sp" />
+
         <Button
             android:id="@+id/btnMaintenance"
             android:layout_width="match_parent"

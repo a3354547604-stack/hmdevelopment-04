@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  与鸿蒙 AppTheme 对应的通用样式：
+  · SectionLabel —— ProfilePage.card() 的小节标题：13sp 提示色、左缩进 4、下方 2；
+  · Chevron      —— row() 右侧的「›」，19sp 提示色且不参与朗读（accessibilityLevel('no')）；
+  · RowDivider   —— row 之间的 1dp 分隔线。
+-->
+<resources>
+
+    <style name="SectionLabel">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingStart">4dp</item>
+        <item name="android:paddingEnd">4dp</item>
+        <item name="android:paddingBottom">2dp</item>
+        <item name="android:textColor">@color/text_hint</item>
+        <item name="android:textSize">@dimen/font_label</item>
+    </style>
+
+    <style name="Chevron">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">8dp</item>
+        <item name="android:text">›</item>
+        <item name="android:textColor">@color/text_hint</item>
+        <item name="android:textSize">@dimen/font_section</item>
+        <item name="android:importantForAccessibility">no</item>
+    </style>
+
+    <style name="RowDivider">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">@dimen/line_width</item>
+        <item name="android:background">@color/divider</item>
+    </style>
+
+    <style name="TitleText">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">@dimen/font_title</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="BodyText">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">@dimen/font_body</item>
+    </style>
+
+    <style name="CaptionText">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text_secondary</item>
+        <item name="android:textSize">@dimen/font_caption</item>
+    </style>
+
+    <!-- 节点详情半模态：白底、顶部圆角，和鸿蒙 bindSheet 的观感对齐 -->
+    <style name="SheetDialog" parent="Theme.MaterialComponents.DayNight.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/SheetDialog.Sheet</item>
+    </style>
+
+    <style name="SheetDialog.Sheet" parent="Widget.MaterialComponents.BottomSheet.Modal">
+        <item name="backgroundTint">@color/surface</item>
+        <item name="shapeAppearanceOverlay">@style/SheetDialog.Shape</item>
+    </style>
+
+    <style name="SheetDialog.Shape" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">16dp</item>
+        <item name="cornerSizeTopRight">16dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+</resources>

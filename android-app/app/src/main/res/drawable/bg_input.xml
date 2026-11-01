@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 输入框底：鸿蒙版是 backgroundColor(COLOR_BG) + borderRadius(8)，这里用同色同圆角的 drawable 复刻 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/page_bg" />
+    <corners android:radius="@dimen/btn_radius" />
+</shape>

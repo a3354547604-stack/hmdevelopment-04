@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("app.cash.paparazzi")
 }
 
 android {
@@ -13,13 +14,15 @@ android {
         // 现场演示机普遍是 10+，但保留 26 可以直接装在旧备用机上。
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
+        versionCode = 23
         // 0.2.0：补齐 F4–F13（登录/绑定/首页/告警/报表/设置/Mock 自检），与鸿蒙 App 功能对齐
-        versionName = "0.3.0"
+        versionName = "0.5.0"
 
         // 服务器地址默认指向演示笔记本上的 Nginx（契约 §6.1：http://{host}/api）。
         // 运行时可在 App「开发者设置」里改，不需要重新打包——现场 IP 一定会变。
-        buildConfigField("String", "DEFAULT_SERVER_BASE", "\"http://192.168.1.100/api\"")
+        // 默认指向公网测试服务器（鸿蒙版同一台）：装了就能登录，不用先进高级设置改地址。
+        // 现场 IP 变了仍可在「我的 → 版本号连点 5 次 → 高级 → 云端地址」改，不必重新打包。
+        buildConfigField("String", "DEFAULT_SERVER_BASE", "\"http://123.206.99.28/api\"")
 
         // 首启是否直接进 mock 模式（真机演示时也可在设置里手动打开）
         buildConfigField("boolean", "DEFAULT_MOCK_MODE", "false")
@@ -68,6 +71,8 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
+    // 三个页签放进 ViewPager2，才能跟手左右翻页（鸿蒙端是 ArkUI Tabs）
+    implementation("androidx.viewpager2:viewpager2:1.1.0")
     implementation("androidx.activity:activity-ktx:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")

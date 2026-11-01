@@ -45,7 +45,7 @@ class LifeTextTest {
     @Test
     fun `燃气按两级门槛说正常 偏高 很高`() {
         assertEquals("正常", LifeText.gasText(320.0))
-        assertEquals("偏高", LifeText.gasText(LifeText.GAS_WARN_MV))
+        assertEquals("有点高", LifeText.gasText(LifeText.GAS_WARN_MV))
         assertEquals("很高", LifeText.gasText(LifeText.GAS_ALARM_MV))
         assertEquals("—", LifeText.gasText(null))
         assertEquals(0, LifeText.gasLevel(320.0))

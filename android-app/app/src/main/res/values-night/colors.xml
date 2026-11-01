@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 深色模式：与鸿蒙 resources/dark/element/color.json 逐项对齐（同一套令牌，两个主题）。 -->
+<resources>
+    <color name="brand">#3FD3B0</color>
+    <color name="brand_dark">#E9F0ED</color>
+    <color name="muted">#AEBAB5</color>
+    <color name="color_primary">#3FD3B0</color>
+    <color name="color_primary_fill">#12866E</color>
+    <color name="color_primary_press">#0B6E5A</color>
+    <color name="color_on_primary">#FFFFFF</color>
+    <color name="page_bg">#101614</color>
+    <color name="color_bg">#101614</color>
+    <color name="surface">#1A211F</color>
+    <color name="color_surface">#1A211F</color>
+    <color name="surface_alt">#101614</color>
+    <color name="color_disabled_bg">#232B28</color>
+    <color name="text_primary">#E9F0ED</color>
+    <color name="text_secondary">#AEBAB5</color>
+    <color name="text_hint">#8D9A94</color>
+    <color name="color_text_primary">#E9F0ED</color>
+    <color name="color_text_secondary">#AEBAB5</color>
+    <color name="color_text_hint">#8D9A94</color>
+    <color name="divider">#2A3330</color>
+    <color name="color_divider">#2A3330</color>
+    <color name="ok">#45C77C</color>
+    <color name="warn">#F0B45A</color>
+    <color name="danger">#F07171</color>
+    <color name="level0">#45C77C</color>
+    <color name="level1">#F0B45A</color>
+    <color name="level2">#F07171</color>
+    <color name="level0_deep">#17663A</color>
+    <color name="level1_deep">#6E4800</color>
+    <color name="level2_deep">#8E2020</color>
+    <color name="level0_text">#5FD08C</color>
+    <color name="level1_text">#F5C06A</color>
+    <color name="level2_text">#FF9292</color>
+    <color name="offline">#7A857F</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="on_accent_subtle">#DCE8E3</color>
+    <color name="white">#1A211F</color>
+    <color name="black">#E9F0ED</color>
+    <color name="warn_bg">#3A2E10</color>
+    <color name="ok_bg">#12351F</color>
+    <color name="err_bg">#3A1A1A</color>
+</resources>

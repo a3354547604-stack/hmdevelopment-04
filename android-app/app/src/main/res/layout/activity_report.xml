@@ -1,199 +1,312 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  报表页：与鸿蒙 ReportPage.ets 一比一。
+  返回条 + 标题 + 「这周/这个月」切换 + 大字卡（走动次数与对比）+ 每天走动柱状图 + 提醒统计卡。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/page_bg"
     android:orientation="vertical">
 
     <TextView
         android:id="@+id/tvOfflineBanner"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@drawable/bg_banner"
-        android:padding="10dp"
-        android:text="@string/offline_banner"
-        android:textColor="@color/warn"
-        android:textSize="15sp"
+        android:background="@color/level1_deep"
+        android:paddingStart="@dimen/page_padding"
+        android:paddingTop="8dp"
+        android:paddingEnd="@dimen/page_padding"
+        android:paddingBottom="8dp"
+        android:textColor="@color/on_accent"
+        android:textSize="@dimen/font_caption"
         android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tvBack"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/touch_min"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:paddingStart="@dimen/page_padding"
+        android:paddingEnd="@dimen/page_padding"
+        android:text="@string/back_label"
+        android:textColor="@color/color_primary"
+        android:textSize="@dimen/font_body" />
+
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="@dimen/page_padding"
+        android:paddingEnd="@dimen/page_padding"
+        android:paddingBottom="8dp"
+        android:text="@string/title_report"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/font_title"
+        android:textStyle="bold" />
 
     <ScrollView
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:fillViewport="true">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:paddingStart="@dimen/page_padding"
+            android:paddingEnd="@dimen/page_padding"
+            android:paddingBottom="@dimen/page_padding">
+
+            <!-- 这周 / 这个月 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card"
+                android:orientation="horizontal"
+                android:padding="3dp">
+
+                <TextView
+                    android:id="@+id/tabWeek"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="@string/action_period_week"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_body" />
+
+                <TextView
+                    android:id="@+id/tabMonth"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="@string/action_period_month"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_body" />
+            </LinearLayout>
+
+            <!-- 大字卡 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/card_gap"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="@dimen/card_padding">
+
+                <TextView
+                    android:id="@+id/tvBigLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_body" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tvTotal"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_primary"
+                        android:textSize="@dimen/font_number_lg"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/unit_times"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="@dimen/font_body" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvCompare"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_caption" />
+            </LinearLayout>
+
+            <!-- 每天走动次数 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/card_gap"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="@dimen/card_padding">
+
+                <TextView
+                    android:id="@+id/tvDailyLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_caption" />
+
+                <LinearLayout
+                    android:id="@+id/containerBars"
+                    android:layout_width="match_parent"
+                    android:layout_height="120dp"
+                    android:layout_marginTop="8dp"
+                    android:gravity="bottom"
+                    android:orientation="horizontal" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tvBarFirst"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_hint"
+                        android:textSize="@dimen/font_caption" />
+
+                    <TextView
+                        android:id="@+id/tvBarLast"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="end"
+                        android:textColor="@color/text_hint"
+                        android:textSize="@dimen/font_caption" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 提醒统计 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/card_gap"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="@dimen/card_padding">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/report_alerts_title"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_caption" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tvAlertTotal"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/text_primary"
+                            android:textSize="@dimen/font_number_md" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/report_alert_unit"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="@dimen/font_caption" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tvAlertPending"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/text_primary"
+                            android:textSize="@dimen/font_number_md" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/alert_pending"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="@dimen/font_caption" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/tvAlertFalse"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/text_primary"
+                            android:textSize="@dimen/font_number_md" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/report_false_alarm"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="@dimen/font_caption" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvComparePrev"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/text_hint"
+                    android:textSize="@dimen/font_caption"
+                    android:visibility="gone" />
+            </LinearLayout>
 
             <TextView
+                android:id="@+id/tvState"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/title_report"
-                android:textColor="@color/brand_dark"
-                android:textSize="26sp"
-                android:textStyle="bold" />
+                android:layout_marginTop="@dimen/card_gap"
+                android:gravity="center"
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/font_caption"
+                android:visibility="gone" />
 
-            <LinearLayout
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnRetry"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:orientation="horizontal">
-
-                <Button
-                    android:id="@+id/btnWeek"
-                    android:layout_width="0dp"
-                    android:layout_height="48dp"
-                    android:layout_weight="1"
-                    android:backgroundTint="@color/brand"
-                    android:text="@string/action_period_week"
-                    android:textSize="16sp" />
-
-                <Button
-                    android:id="@+id/btnMonth"
-                    android:layout_width="0dp"
-                    android:layout_height="48dp"
-                    android:layout_marginStart="12dp"
-                    android:layout_weight="1"
-                    android:backgroundTint="@color/surface_alt"
-                    android:text="@string/action_period_month"
-                    android:textColor="@color/brand_dark"
-                    android:textSize="16sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="16dp"
-                android:background="@drawable/bg_card"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:id="@+id/tvCompareTitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/label_compare"
-                    android:textColor="@color/brand_dark"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvCompareRowToday"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:textColor="@color/black"
-                    android:textSize="18sp" />
-
-                <TextView
-                    android:id="@+id/tvCompareRowYesterday"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/black"
-                    android:textSize="18sp" />
-
-                <TextView
-                    android:id="@+id/tvCompareRowDelta"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/black"
-                    android:textSize="18sp" />
-
-                <TextView
-                    android:id="@+id/tvCompareNote"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:textColor="@color/muted"
-                    android:textSize="16sp" />
-
-                <TextView
-                    android:id="@+id/tvCompareHint"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:textColor="@color/warn"
-                    android:textSize="15sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:background="@drawable/bg_card"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/label_summary"
-                    android:textColor="@color/brand_dark"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvSummaryActivity"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:textColor="@color/black"
-                    android:textSize="17sp" />
-
-                <TextView
-                    android:id="@+id/tvSummaryAlerts"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/black"
-                    android:textSize="17sp" />
-
-                <TextView
-                    android:id="@+id/tvSummaryEnv"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/black"
-                    android:textSize="17sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:background="@drawable/bg_card"
-                android:orientation="vertical"
-                android:padding="16dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/label_activity"
-                    android:textColor="@color/brand_dark"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvActivity"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:textColor="@color/black"
-                    android:textSize="17sp" />
-            </LinearLayout>
-
-            <Button
-                android:id="@+id/btnRefresh"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginTop="16dp"
-                android:backgroundTint="@color/surface_alt"
-                android:text="@string/action_refresh"
-                android:textColor="@color/brand_dark"
-                android:textSize="17sp" />
+                android:layout_height="@dimen/btn_height"
+                android:layout_marginTop="@dimen/card_gap"
+                android:text="@string/action_retry"
+                android:textAllCaps="false"
+                android:textColor="@color/color_primary"
+                android:textSize="@dimen/font_body"
+                android:visibility="gone"
+                app:cornerRadius="@dimen/btn_radius"
+                app:strokeColor="@color/color_primary"
+                app:strokeWidth="1dp" />
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

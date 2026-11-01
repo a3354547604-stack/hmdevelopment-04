@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.LinearLayout
@@ -18,7 +19,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.hmprogram.eldercare.provision.ProvisionApp
 import com.hmprogram.eldercare.provision.R
 import com.hmprogram.eldercare.provision.core.ApiResult
+import com.hmprogram.eldercare.provision.core.CrashReport
 import com.hmprogram.eldercare.provision.core.SessionStore
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -32,14 +35,29 @@ import kotlinx.coroutines.launch
  */
 abstract class BaseActivity : AppCompatActivity() {
 
+    private val TAG = this::class.java.simpleName
+
     protected val container get() = ProvisionApp.of(this)
     protected val session: SessionStore get() = container.session
 
     /** 与界面同生命周期的作用域 */
     protected fun scope(): CoroutineScope = lifecycleScope
 
+    /**
+     * UI 协程里抛出的异常如果不接住，会直接进 UncaughtExceptionHandler 把 App 干掉——
+     * 对老人用的东西来说，「网络抖一下」不该等于「应用闪退」。这里统一兜住：
+     * 记一份到 last-crash.txt（下次启动可复制出来），只弹一句轻提示。
+     */
+    private val uiErrorHandler = CoroutineExceptionHandler { _, e ->
+        Log.e(TAG, "ui coroutine failed", e)
+        CrashReport.save(this, e)
+        toast(getString(R.string.ui_error_generic))
+    }
+
     protected fun launchUi(block: suspend CoroutineScope.() -> Unit) {
-        lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { block() } }
+        lifecycleScope.launch(uiErrorHandler) {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { block() }
+        }
     }
 
     protected fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
@@ -142,15 +160,42 @@ abstract class BaseActivity : AppCompatActivity() {
             Triple(R.id.btnTabReminders, Tab.REMINDERS, RemindersActivity::class.java),
             Triple(R.id.btnTabProfile, Tab.PROFILE, ProfileActivity::class.java),
         )
+        val iconIds = mapOf(
+            Tab.HOME to R.id.ivTabHome,
+            Tab.REMINDERS to R.id.ivTabAlert,
+            Tab.PROFILE to R.id.ivTabProfile,
+        )
         for ((id, tab, target) in targets) {
             val view = findViewById<View>(id) ?: continue
             view.isSelected = tab == current
-            view.alpha = if (tab == current) 1f else 0.55f
+            view.alpha = if (tab == current) 1f else 1f
+            // 图标与文字都用「选中主色 / 未选提示色」，和鸿蒙 MainTabs 的 fillColor 规则一致；
+            // 不再用整体 alpha 变暗——那会让未选中的图标糊成一团灰。
+            val tint = android.content.res.ColorStateList.valueOf(
+                getColor(if (tab == current) R.color.color_primary else R.color.text_hint),
+            )
+            iconIds[tab]?.let { iconId ->
+                findViewById<android.widget.ImageView>(iconId)?.imageTintList = tint
+            }
+            (view as? android.view.ViewGroup)?.let { group ->
+                for (i in 0 until group.childCount) {
+                    val child = group.getChildAt(i)
+                    if (child is android.widget.TextView) child.setTextColor(tint)
+                }
+            }
             view.setOnClickListener {
                 if (tab == current) return@setOnClickListener
                 startActivity(
                     Intent(this, target)
                         .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                )
+                // 左右翻页：往右边的页签切，新页从右边进来、旧页往左走；
+                // 往左边切则反过来。原来所有切换都用系统默认动画（永远是同一个方向），
+                // 点「我的」和点「提醒」看起来一模一样，没有「翻页」的方向感。
+                val forward = tab.ordinal > current.ordinal
+                overridePendingTransition(
+                    if (forward) R.anim.slide_in_right else R.anim.slide_in_left,
+                    if (forward) R.anim.slide_out_left else R.anim.slide_out_right,
                 )
                 finish()
             }
@@ -176,5 +221,41 @@ abstract class BaseActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        showPendingCrashIfAny(savedInstanceState)
+    }
+
+    /**
+     * 上次闪退过就把栈弹出来（等界面挂好再弹，否则 WindowManager 会报错）。
+     *
+     * 我这边没有 logcat 通道，用户只能看到「应用已停止」；把栈直接摆在屏幕上，
+     * 他截个图就能定位，比让他开 USB 调试现实得多。
+     */
+    private fun showPendingCrashIfAny(savedInstanceState: Bundle?) {
+        if (savedInstanceState != null) return
+        val text = CrashReport.pending(this) ?: return
+        window.decorView.post {
+            if (isFinishing || isDestroyed) return@post
+            val body = TextView(this).apply {
+                this.text = text
+                textSize = 11f
+                setTextIsSelectable(true)
+                setPadding(28, 24, 28, 24)
+                typeface = android.graphics.Typeface.MONOSPACE
+            }
+            val scroll = android.widget.ScrollView(this).apply { addView(body) }
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(getString(R.string.crash_title))
+                .setView(scroll)
+                .setPositiveButton(getString(R.string.crash_copy)) { _, _ ->
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("crash", text))
+                    CrashReport.clear(this)
+                    toast(getString(R.string.crash_copied))
+                }
+                .setNegativeButton(getString(R.string.crash_close)) { _, _ ->
+                    CrashReport.clear(this)
+                }
+                .show()
+        }
     }
 }

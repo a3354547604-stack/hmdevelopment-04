@@ -52,6 +52,8 @@ data class BindDeviceData(
 data class NodeStatus(
     val sn: String = "",
     val type: String = "",
+    /** 小设备所在的**地址**（家 / 老家）。契约暂时只有 location（房间），缺省按「家」处理。 */
+    val site: String = "",
     val location: String = "",
     val online: Boolean = false,
     val last_seen: Long = 0,

@@ -1,23 +1,24 @@
 package com.hmprogram.eldercare.provision.ui
 
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.hmprogram.eldercare.provision.R
 import com.hmprogram.eldercare.provision.core.ApiResult
 import com.hmprogram.eldercare.provision.data.model.ActivityData
-import com.hmprogram.eldercare.provision.data.model.CompareView
 import com.hmprogram.eldercare.provision.data.model.SummaryData
 import com.hmprogram.eldercare.provision.data.model.TrendData
 import com.hmprogram.eldercare.provision.databinding.ActivityReportBinding
 
 /**
- * 「这周 / 这个月」小结：一句对比 + 活动量 + 提醒数 + 屋内温湿度。
- *
- * 对比那行必须永远有标题：契约 §6.17 保证 `compare.title` 一定返回，
- * 但 `yesterday` / `delta_pct` / `text` 在「新设备」或「统计首日」时会被省略。
- * 所以没有基线时显示「暂无对比数据」而不是留白或崩掉——这是 F10 的验收点。
+ * 报表页：与鸿蒙 ReportPage.ets 一比一。
  *
  * 三个接口各自独立降级：哪个挂了就只空哪一块，整页不白屏。
+ * 对比那行永远有内容——契约 §6.17 保证 `compare.title` 必现，但 `yesterday`/`text`
+ * 在「新设备」或「统计首日」会被省略，此时按鸿蒙的写法退化成「刚住进来，还没法对比」。
  */
 class ReportActivity : BaseActivity() {
 
@@ -29,9 +30,10 @@ class ReportActivity : BaseActivity() {
         vb = ActivityReportBinding.inflate(layoutInflater)
         setContentView(vb.root)
 
-        vb.btnWeek.setOnClickListener { load("week") }
-        vb.btnMonth.setOnClickListener { load("month") }
-        vb.btnRefresh.setOnClickListener { load(period) }
+        vb.tvBack.setOnClickListener { finish() }
+        vb.tabWeek.setOnClickListener { load("week") }
+        vb.tabMonth.setOnClickListener { load("month") }
+        vb.btnRetry.setOnClickListener { load(period) }
     }
 
     override fun onStart() {
@@ -42,20 +44,120 @@ class ReportActivity : BaseActivity() {
 
     private fun load(target: String) {
         period = target
+        styleTabs()
         val days = if (target == "month") 30 else 7
         launchUi {
             val deviceId = ensureDeviceId()
             if (deviceId <= 0) {
-                vb.tvCompareTitle.text = getString(R.string.label_no_device)
+                showState(getString(R.string.label_no_device))
                 return@launchUi
             }
-            val summary = fetch { container.serverApi.summary(deviceId, target) }
-            val trend = fetch { container.serverApi.trend(deviceId, days) }
             val activity = fetch { container.serverApi.activity(deviceId, target) }
-            renderCompare(trend)
-            renderSummary(summary)
-            renderActivity(activity)
+            val trend = fetch { container.serverApi.trend(deviceId, days) }
+            val summary = fetch { container.serverApi.summary(deviceId, target) }
+            if (activity == null && trend == null && summary == null) {
+                showState(getString(R.string.report_no_data))
+                return@launchUi
+            }
+            renderBig(activity, trend)
+            renderBars(activity)
+            renderAlerts(summary)
+            showState(null)
         }
+    }
+
+    private fun styleTabs() {
+        val on = resources.getColor(R.color.color_primary_fill, null)
+        val onText = resources.getColor(R.color.on_accent, null)
+        val offText = resources.getColor(R.color.text_secondary, null)
+        val weekOn = period == "week"
+        vb.tabWeek.setBackgroundColor(if (weekOn) on else android.graphics.Color.TRANSPARENT)
+        vb.tabWeek.setTextColor(if (weekOn) onText else offText)
+        vb.tabMonth.setBackgroundColor(if (weekOn) android.graphics.Color.TRANSPARENT else on)
+        vb.tabMonth.setTextColor(if (weekOn) offText else onText)
+        val r = dp(8)
+        vb.tabWeek.background = roundBg(if (weekOn) on else android.graphics.Color.TRANSPARENT, r)
+        vb.tabMonth.background = roundBg(if (weekOn) android.graphics.Color.TRANSPARENT else on, r)
+    }
+
+    private fun roundBg(color: Int, radius: Int): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = radius.toFloat()
+        }
+
+    private fun renderBig(activity: ActivityData?, trend: TrendData?) {
+        vb.tvBigLabel.text = getString(
+            R.string.report_big_label,
+            if (period == "week") getString(R.string.action_period_week) else getString(R.string.action_period_month),
+        )
+        vb.tvTotal.text = (activity?.total ?: 0).toString()
+
+        val compare = trend?.compare
+        val text = compare?.text?.takeIf { it.isNotBlank() }
+        vb.tvCompare.text = when {
+            text != null -> text
+            compare?.yesterday != null -> getString(R.string.report_compare_yesterday, compare.today ?: 0L)
+            else -> getString(R.string.no_compare)
+        }
+        vb.tvCompare.setTextColor(
+            resources.getColor(if (text != null || compare?.yesterday != null) R.color.text_secondary else R.color.text_hint, null)
+        )
+    }
+
+    /** 每天走动次数：竖条，柱高按最大值等比，0 次画一条灰线（与鸿蒙 DailyBuckets 一致） */
+    private fun renderBars(activity: ActivityData?) {
+        val buckets = activity?.daily.orEmpty()
+        vb.tvDailyLabel.text = getString(
+            if (period == "week") R.string.report_daily_week else R.string.report_daily_month,
+        )
+        vb.containerBars.removeAllViews()
+        if (buckets.isEmpty()) {
+            vb.tvBarFirst.text = ""
+            vb.tvBarLast.text = ""
+            return
+        }
+        val max = buckets.maxOf { it.count }.coerceAtLeast(1)
+        val maxHeight = dp(120)
+        val barWidth = dp(10)
+        val primary = resources.getColor(R.color.color_primary, null)
+        val divider = resources.getColor(R.color.divider, null)
+
+        buckets.forEach { b ->
+            val col = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(0, maxHeight, 1f)
+            }
+            val h = if (b.count <= 0) dp(2) else (maxHeight * b.count / max).coerceAtLeast(dp(2))
+            col.addView(View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(barWidth, h)
+                background = roundBg(if (b.count > 0) primary else divider, dp(2))
+            })
+            vb.containerBars.addView(col)
+        }
+        vb.tvBarFirst.text = buckets.first().date.takeLast(5)
+        vb.tvBarLast.text = buckets.last().date.takeLast(5)
+    }
+
+    private fun renderAlerts(summary: SummaryData?) {
+        val a = summary?.alerts
+        vb.tvAlertTotal.text = (a?.total ?: 0).toString()
+        vb.tvAlertPending.text = (a?.pending ?: 0).toString()
+        vb.tvAlertPending.setTextColor(
+            resources.getColor(if ((a?.pending ?: 0) > 0) R.color.level2 else R.color.text_primary, null)
+        )
+        vb.tvAlertFalse.text = (a?.false_alarm ?: 0).toString()
+
+        val prev = summary?.activity?.compare_prev?.takeIf { it.isNotBlank() }
+        vb.tvComparePrev.visibility = if (prev == null) View.GONE else View.VISIBLE
+        vb.tvComparePrev.text = prev.orEmpty()
+    }
+
+    private fun showState(text: String?) {
+        vb.tvState.visibility = if (text == null) View.GONE else View.VISIBLE
+        vb.tvState.text = text.orEmpty()
+        vb.btnRetry.visibility = if (text == null) View.GONE else View.VISIBLE
     }
 
     private suspend fun ensureDeviceId(): Long {
@@ -81,55 +183,5 @@ class ReportActivity : BaseActivity() {
             }
         }
 
-    private fun renderCompare(trend: TrendData?) {
-        val lines = CompareView.lines(trend?.compare)
-        vb.tvCompareTitle.text = lines.title
-        vb.tvCompareRowToday.text = getString(R.string.compare_today, lines.today)
-        vb.tvCompareRowYesterday.text = getString(R.string.compare_yesterday, lines.yesterday)
-        vb.tvCompareRowDelta.text = getString(R.string.compare_delta, lines.delta)
-        vb.tvCompareNote.text = lines.note
-        vb.tvCompareHint.text = lines.baselineHint.orEmpty()
-        vb.tvCompareHint.visibility = if (lines.baselineHint == null) View.GONE else View.VISIBLE
-    }
-
-    private fun renderSummary(summary: SummaryData?) {
-        if (summary == null) {
-            vb.tvSummaryActivity.text = getString(R.string.report_no_data)
-            vb.tvSummaryAlerts.text = ""
-            vb.tvSummaryEnv.text = ""
-            return
-        }
-        val act = summary.activity
-        vb.tvSummaryActivity.text = getString(
-            R.string.summary_activity_fmt,
-            act.total, act.active_days, fmt(act.avg_daily), hourText(act.peak_hour), hourText(act.min_hour),
-        )
-        val alerts = summary.alerts
-        val byType = alerts.by_type.entries
-            .filter { it.value > 0 }
-            .joinToString("、") { "${LifeText.alertTitle(it.key, 1)} ${it.value} 次" }
-            .ifBlank { getString(R.string.value_none) }
-        vb.tvSummaryAlerts.text = getString(
-            R.string.summary_alerts_fmt,
-            alerts.total, alerts.resolved, alerts.pending, byType,
-        )
-        val env = summary.env
-        vb.tvSummaryEnv.text = getString(
-            R.string.summary_env_fmt,
-            fmt(env.temp_avg), fmt(env.temp_min), fmt(env.temp_max), fmt(env.humi_avg),
-        )
-    }
-
-    private fun renderActivity(activity: ActivityData?) {
-        val lines = activity?.seriesText().orEmpty()
-        vb.tvActivity.text = if (lines.isEmpty()) {
-            getString(R.string.report_no_data)
-        } else {
-            getString(R.string.activity_total_fmt, activity?.total ?: 0) + "\n" + lines.joinToString("\n")
-        }
-    }
-
-    private fun fmt(value: Double?): String = if (value == null) "—" else String.format("%.1f", value)
-
-    private fun hourText(hour: Int?): String = if (hour == null) "—" else "${hour} 点"
+    private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
 }

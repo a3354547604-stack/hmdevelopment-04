@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  页签宿主：顶栏 + 可左右滑动的三页 + 底部页签。
+  为什么改成 ViewPager2：原来是三个 Activity，切换时只能播系统 Activity 动画，
+  永远同一个方向、也不跟手；鸿蒙端用的是 ArkUI Tabs（内容区可左右滑），
+  要做出同样的「翻页」手感，只能把三页放进一个容器里。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/page_bg"
+    android:orientation="vertical">
+
+    <include
+        android:id="@+id/topBar"
+        layout="@layout/part_top_bar" />
+
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/pager"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <include layout="@layout/part_bottom_nav" />
+</LinearLayout>

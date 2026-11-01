@@ -316,7 +316,8 @@ data class ActivitySummaryBlock(
     val avg_daily: Double = 0.0,
     val peak_hour: Int? = null,
     val min_hour: Int? = null,
-    val compare_prev: Int? = null,
+    /** 契约 §6.18：形如「较上周下降 5%」的**文案**，不是数字 */
+    val compare_prev: String? = null,
 )
 
 data class AlertSummaryBlock(

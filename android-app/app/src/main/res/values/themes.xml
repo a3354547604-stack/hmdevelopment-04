@@ -2,11 +2,11 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- 现场演示要看得清：字号整体放大一档，方便讲解时投屏 -->
     <style name="Theme.ElderCare.Provision" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/brand</item>
+        <item name="colorPrimary">@color/color_primary</item>
         <item name="colorPrimaryDark">@color/brand_dark</item>
         <item name="colorAccent">@color/brand</item>
         <item name="android:textSize">16sp</item>
-        <item name="android:windowBackground">@color/white</item>
+        <item name="android:windowBackground">@color/page_bg</item>
     </style>
 
     <style name="CardTitle">

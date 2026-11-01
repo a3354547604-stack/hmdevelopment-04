@@ -1,82 +1,171 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+  注册页：与鸿蒙 RegisterPage.ets 一比一。
+  返回条 + 「注册账号」标题 + 白卡（手机号 / 密码 / 确认密码 + 行内红字 + 注册并登录）+ 去登录链接。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:background="@color/page_bg"
+    android:orientation="vertical">
 
-    <LinearLayout
+    <TextView
+        android:id="@+id/tvBack"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_horizontal"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:layout_height="@dimen/touch_min"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:paddingStart="@dimen/page_padding"
+        android:paddingEnd="@dimen/page_padding"
+        android:text="@string/back_label"
+        android:textColor="@color/color_primary"
+        android:textSize="@dimen/font_body" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="40dp"
-            android:text="@string/register_title"
-            android:textColor="@color/brand_dark"
-            android:textSize="28sp"
-            android:textStyle="bold" />
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true">
 
-        <EditText
-            android:id="@+id/etPhone"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_marginTop="32dp"
-            android:hint="@string/hint_phone"
-            android:importantForAutofill="no"
-            android:inputType="phone"
-            android:maxLength="11"
-            android:textSize="20sp" />
-
-        <EditText
-            android:id="@+id/etPassword"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_marginTop="12dp"
-            android:hint="@string/hint_password_new"
-            android:importantForAutofill="no"
-            android:inputType="textPassword"
-            android:textSize="20sp" />
-
-        <EditText
-            android:id="@+id/etPasswordConfirm"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_marginTop="12dp"
-            android:hint="@string/hint_password_confirm"
-            android:importantForAutofill="no"
-            android:inputType="textPassword"
-            android:textSize="20sp" />
-
-        <Button
-            android:id="@+id/btnRegister"
-            android:layout_width="match_parent"
-            android:layout_height="60dp"
-            android:layout_marginTop="28dp"
-            android:backgroundTint="@color/brand"
-            android:text="@string/action_register_and_login"
-            android:textSize="20sp" />
-
-        <Button
-            android:id="@+id/btnBackToLogin"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="12dp"
-            android:backgroundTint="@color/surface_alt"
-            android:text="@string/action_back_to_login"
-            android:textColor="@color/brand"
-            android:textSize="17sp" />
-
-        <TextView
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:gravity="center"
-            android:text="@string/register_note"
-            android:textColor="@color/muted"
-            android:textSize="14sp" />
-    </LinearLayout>
-</ScrollView>
+            android:orientation="vertical"
+            android:paddingStart="@dimen/page_padding"
+            android:paddingEnd="@dimen/page_padding"
+            android:paddingBottom="@dimen/page_padding">
+
+            <TextView
+                android:id="@+id/tvTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="24dp"
+                android:text="@string/register_title"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/font_title"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_card"
+                android:orientation="vertical"
+                android:padding="@dimen/card_padding">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_phone"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_caption" />
+
+                <EditText
+                    android:id="@+id/etPhone"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/input_height"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_input"
+                    android:hint="@string/phone_bad"
+                    android:importantForAutofill="no"
+                    android:inputType="number"
+                    android:maxLength="11"
+                    android:maxLines="1"
+                    android:paddingStart="12dp"
+                    android:paddingTop="0dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="0dp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_hint"
+                    android:textSize="@dimen/font_body" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/label_password"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_caption" />
+
+                <EditText
+                    android:id="@+id/etPassword"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/input_height"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_input"
+                    android:hint="@string/hint_pwd_min8"
+                    android:importantForAutofill="no"
+                    android:inputType="textPassword"
+                    android:maxLength="64"
+                    android:maxLines="1"
+                    android:paddingStart="12dp"
+                    android:paddingTop="0dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="0dp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_hint"
+                    android:textSize="@dimen/font_body" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/label_password2"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/font_caption" />
+
+                <EditText
+                    android:id="@+id/etPasswordConfirm"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/input_height"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_input"
+                    android:hint="@string/hint_pwd_again"
+                    android:importantForAutofill="no"
+                    android:inputType="textPassword"
+                    android:maxLength="64"
+                    android:maxLines="1"
+                    android:paddingStart="12dp"
+                    android:paddingTop="0dp"
+                    android:paddingEnd="12dp"
+                    android:paddingBottom="0dp"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_hint"
+                    android:textSize="@dimen/font_body" />
+
+                <TextView
+                    android:id="@+id/tvError"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/level2_text"
+                    android:textSize="@dimen/font_caption"
+                    android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnRegister"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/btn_height"
+                    android:layout_marginTop="12dp"
+                    android:backgroundTint="@color/color_primary_fill"
+                    android:text="@string/btn_register_and_in"
+                    android:textAllCaps="false"
+                    android:textColor="@color/on_accent"
+                    android:textSize="@dimen/font_body"
+                    app:cornerRadius="@dimen/btn_radius" />
+
+                <TextView
+                    android:id="@+id/tvGoLogin"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/touch_min"
+                    android:layout_marginTop="6dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center"
+                    android:text="@string/go_login"
+                    android:textColor="@color/color_primary"
+                    android:textSize="@dimen/font_caption" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

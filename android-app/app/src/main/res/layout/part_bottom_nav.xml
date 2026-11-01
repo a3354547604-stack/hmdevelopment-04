@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 底部三个页签：首页 / 提醒 / 我的（规范里只有这三个入口） -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:background="@color/white"
-    android:elevation="8dp"
+    android:layout_height="64dp"
+    android:background="@color/surface"
     android:orientation="horizontal"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp">
+    android:gravity="center_vertical">
 
     <LinearLayout
         android:id="@+id/btnTabHome"
@@ -20,17 +19,20 @@
         android:gravity="center"
         android:orientation="vertical">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="&#127968;"
-            android:textSize="22sp" />
+        <ImageView
+            android:id="@+id/ivTabHome"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_tab_home"
+            app:tint="@color/text_hint" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
             android:text="@string/tab_home"
-            android:textSize="14sp" />
+            android:textSize="13sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -44,17 +46,42 @@
         android:gravity="center"
         android:orientation="vertical">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="&#128276;"
-            android:textSize="22sp" />
+        <!-- 图标 + 未读数角标叠一层：鸿蒙那边提醒页签上也挂未处理条数，
+             家属不点进提醒页就知道有几条没处理 -->
+        <FrameLayout
+            android:layout_width="32dp"
+            android:layout_height="24dp">
+
+            <ImageView
+                android:id="@+id/ivTabAlert"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_tab_alert"
+                app:tint="@color/text_hint" />
+
+            <TextView
+                android:id="@+id/tvTabBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="16dp"
+                android:layout_gravity="top|end"
+                android:background="@drawable/bg_badge"
+                android:gravity="center"
+                android:minWidth="16dp"
+                android:paddingStart="3dp"
+                android:paddingEnd="3dp"
+                android:textColor="@color/on_accent"
+                android:textSize="11sp"
+                android:visibility="gone" />
+        </FrameLayout>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
             android:text="@string/tab_reminders"
-            android:textSize="14sp" />
+            android:textSize="13sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -68,16 +95,19 @@
         android:gravity="center"
         android:orientation="vertical">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="&#128100;"
-            android:textSize="22sp" />
+        <ImageView
+            android:id="@+id/ivTabProfile"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_tab_profile"
+            app:tint="@color/text_hint" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
             android:text="@string/tab_profile"
-            android:textSize="14sp" />
+            android:textSize="13sp" />
     </LinearLayout>
 </LinearLayout>

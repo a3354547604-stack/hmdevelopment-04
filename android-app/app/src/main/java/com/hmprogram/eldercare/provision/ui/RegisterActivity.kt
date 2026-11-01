@@ -2,15 +2,17 @@ package com.hmprogram.eldercare.provision.ui
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import com.hmprogram.eldercare.provision.R
 import com.hmprogram.eldercare.provision.core.ApiResult
 import com.hmprogram.eldercare.provision.databinding.ActivityRegisterBinding
 
 /**
- * 注册：手机号 / 密码 / 确认密码，三步填完直接进首页。
+ * 注册：与鸿蒙 RegisterPage.ets 一比一。
  *
- * 注册成功后紧跟一次登录，是为了拿到令牌——服务端的注册接口只返回账号信息，不发令牌；
- * 让用户注册完再手输一次密码纯属折腾，所以这里连着做。
+ * 校验顺序照鸿蒙：手机号 11 位 → 密码至少 8 位 → 两次一致；错误写在卡片里的红字上，
+ * 不弹 toast（老人看不见一闪而过的提示，红字留在原地更稳）。
+ * 注册成功后紧跟一次登录，是因为服务端注册接口只返账号信息、不发令牌。
  */
 class RegisterActivity : BaseActivity() {
 
@@ -21,37 +23,44 @@ class RegisterActivity : BaseActivity() {
         vb = ActivityRegisterBinding.inflate(layoutInflater)
         setContentView(vb.root)
 
+        vb.tvBack.setOnClickListener { finish() }
+        vb.tvGoLogin.setOnClickListener { finish() }
         vb.btnRegister.setOnClickListener { submit() }
-        vb.btnBackToLogin.setOnClickListener { finish() }
+        // 改输入就抹掉旧错误，免得红字一直挂着
+        listOf(vb.etPhone, vb.etPassword, vb.etPasswordConfirm).forEach { field ->
+            field.setOnFocusChangeListener { _, focused -> if (focused) clearError() }
+        }
     }
 
     private fun submit() {
         val phone = vb.etPhone.text.toString().trim()
         val password = vb.etPassword.text.toString()
         val confirm = vb.etPasswordConfirm.text.toString()
+
         if (!LoginActivity.PHONE_RE.matches(phone)) {
-            toast(getString(R.string.err_phone_format))
-            return
+            showError(getString(R.string.phone_bad)); return
         }
         if (password.length < 8) {
-            toast(getString(R.string.err_password_len))
-            return
+            showError(getString(R.string.pwd_bad)); return
         }
         if (password != confirm) {
-            toast(getString(R.string.err_password_mismatch))
-            return
+            showError(getString(R.string.pwd_diff)); return
         }
+
+        clearError()
         vb.btnRegister.isEnabled = false
+        vb.btnRegister.alpha = 0.5f
         launchUi {
             try {
                 when (val res = container.serverApi.register(phone, password, phone)) {
                     is ApiResult.Ok -> loginAfterRegister(phone, password)
-                    is ApiResult.Err -> toast(
+                    is ApiResult.Err -> showError(
                         if (res.code == 1103) getString(R.string.err_phone_taken) else res.display(),
                     )
                 }
             } finally {
                 vb.btnRegister.isEnabled = true
+                vb.btnRegister.alpha = 1f
             }
         }
     }
@@ -72,5 +81,14 @@ class RegisterActivity : BaseActivity() {
                 finish()
             }
         }
+    }
+
+    private fun showError(text: String) {
+        vb.tvError.text = text
+        vb.tvError.visibility = View.VISIBLE
+    }
+
+    private fun clearError() {
+        vb.tvError.visibility = View.GONE
     }
 }

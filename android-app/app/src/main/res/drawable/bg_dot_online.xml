@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 顶栏那颗 8dp 的在线点（鸿蒙 MainTabs 同款） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <solid android:color="@color/level0" />
+</shape>
