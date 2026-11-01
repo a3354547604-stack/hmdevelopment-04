@@ -86,7 +86,7 @@ static int uart_init(void)
     (void)PinctrlSet(GPIO0_PB7, MUX_FUNC2, PULL_KEEP, DRIVE_LEVEL2);
     rc = LzUartInit(MIN_UART_ID, &attr);
     if (rc != LZ_HARDWARE_SUCCESS) {
-        printf("[%s] ⚠ UART0 初始化失败 rc=0x%08X\n", MIN_LOG_TAG, (unsigned)rc);
+        printf("[min] ⚠ UART0 初始化失败 rc=0x%08X\n", (unsigned)rc);
         return -1;
     }
     return 0;
@@ -132,12 +132,11 @@ static void stack_report(void)
     if (LOS_TaskInfoGet(g_work_tid, &info) != LOS_OK) {
         return;
     }
-    printf("[%s] stk 已用 %u B / 峰值 %u B / 栈 %u B\n", MIN_LOG_TAG, (unsigned)info.uwCurrUsed,
+    printf("[min] stk 已用 %u B / 峰值 %u B / 栈 %u B\n", (unsigned)info.uwCurrUsed,
            (unsigned)info.uwPeakUsed, (unsigned)info.uwStackSize);
     if (info.bOvf) {
         /* 内核判定栈已写穿：这行就是「崩溃前最后一句」 */
-        printf("[%s] !! fatal 主任务栈溢出 bOvf=1（峰值 %u B / 栈 %u B）\n", MIN_LOG_TAG,
-               (unsigned)info.uwPeakUsed, (unsigned)info.uwStackSize);
+        printf("[min] !! fatal 主任务栈溢出 bOvf=1（峰值 %u B / 栈 %u B）\n", (unsigned)info.uwPeakUsed, (unsigned)info.uwStackSize);
     }
 }
 
@@ -146,14 +145,13 @@ static void report(uint32_t now)
 {
     if ((int32_t)(now - s_hb_last) >= (int32_t)MIN_HB_MS) {
         s_hb_last = now;
-        printf("[%s] alive n=%u up=%us uart=%uB pub=%u err=%u\n", MIN_LOG_TAG,
-               (unsigned)g_loops, (unsigned)(now / 1000u), (unsigned)g_rx_bytes,
+        printf("[min] alive n=%u up=%us uart=%uB pub=%u err=%u\n", (unsigned)g_loops, (unsigned)(now / 1000u), (unsigned)g_rx_bytes,
                (unsigned)g_pub_ok, (unsigned)g_pub_err);
         stack_report();
     }
     if ((int32_t)(now - s_rx_last) >= (int32_t)MIN_RX_REPORT_MS) {
         s_rx_last = now;
-        printf("[%s] uart rx=%uB frames=%u\n", MIN_LOG_TAG, (unsigned)g_rx_bytes,
+        printf("[min] uart rx=%uB frames=%u\n", (unsigned)g_rx_bytes,
                (unsigned)g_frames);
     }
 }
@@ -183,7 +181,7 @@ static void backoff_note(uint32_t now)
     g_pub_err++;
     wait = min_backoff_ms(s_ctx.fails - 1u);
     s_ctx.next_try = now + wait;
-    printf("[%s] %s 失败（第 %u 次），%u s 后重试\n", MIN_LOG_TAG, state_name(s_ctx.st),
+    printf("[min] %s 失败（第 %u 次），%u s 后重试\n", state_name(s_ctx.st),
            (unsigned)s_ctx.fails, (unsigned)(wait / 1000u));
 }
 
@@ -200,33 +198,30 @@ static int publish_frame(const min_frame_t *fr)
 
     /* publish 前先留一行：rc 是**上一次**的返回码（首发为 0）。现场对时间戳用——
      * 这行出现而下一行「已上报」没出现 ⇒ 卡死在 publish 里。 */
-    printf("[%s] pub seq=%u len=%u rc=%d\n", MIN_LOG_TAG, (unsigned)fr->seq,
+    printf("[min] pub seq=%u len=%u rc=%d\n", (unsigned)fr->seq,
            (unsigned)fr->plen, (int)g_last_rc);
     g_pub_seq = fr->seq;
 
     bl = min_msg_node_samples(s_cred.device_id, ms, fr->payload, fr->plen, s_ctx.body,
                               (uint32_t)sizeof(s_ctx.body));
     if (bl <= 0) {
-        printf("[%s] ⚠ 报文拼装失败（转义溢出或超长）seq=%u len=%u → 丢这一帧\n", MIN_LOG_TAG,
-               (unsigned)fr->seq, (unsigned)fr->plen);
+        printf("[min] ⚠ 报文拼装失败（转义溢出或超长）seq=%u len=%u → 丢这一帧\n", (unsigned)fr->seq, (unsigned)fr->plen);
         return 1;
     }
     rc = min_mqtt_publish(&s_mqtt, s_ctx.topic_msg, (const uint8_t *)s_ctx.body, (uint32_t)bl);
     g_last_rc = rc;
     if (rc == 0) {
         g_pub_ok++;
-        printf("[%s] 已上报 node seq=%u len=%u（PUBACK）rc=%d\n", MIN_LOG_TAG,
-               (unsigned)fr->seq, (unsigned)bl, rc);
+        printf("[min] 已上报 node seq=%u len=%u（PUBACK）rc=%d\n", (unsigned)fr->seq, (unsigned)bl, rc);
         return 0;
     }
     if (rc == -2) {
         /* select 总预算到点仍没等到 PUBACK（契约 QoS1）。这**不是**致命错：断开重连，
          * 主循环继续跑、心跳照打——绝不在这里 break 或原地重发。 */
-        printf("[%s] ⚠ PUBACK 超时（%us 预算内没等到）→ 重连 seq=%u len=%u\n", MIN_LOG_TAG,
-               (unsigned)(MIN_MQTT_PUB_BUDGET_MS / 1000u), (unsigned)fr->seq, (unsigned)bl);
+        printf("[min] ⚠ PUBACK 超时（%us 预算内没等到）→ 重连 seq=%u len=%u\n", (unsigned)(MIN_MQTT_PUB_BUDGET_MS / 1000u), (unsigned)fr->seq, (unsigned)bl);
         return -1;
     }
-    printf("[%s] ⚠ 上报失败 rc=%d（seq=%u len=%u）\n", MIN_LOG_TAG, rc, (unsigned)fr->seq,
+    printf("[min] ⚠ 上报失败 rc=%d（seq=%u len=%u）\n", rc, (unsigned)fr->seq,
            (unsigned)bl);
     return -1;
 }
@@ -246,7 +241,7 @@ static void handle_frame(const min_frame_t *fr, uint32_t now)
     }
     if (prc != 0) {
         g_pub_err++;
-        printf("[%s] ⚠ MQTT 断开重连 n=%u rc=%d\n", MIN_LOG_TAG, (unsigned)(s_ctx.fails + 1u),
+        printf("[min] ⚠ MQTT 断开重连 n=%u rc=%d\n", (unsigned)(s_ctx.fails + 1u),
                (int)g_last_rc);
         sess_close();
         backoff_note(now);
@@ -298,8 +293,7 @@ static void state_step(uint32_t now)
             backoff_note(now);
             break;
         }
-        printf("[%s] 取时成功 utc_epoch=%llu（来源 %s:%u）\n", MIN_LOG_TAG,
-               (unsigned long long)s_ctx.epoch, s_cred.time_host, (unsigned)s_cred.time_port);
+        printf("[min] 取时成功 utc_epoch=%llu（来源 %s:%u）\n", (unsigned long long)s_ctx.epoch, s_cred.time_host, (unsigned)s_cred.time_port);
         s_ctx.fails = 0;
         s_ctx.st = ST_MQTT;
         break;
@@ -310,7 +304,7 @@ static void state_step(uint32_t now)
         g_stage = 2u;
         if (min_iotda_client_id(s_cred.device_id, s_ctx.epoch, s_ctx.client_id,
                                 sizeof(s_ctx.client_id)) != 0) {
-            printf("[%s] 未校时：不拼 clientId（避免 0x02）\n", MIN_LOG_TAG);
+            printf("[min] 未校时：不拼 clientId（避免 0x02）\n");
             backoff_note(now);
             break;
         }
@@ -327,12 +321,11 @@ static void state_step(uint32_t now)
         }
         if (min_mqtt_connect(&s_mqtt, fd, s_ctx.client_id, s_ctx.user, s_ctx.pass, 120u) != 0) {
             (void)close(fd);
-            printf("[%s] IoTDA 连接失败（第 %u 次），%u s 后重试\n", MIN_LOG_TAG,
-                   (unsigned)(s_ctx.fails + 1u), (unsigned)(min_backoff_ms(s_ctx.fails) / 1000u));
+            printf("[min] IoTDA 连接失败（第 %u 次），%u s 后重试\n", (unsigned)(s_ctx.fails + 1u), (unsigned)(min_backoff_ms(s_ctx.fails) / 1000u));
             backoff_note(now);
             break;
         }
-        printf("[%s] IoTDA 已连接 clientId=%s\n", MIN_LOG_TAG, s_ctx.client_id);
+        printf("[min] IoTDA 已连接 clientId=%s\n", s_ctx.client_id);
         s_ctx.fails = 0;
         s_ctx.last_ping = now;
         s_ctx.st = ST_RUN;
@@ -348,7 +341,7 @@ static void state_step(uint32_t now)
 
             s_ctx.last_ping = now;
             if (rc != 0) {
-                printf("[%s] ⚠ PINGRESP 没回来 rc=%d：断开重连 n=%u\n", MIN_LOG_TAG, rc,
+                printf("[min] ⚠ PINGRESP 没回来 rc=%d：断开重连 n=%u\n", rc,
                        (unsigned)(s_ctx.fails + 1u));
                 sess_close();
                 backoff_note(now);
@@ -406,8 +399,8 @@ void BusFault_Handler(void);
 
 void HardFault_Handler(void)
 {
-    printf("\n[%s] !! fatal HardFault：CPU 异常（stage=%u n=%u uart=%uB pub=%u err=%u）\n",
-           MIN_LOG_TAG, (unsigned)g_stage, (unsigned)g_loops, (unsigned)g_rx_bytes,
+    printf("\n[min] !! fatal HardFault：CPU 异常（stage=%u n=%u uart=%uB pub=%u err=%u）\n",
+           (unsigned)g_stage, (unsigned)g_loops, (unsigned)g_rx_bytes,
            (unsigned)g_pub_ok, (unsigned)g_pub_err);
     for (;;) {
     }
@@ -415,7 +408,7 @@ void HardFault_Handler(void)
 
 void BusFault_Handler(void)
 {
-    printf("\n[%s] !! fatal BusFault：总线/外设访存异常（stage=%u n=%u）\n", MIN_LOG_TAG,
+    printf("\n[min] !! fatal BusFault：总线/外设访存异常（stage=%u n=%u）\n",
            (unsigned)g_stage, (unsigned)g_loops);
     for (;;) {
     }
@@ -436,9 +429,9 @@ static void guard_task(void *arg)
         if (g_loops == last_seen) {
             still++;
             if (still == MIN_STALL_S) {
-                printf("[%s] !! fatal 主任务 %u s 没有前进（stage=%u seq=%u n=%u uart=%uB "
+                printf("[min] !! fatal 主任务 %u s 没有前进（stage=%u seq=%u n=%u uart=%uB "
                        "frames=%u pub=%u err=%u）\n",
-                       MIN_LOG_TAG, (unsigned)still, (unsigned)g_stage, (unsigned)g_pub_seq,
+                       (unsigned)still, (unsigned)g_stage, (unsigned)g_pub_seq,
                        (unsigned)g_loops, (unsigned)g_rx_bytes, (unsigned)g_frames,
                        (unsigned)g_pub_ok, (unsigned)g_pub_err);
                 stack_report();
@@ -458,7 +451,7 @@ static void min_entry(void)
     uint32_t tid = 0;
     uint32_t ret;
 
-    printf("\n[%s] ---- RK2206 最小网关启动 %s (%s %s) ----\n", MIN_LOG_TAG, MIN_IMAGE_TAG,
+    printf("\n[min] ---- RK2206 最小网关启动 %s (%s %s) ----\n", MIN_IMAGE_TAG,
            __DATE__, __TIME__);
 
     /* 第 1 行（判据）：KV 里到底有没有凭证。口令只打「有/无」，永不回显。 */
@@ -467,25 +460,22 @@ static void min_entry(void)
         int cr = min_kv_load_iotda(&s_cred);
 
         if (wr == 0) {
-            printf("[%s] KV：Wi-Fi ssid=%s 口令=%s（不回显）\n", MIN_LOG_TAG, s_wifi.ssid,
+            printf("[min] KV：Wi-Fi ssid=%s 口令=%s（不回显）\n", s_wifi.ssid,
                    (s_wifi.psk[0] != '\0') ? "已读到" : "空");
         } else {
-            printf("[%s] KV：没读到 Wi-Fi 凭证（旧固件里没配过？串口 wifi set 配一次即可）\n",
-                   MIN_LOG_TAG);
+            printf("[min] KV：没读到 Wi-Fi 凭证（旧固件里没配过？串口 wifi set 配一次即可）\n");
         }
         if (cr == 0) {
-            printf("[%s] KV：IoTDA 接入 %s:%u 设备 %s，取时 %s:%u\n", MIN_LOG_TAG, s_cred.mqtt_host,
+            printf("[min] KV：IoTDA 接入 %s:%u 设备 %s，取时 %s:%u\n", s_cred.mqtt_host,
                    (unsigned)s_cred.mqtt_port, s_cred.device_id, s_cred.time_host,
                    (unsigned)s_cred.time_port);
         } else {
-            printf("[%s] KV：没有 IoTDA 凭证块（Flash 0x%06X）：只解析串口，不上云\n", MIN_LOG_TAG,
-                   (unsigned)MIN_KV_FLASH_OFF);
+            printf("[min] KV：没有 IoTDA 凭证块（Flash 0x%06X）：只解析串口，不上云\n", (unsigned)MIN_KV_FLASH_OFF);
         }
     }
 
     if (uart_init() == 0) {
-        printf("[%s] UART0 就绪 %u 8N1（RX=GPIO0_PB6 / TX=GPIO0_PB7，MUX_FUNC2）\n", MIN_LOG_TAG,
-               (unsigned)MIN_UART_BAUD);
+        printf("[min] UART0 就绪 %u 8N1（RX=GPIO0_PB6 / TX=GPIO0_PB7，MUX_FUNC2）\n", (unsigned)MIN_UART_BAUD);
     }
 
     /* 守卫任务先起：主任务万一在 SDK 里卡死，它还能喊话 */
@@ -496,8 +486,7 @@ static void min_entry(void)
     p.pcName = "minGuard";
     ret = LOS_TaskCreate(&tid, &p);
     if (ret != LOS_OK) {
-        printf("[%s] ⚠ 守卫任务创建失败 ret=0x%08X（心跳仍会打，但卡死没人喊）\n", MIN_LOG_TAG,
-               (unsigned)ret);
+        printf("[min] ⚠ 守卫任务创建失败 ret=0x%08X（心跳仍会打，但卡死没人喊）\n", (unsigned)ret);
     }
 
     memset(&p, 0, sizeof(p));
@@ -507,14 +496,13 @@ static void min_entry(void)
     p.pcName = "minWork";
     ret = LOS_TaskCreate(&tid, &p);
     if (ret != LOS_OK) {
-        printf("[%s] ✗ 主任务创建失败 ret=0x%08X：固件不会做任何事\n", MIN_LOG_TAG, (unsigned)ret);
+        printf("[min] ✗ 主任务创建失败 ret=0x%08X：固件不会做任何事\n", (unsigned)ret);
         return;
     }
     g_work_tid = tid;
     s_hb_last = min_now_ms();
     s_rx_last = s_hb_last;
-    printf("[%s] 主任务已启动（栈 %u B，优先级 %u）；心跳 %u s / UART 计数 %u s\n", MIN_LOG_TAG,
-           (unsigned)MIN_TASK_STACK, (unsigned)MIN_TASK_PRIO, (unsigned)(MIN_HB_MS / 1000u),
+    printf("[min] 主任务已启动（栈 %u B，优先级 %u）；心跳 %u s / UART 计数 %u s\n", (unsigned)MIN_TASK_STACK, (unsigned)MIN_TASK_PRIO, (unsigned)(MIN_HB_MS / 1000u),
            (unsigned)(MIN_RX_REPORT_MS / 1000u));
 }
 

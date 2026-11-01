@@ -151,8 +151,8 @@ bash tools/build-lock.sh bash tools/gw-build-min.sh
 `Firmware.img` 含锚点串 `MIN-GW-v0.2-diag` / 镜像 2097152 B 且打印当次 md5+sha256。
 
 **当次结果（t193，2026-11-01 23:5x，本机）**：hb 退出码 0、日志 1519 行、7 项断言全过；
-`Firmware.img` **2097152 B**、md5 `0e07ad3e1e4c48d2e5db0a6e524eed01`、sha256
-`5c0ad0e130ca80ab95fc82ad4a19f35704b497b51dc537f30ec8bece585275e9`、`liteos.elf` 839424 B。
+`Firmware.img` **2097152 B**、md5 `cd590e42f889601bb4ef957852707fcd`、sha256
+`4c4b1e35bc20dae57057f095e51e5060dad4f956942efcba88ba17a1525741bb`、`liteos.elf` 839424 B。
 证据文件：`rk2206-gateway/out/build-min.evidence.txt`。
 （t192 首版：md5 `59f757166a636657b035d599a805bd80`、elf 837564 B。）
 
@@ -163,7 +163,7 @@ bash tools/build-lock.sh bash tools/gw-build-min.sh
 | `MIN-GW-v0.2-diag` | 1 | 版本锚点（构建脚本断言它存在） |
 | `alive n=` | 1 | t193 心跳 |
 | `uart rx=` | 1 | t193 UART 计数 |
-| `PUBACK 超时` | 1 | t193 等 PUBACK 预算闸 |
+| `PUBACK` | 2 | t193 等 PUBACK 预算闸（中文串用 `grep -a -F 'PUBACK 超时'` 核，`strings` 会截断 UTF-8） |
 | `minGuard` | 1 | t193 守卫任务名 |
 | `!! fatal` | 4 | HardFault / BusFault / 栈溢出 / 20 s 不前进 |
 

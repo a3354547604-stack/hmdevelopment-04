@@ -162,7 +162,7 @@ void min_hmac_sha256(const uint8_t *key, uint32_t klen, const uint8_t *msg, uint
     memcpy(tmp, ipad, 64u);
     if (mlen > 256u) {
         /* 本固件里 message 最长就是 secret(≤63 B)，超长直接按前 256 B 算并打日志 */
-        printf("[%s] ⚠ HMAC message 超长（%u B），只取前 256 B\n", MIN_LOG_TAG, (unsigned)mlen);
+        printf("[min] ⚠ HMAC message 超长（%u B），只取前 256 B\n", (unsigned)mlen);
         mlen = 256u;
     }
     memcpy(&tmp[64], msg, mlen);
@@ -445,6 +445,18 @@ int min_mqtt_connect(min_mqtt_t *m, int fd, const char *client_id, const char *u
     if (m == NULL || client_id == NULL || user == NULL || pass == NULL) {
         return -1;
     }
+    /* 卡面第 1 条：MQTT socket 的读超时固定 3 s（HTTP 取时那条是 min_net 里的 5 s，互不影响）。
+     * 这只是兜底——真正保证不卡死的是下面 mqtt_recv_deadline 的 select 总预算。 */
+    {
+        struct timeval tv;
+
+        tv.tv_sec = (long)MIN_MQTT_RECV_TIMEOUT_S;
+        tv.tv_usec = 0;
+        if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+            printf("[min] ⚠ SO_RCVTIMEO %us 设置失败（继续靠 select 预算兜底）\n",
+                   (unsigned)MIN_MQTT_RECV_TIMEOUT_S);
+        }
+    }
     cid_len = (uint32_t)strlen(client_id);
     user_len = (uint32_t)strlen(user);
     pass_len = (uint32_t)strlen(pass);
@@ -471,34 +483,22 @@ int min_mqtt_connect(min_mqtt_t *m, int fd, const char *client_id, const char *u
     memcpy(&pkt[o], pass, pass_len); o += pass_len;
 
     if (mqtt_send(fd, pkt, o) != 0) {
-        printf("[%s] ⚠ MQTT CONNECT 发送失败\n", MIN_LOG_TAG);
+        printf("[min] ⚠ MQTT CONNECT 发送失败\n");
         return -1;
     }
     if (mqtt_recv(fd, &type, body, sizeof(body)) < 0) {
-        printf("[%s] ⚠ MQTT 没有 CONNACK（连接被关或超时）\n", MIN_LOG_TAG);
+        printf("[min] ⚠ MQTT 没有 CONNACK（连接被关或超时）\n");
         return -1;
     }
     if (type != 2u) {
-        printf("[%s] ⚠ 期望 CONNACK(2)，收到 type=%u\n", MIN_LOG_TAG, (unsigned)type);
+        printf("[min] ⚠ 期望 CONNACK(2)，收到 type=%u\n", (unsigned)type);
         return -1;
     }
     if (body[1] != 0u) {
         /* 0x02 = clientId 不合法（时间戳没校上/格式错）；0x04 = 用户名口令错（HMAC 方向或 secret） */
-        printf("[%s] ✗ IoTDA 拒绝连接 return code=0x%02X（0x02=clientId 时间戳，0x04=口令）\n",
-               MIN_LOG_TAG, (unsigned)body[1]);
+        printf("[min] ✗ IoTDA 拒绝连接 return code=0x%02X（0x02=clientId 时间戳，0x04=口令）\n",
+               (unsigned)body[1]);
         return -2;
-    }
-    {
-        /* t193：把 MQTT 会话的 socket 超时统一成 3 s（取时那条是 5 s，不复用）。
-         * lwipopts.h:123 已开 LWIP_SO_RCVTIMEO，设不上就打印出来，别静默。 */
-        struct timeval tv;
-
-        tv.tv_sec = (long)MIN_MQTT_RECV_TIMEOUT_S;
-        tv.tv_usec = 0;
-        if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
-            printf("[%s] ⚠ SO_RCVTIMEO 设置失败（%u s）：靠 select 预算兜底\n", MIN_LOG_TAG,
-                   (unsigned)MIN_MQTT_RECV_TIMEOUT_S);
-        }
     }
     m->fd = fd;
     m->next_id = 1u;
