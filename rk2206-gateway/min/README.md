@@ -532,3 +532,54 @@ strings rk2206-gateway/out/gateway-Firmware.img | grep -aF 'baud-lock'
 `hdr[63]/psk[63]`；`min_wifi_t.ssid[33]` 的 `out->ssid[32]='\0'`；`min_cred_t.device_id[64]` 装 47 字符
 （打印设备 ID 全程用 `printf("%s")`，没有中转小缓冲；真正落地的只有 `s_ctx.user[64]` 与
 `s_ctx.client_id[128]`，都是 `snprintf` 截断写）。
+
+---
+
+## 14. v0.6-uart：加回 UART 真实数据（t206）
+
+**一句话**：v0.5.1 已实机确认「Wi-Fi + 取时 + IoTDA QoS1」这条链干净；v0.6 只在这条链**末端**加一段
+「读 UART0 → 解帧 → 按契约上报」，其余能力一个都没加。
+
+### 14.1 改了什么
+| 位置 | 改动 |
+|---|---|
+| `min_main.c` `uart_init()` | 固定 9600 8N1；`LzUartDeinit` 后重配（幂等保险）、`PinctrlSet(GPIO0_PB6/PB7, MUX_FUNC2)`、RX 上拉；失败只打日志不阻断联网 |
+| `min_main.c` `uart_pump()` | 主循环每圈无条件调用（退避期间也调）：`LzUartRead` → `min_parser_feed` → 把缓冲里剩下的帧全挤出来 |
+| `min_main.c` `handle_frame()` / `publish_frame()` | 0x01 帧按 §4.6 `device.message` 上报；**限速 2 条/秒**（`MIN_UART_RATE_MS 500`） |
+| `min_main.c` `report()` | alive 行改成卡面口径：`uart=<B> frames=<n> crc=<n> pub=<n> err=<n> heap=<B> phase= since_last=<s>` |
+| `min_main.c` `uart_pump()` | 5 s 一帧没解出来打一次 `[v06] uart no-frame 5s, baud=9600（rx/crc/fmt/drop）` |
+| `min_main.c` 入口 | **删掉守卫线程**（见 14.3），改成软件守卫 |
+| `min_proto.c` | 新增 `min_json_str_field()`（只认 `"key":"value"`），给 `frame sn=… type=…` 那行取字段 |
+| `min_gw.h` | `MIN_IMAGE_TAG` → `MIN-GW-v0.6-uart`；新增上面那个原型 |
+| `test/test_min.c` | 新增 `test_json_field()` 10 条（含「数字/布尔不算字符串」「值超长不截半截」「NULL/长度 0」） |
+
+**解析器没有再写一份**：`min_proto.c` 从 t192 起就是正式固件 `gw_proto.c` 的同一算法
+（AA55 帧头 + VER/TYPE/SEQ/LEN + CRC16-MODBUS 尾），单测里跑的就是契约 §3.7 的三条真实帧。
+卡面要求「沿用正式固件的解析器、不要新写解析」，这里满足的是**算法与用例一致**，而不是 `#include ../src/gw_proto.c`
+——`min/` 不能依赖 `src/` 是 t192 就定下的边界（`min/` 要能整体删掉而不影响正式固件）。
+
+### 14.2 判据（烧录说明里同步）
+连续 10 分钟：alive 不断 / `frames` 持续涨 / `pub` 与 `frames` 同步 / `err=0` /
+服务器 `/api/iotda/webhook` 计数同步涨 / 无 `[ERR]stack-protector`。
+
+`frames` 与 `pub` 的差值 = 被限速丢掉的帧（≤ 帧率一半属正常）；未联网期间解出的帧计入
+`drop_offline`（`v06` 命令里能看到），**不并进 err=**，否则开机那几帧会把 `err=0` 的判据顶起来。
+
+### 14.3 为什么删掉守卫线程（t206 卡面要求）
+v0.5.1 现场开机打 `[v06] ⚠ 守卫任务创建失败 ret=0x02000203` —— `0x02000203` 是
+`LOS_ERRNO_TSK_NO_MEMORY`：堆里已经建不出第二个线程的栈了。多一个线程只多一份风险，
+于是改成**软件守卫**：
+- 主循环每圈写 `s_loop_ms = now`；
+- alive 行打 `since_last=(now - s_loop_ms)/1000`；
+- 主循环被 SDK 卡住时，alive 行不再出现（或 `since_last` 明显变大），凭这一行就能判「卡死」。
+
+**代价**（写在明处）：如果卡死发生在**主循环内部**，软件守卫也只能「事后由日志消失」体现，
+不能像硬件看门狗那样把板子拉回来——本版没有看门狗，这是卡面明确接受的范围。
+
+### 14.4 本版指纹
+- TAG `MIN-GW-v0.6-uart`，镜像 2097152 B，md5 `060604899a40c123f97d06902485844c`（当次），
+  `liteos.elf` 840916 B
+- 锚点（`grep -a -c -F`）：`MIN-GW-v0.6-uart` / `[v06] alive n=` / `[v06] frame seq=` /
+  `uart no-frame 5s` / `[v06] stack guard ok` 各 1
+- `bash tools/gw-build-min.sh --check`：主机单测 **91/0**（v0.5.1 是 81，新增 10 条 JSON 字段用例），
+  6 个 .c 交叉语法检查全 OK

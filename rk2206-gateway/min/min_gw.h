@@ -29,7 +29,7 @@
  * 不注入时默认值照样能单独编过；注入只影响横幅与锚点，不影响业务逻辑）。
  */
 #ifndef MIN_IMAGE_TAG
-#define MIN_IMAGE_TAG       "MIN-GW-v0.5.1-comms"
+#define MIN_IMAGE_TAG       "MIN-GW-v0.6-uart"
 #endif
 #define MIN_LOG_TAG         "min"
 #define MIN_DEVICE_SN       "M0-3F1A2B"            /* 与旧固件 gw_config.h:302 一致：
@@ -146,6 +146,10 @@ int      min_parser_feed(min_parser_t *p, const uint8_t *d, uint32_t n, min_fram
 int      min_parser_pull(min_parser_t *p, min_frame_t *out);
 /* 把缓冲区当作一整帧来校验（单测用）：0 = 合法 */
 int      min_frame_verify(const uint8_t *f, uint32_t n, min_frame_t *out);
+/* 从节点 JSON 里抠字符串字段（t206）：只认 "key":"value"，纯 ASCII、不解转义。
+ * 用来把 `frame sn=M1 type=gas` 打进日志；找不到返回 -1 且 out[0]='\0'。 */
+int      min_json_str_field(const uint8_t *js, uint32_t len, const char *key, char *out,
+                            uint32_t cap);
 
 /* ---------------------------------------------------------------- kv */
 
@@ -208,7 +212,7 @@ int min_msg_node_samples(const char *device_id, uint64_t epoch_ms, const uint8_t
 
 /* ---------------------------------------------------------------- shell */
 
-/* t204：最小串口命令（只有 wifi set / wifi net / wifi show + v05 状态）。
+/* t204/t206：最小串口命令（只有 wifi set / wifi net / wifi show + v06 状态）。
  * 命令名走 XARGS 口径：argv[0] 是命令名本身（t139 踩过这个坑）。 */
 int min_shell_register(void);
 

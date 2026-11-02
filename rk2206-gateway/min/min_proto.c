@@ -211,3 +211,62 @@ uint32_t min_backoff_ms(uint32_t fails)
         return MIN_BACKOFF_MAX;
     }
 }
+
+/* ---------------------------------------------------------------- JSON 字段 */
+
+/*
+ * 从节点 JSON 里抠一个字符串字段（t206 日志用）。汇聚的 node_json 是纯 ASCII、扁平结构
+ * （契约 §3.4：{"sn":"M1","type":"gas",...}），所以这里只做三件事：
+ *   找 "key"，跳过冒号与引号，拷到下一个引号为止。
+ * 不做转义、不认嵌套 —— 要的是「日志里能看出是哪颗节点、什么类型」，不是通用 JSON 解析。
+ * 返回 0 = 取到；-1 = 没这个键 / 值太长 / 参数非法（此时 out[0]='\0'）。
+ */
+int min_json_str_field(const uint8_t *js, uint32_t len, const char *key, char *out,
+                       uint32_t cap)
+{
+    uint32_t klen;
+    uint32_t i;
+    uint32_t o;
+
+    if (out == NULL || cap == 0u) {
+        return -1;
+    }
+    out[0] = '\0';
+    if (js == NULL || key == NULL || len == 0u) {
+        return -1;
+    }
+    klen = (uint32_t)strlen(key);
+    if (klen == 0u) {
+        return -1;
+    }
+    for (i = 0u; i + klen + 3u <= len; i++) {
+        if (js[i] != (uint8_t)'"') {
+            continue;
+        }
+        if (memcmp(&js[i + 1u], key, klen) != 0) {
+            continue;
+        }
+        if (js[i + 1u + klen] != (uint8_t)'"' || js[i + 2u + klen] != (uint8_t)':') {
+            continue;
+        }
+        i += klen + 3u;                        /* 跳过 "key": */
+        if (i >= len || js[i] != (uint8_t)'"') {
+            return -1;                         /* 值不是字符串（数字/布尔/数组） */
+        }
+        i++;
+        for (o = 0u; i < len && js[i] != (uint8_t)'"'; i++) {
+            if (o + 1u >= cap) {
+                out[0] = '\0';
+                return -1;                     /* 值比缓冲长：宁可不打，也不截半截 */
+            }
+            out[o++] = (char)js[i];
+        }
+        if (i >= len) {
+            out[0] = '\0';
+            return -1;                         /* 引号没闭合：这帧本来就不该通过 CRC */
+        }
+        out[o] = '\0';
+        return 0;
+    }
+    return -1;
+}

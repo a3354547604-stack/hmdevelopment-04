@@ -456,6 +456,35 @@ static void test_baud_probe(void)
     CHECK(min_baud_probe_step(&p, 14200u, 0u, 200u, &next) == 1 && next == 115200u, "有了字节并满窗口才切");
 }
 
+/*
+ * t206：从节点 JSON 里抠 sn/type（只给日志用）。这里钉住的是「查得到、查不到、
+ * 值超长、非字符串值、键名像但不是同一个」五种情形 —— 现场最怕的是把 gas 打成 fall。
+ */
+static void test_json_field(void)
+{
+    const char *js = "{\"sn\":\"M1\",\"type\":\"gas\",\"co_mv\":134,\"ok\":true,"
+                     "\"nested\":{\"sn\":\"X9\"}}";
+    const uint8_t *u = (const uint8_t *)js;
+    uint32_t n = (uint32_t)strlen(js);
+    char out[16];
+    char big[3];   /* "gas" 需要 4 字节（含结尾 0），给 3 字节必须拒 */
+
+    CHECK(min_json_str_field(u, n, "sn", out, sizeof(out)) == 0 && strcmp(out, "M1") == 0,
+          "sn 取到 %s，期望 M1", out);
+    CHECK(min_json_str_field(u, n, "type", out, sizeof(out)) == 0 && strcmp(out, "gas") == 0,
+          "type 取到 %s，期望 gas", out);
+    CHECK(min_json_str_field(u, n, "co_mv", out, sizeof(out)) == -1 && out[0] == '\0',
+          "数字字段不是字符串 → 应返回 -1 且输出置空");
+    CHECK(min_json_str_field(u, n, "ok", out, sizeof(out)) == -1, "布尔字段同样不算字符串");
+    CHECK(min_json_str_field(u, n, "snn", out, sizeof(out)) == -1, "键名像但不是同一个 → -1");
+    CHECK(min_json_str_field(u, n, "type", big, sizeof(big)) == -1 && big[0] == '\0',
+          "值比缓冲长 → -1 且不截半截");
+    CHECK(min_json_str_field(u, n, "missing", out, sizeof(out)) == -1, "没有的键 → -1");
+    CHECK(min_json_str_field(NULL, n, "sn", out, sizeof(out)) == -1, "NULL 输入 → -1");
+    CHECK(min_json_str_field(u, 0u, "sn", out, sizeof(out)) == -1, "长度为 0 → -1");
+    CHECK(min_json_str_field(u, n, "sn", NULL, 0u) == -1, "输出缓冲非法 → -1");
+}
+
 int main(void)
 {
     printf("min 固件主机单测（t192 + t193）\n");
@@ -467,6 +496,7 @@ int main(void)
     test_auth_and_shape();
     test_puback_timeout();
     test_baud_probe();
+    test_json_field();
     printf("通过 %d / 失败 %d\n", g_pass, g_fail);
     return (g_fail == 0) ? 0 : 1;
 }
