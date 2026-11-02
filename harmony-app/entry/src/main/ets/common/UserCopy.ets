@@ -47,6 +47,29 @@ export class UserCopy {
   /** 服务端还没给 `site` 时的兜底地址，避免节点凭空消失。 */
   static readonly SITE_DEFAULT: string = '家';
 
+  /** 用户没给住处命名时首页顶部显示的名字（t197：不能再空着/只写「家」）。 */
+  static readonly SITE_HOME_UNNAMED: string = '我的家';
+  /** 某类读数一条都没有时的兜底文案（t197：不显示 `--`）。 */
+  static readonly NO_DATA: string = '还没有数据';
+
+  /** 卡片标题：「厨房 · 燃气」——只写「房间」用户看不出这是跌倒雷达还是燃气。 */
+  static sensorTitle(room: string, type: string): string {
+    let name: string = UserCopy.SENSOR_DOOR;
+    if (type === 'gas') {
+      name = UserCopy.SENSOR_GAS;
+    } else if (type === 'fall') {
+      name = UserCopy.SENSOR_FALL;
+    } else if (type === 'presence') {
+      name = UserCopy.SENSOR_PRESENCE;
+    }
+    return room + ' · ' + name;
+  }
+
+  /** 「最近 12:34 有人活动」——活动时刻取门磁跳变（§7.9：P0 唯一活动数据源）。 */
+  static activityAt(clock: string): string {
+    return '最近 ' + clock + ' 有人活动';
+  }
+
   // ---------- 房间与传感器 ----------
   static readonly ROOM_KITCHEN: string = '厨房';
   static readonly ROOM_BEDROOM: string = '卧室';
@@ -256,6 +279,7 @@ export class UserCopy {
       UserCopy.GAS_OK, UserCopy.GAS_HIGH, UserCopy.GAS_VERY_HIGH, UserCopy.DOOR_OPEN,
       UserCopy.DOOR_CLOSED, UserCopy.PRESENCE_YES, UserCopy.PRESENCE_NO, UserCopy.NODE_NORMAL,
       UserCopy.NODE_LOST, UserCopy.ENV_TEMP, UserCopy.ENV_HUMI, UserCopy.NODE_ADD_TITLE,
+      UserCopy.SITE_HOME_UNNAMED, UserCopy.NO_DATA,
       UserCopy.NODE_TYPE_LABEL, UserCopy.NODE_STATE_LABEL, UserCopy.NODE_SIGNAL_LABEL,
       UserCopy.ADD_NODE_SCANNING, UserCopy.ADD_NODE_EMPTY, UserCopy.ADD_NODE_DONE,
       UserCopy.ALERT_FILTER_ALL, UserCopy.ALERT_FILTER_PENDING, UserCopy.ALERT_EMPTY,

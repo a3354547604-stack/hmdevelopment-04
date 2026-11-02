@@ -46,6 +46,14 @@ fail() {
 # file: 依赖原样交给 npm/pnpm install），所以模板里用 @TOOLCHAIN@ 占位、由本脚本替换。
 HVIGOR_CFG="$REPO/hvigor/hvigor-config.json5"
 HVIGOR_TPL="$REPO/hvigor/hvigor-config.template.json5"
+# 构建结束后要把 hvigor-config.json5 还原成进来时的样子（可能是 DevEco 的 Windows 口径，
+# 也可能本就不存在）——否则下一轮 DevEco Sync 会撞上 Linux 路径，报
+#   00308003 ENOENT .../node_modules/@ohos/hvigor/bin/hvigor.js
+HVIGOR_BAK="$(mktemp /tmp/hm-hvigor-cfg.XXXXXX)"
+HVIGOR_HAD=0
+if [ -f "$HVIGOR_CFG" ]; then
+  cp -f "$HVIGOR_CFG" "$HVIGOR_BAK" 2>/dev/null && HVIGOR_HAD=1
+fi
 # 判据：文件里有没有指向**本机**工具链的 file: 路径。不能只判 '@TOOLCHAIN@' 是否残留——
 # 同一份工程还会被 Windows 侧 DevEco Studio 打开，它会把这份文件写成
 #   file:C:/Program Files/Huawei/DevEco Studio/tools/hvigor/hvigor（DevEco 自带 hvigor）
@@ -89,6 +97,12 @@ restore_probe() {
   fi
   if [ "$LP_SWAPPED" = "1" ] && [ -f "$LP_BAK" ]; then
     cp -f "$LP_BAK" "$LP" && rm -f "$LP_BAK"
+  fi
+  # hvigor-config.json5：进来时有就按原字节还原，进来时没有就删掉（还给 DevEco 一个干净工程）
+  if [ "$HVIGOR_HAD" = "1" ] && [ -f "$HVIGOR_BAK" ]; then
+    cp -f "$HVIGOR_BAK" "$HVIGOR_CFG" && rm -f "$HVIGOR_BAK"
+  else
+    rm -f "$HVIGOR_CFG" "$HVIGOR_BAK"
   fi
 }
 trap restore_probe EXIT
@@ -135,6 +149,21 @@ red_arkts="$(grep -cE 'ArkTS:ERROR|Cannot find name' "$OUT" || true)"
 [ "$red_build" -ge 1 ] || fail "自证阶段日志里没有 BUILD FAILED"
 [ "$red_arkts" -ge 1 ] || fail "自证阶段日志里没有 ArkTS:ERROR/Cannot find name"
 [ "$restored_hits" = "0" ] || fail "回退注入失败：$PROBE_FILE 仍含 NOT_DEFINED_CONST（工作树被污染）"
+
+# ── 重新物化 WSL 口径（t197）────────────────────────────────────────────────────
+# restore_probe 已经把 hvigor-config.json5 / local.properties 还原成进来时的样子
+# （DevEco 打开过工程时那是 Windows 口径）——正式构建若直接跑，会死在
+#   WARN Installing a dependency from a non-existent directory: .../hvigor/C:/Program Files/...
+# 所以自证之后、正式构建之前，必须按模板再物化一次；EXIT trap 仍负责最后还原。
+if ! grep -qF "$HOME/harmony-toolchain" "$HVIGOR_CFG" 2>/dev/null; then
+  sed "s|@TOOLCHAIN@|$HOME/harmony-toolchain|g" "$HVIGOR_TPL" > "$HVIGOR_CFG" \
+    && echo "[setup] 正式构建前重新物化 hvigor-config.json5" | tee -a "$OUT"
+fi
+LP_BAK="$(mktemp /tmp/hm-local-properties.XXXXXX)"
+if [ -f "$LP" ]; then
+  cp -f "$LP" "$LP_BAK" 2>/dev/null && LP_SWAPPED=1
+fi
+printf 'sdk.dir=%s\n' "$OHOS_BASE_SDK_HOME" > "$LP"
 
 # ── [2/2] 正式构建 ────────────────────────────────────────────────────────────
 # 产物新鲜度（t118）：先清掉上一轮 HAP，再记构建起始时间戳，最后要求列出的 HAP

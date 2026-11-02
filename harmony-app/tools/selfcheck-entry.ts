@@ -33,7 +33,9 @@ import { ProvisionStatus, ScanCache, WifiResult, WifiSubmit } from '../ets/model
 import { AppConfig } from '../ets/common/AppConfig';
 import { RuntimeConfig } from '../ets/common/RuntimeConfig';
 import { UserCopy } from '../ets/common/UserCopy';
-import { isRoomNodeType, onlineRoomCount, roomNodes } from '../ets/model/Types';
+import {
+  defaultRoomName, isRoomNodeType, onlineRoomCount, roomDisplayName, roomNodes
+} from '../ets/model/Types';
 import { KEY_AUTH_SEQ, KEY_USERNAME } from '../ets/service/SessionStore';
 
 /**
@@ -789,6 +791,76 @@ class Runner {
 
     await this.bindCases();
     this.offlineAndHubCases();
+    await this.roomNameAndReadingCases();
+  }
+
+  /**
+   * t197：房间名兜底 + 读数落到卡片上。
+   *
+   * 这两条对应现场截图里的两个「什么都没显示」：卡片标题只有「房间」、
+   * 数值只有 `--`。判据分别放在 `Types.defaultRoomName/roomDisplayName`
+   * 与「拿到 readings 之后卡片第一行该是什么」的取数逻辑里。
+   */
+  private async roomNameAndReadingCases(): Promise<void> {
+    // #56 房间名兜底：M1/M2/M4 与类型映射；服务器给了 name 以它为准
+    const m1: NodeItem = { sn: 'M1', type: 'gas', location: '', online: true, last_seen: 1 };
+    const m2: NodeItem = { sn: 'M2', type: 'fall', location: '', online: true, last_seen: 1 };
+    const m4: NodeItem = { sn: 'M4', type: 'door', location: '', online: false, last_seen: 1 };
+    const snX: NodeItem = { sn: 'M9', type: 'fall', location: '', online: true, last_seen: 1 };
+    const named: NodeItem = {
+      sn: 'M1', name: '灶台', type: 'gas', location: '', online: true, last_seen: 1
+    };
+    const hubs: NodeItem[] = [{ sn: 'H1', type: 'hub', location: '客厅', online: true, last_seen: 1 }, m1];
+    const ok56: boolean = defaultRoomName('M1', 'gas') === '厨房'
+      && defaultRoomName('M2', 'fall') === '卧室'
+      && defaultRoomName('M4', 'door') === '门厅'
+      && defaultRoomName('M9', 'fall') === '卧室'
+      && defaultRoomName('M9', 'unknown') === '房间'
+      && roomDisplayName(m1) === '厨房' && roomDisplayName(named) === '灶台'
+      && UserCopy.sensorTitle(roomDisplayName(m2), m2.type) === '卧室 · 跌倒'
+      && roomNodes(hubs).length === 1 && roomDisplayName(m4) === '门厅';
+    this.cases.push({
+      seq: 56, name: '房间名兜底：M1/M2/M4 → 厨房/卧室/门厅（t197）', contract: '§6.7',
+      ok: ok56, code: 0, httpStatus: 200,
+      detail: `M1=${defaultRoomName('M1', 'gas')} M2=${defaultRoomName('M2', 'fall')} `
+        + `M4=${defaultRoomName('M4', 'door')} 未知=${defaultRoomName('M9', 'unknown')} `
+        + `name优先=${roomDisplayName(named)} 标题=「${UserCopy.sensorTitle(roomDisplayName(m2), m2.type)}」 `
+        + `hub过滤后=${roomNodes(hubs).length} 条`
+    });
+
+    // #57 有 readings 时卡片出现数值（夹具：gas 一条 24.5℃/56.2%，door 一条 开）
+    const readingStub: BindStubTransport = new BindStubTransport();
+    readingStub.body = '{"code":0,"message":"ok","ts":1793000000000,"data":{"total":1,"items":['
+      + '{"id":9,"node_sn":"M1","type":"gas","ts":1792999999000,'
+      + '"payload":{"smoke":320,"temp":24.5,"humi":56.2}}]}}';
+    const apiR: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', readingStub);
+    const rGas: ApiResult<ReadingListResult> = await apiR.readings(1, 'gas', 1);
+    let temp: number = -1;
+    let humi: number = -1;
+    let smoke: number = -1;
+    if (rGas.ok && rGas.data !== undefined && rGas.data.items.length > 0) {
+      const p: Record<string, Object> = rGas.data.items[0].payload as Record<string, Object>;
+      temp = p['temp'] as number;
+      humi = p['humi'] as number;
+      smoke = p['smoke'] as number;
+    }
+    const line1: string = Formatter.fmtTemp(temp) + ' / ' + Formatter.fmtHumi(humi);
+    const line2: string = UserCopy.SENSOR_GAS + ' '
+      + UserCopy.gasText(smoke >= 3500 ? 2 : (smoke >= 2500 ? 1 : 0));
+    const ok57: boolean = rGas.ok && readingStub.lastUrl.indexOf('type=gas') > 0
+      && readingStub.lastUrl.indexOf('limit=1') > 0
+      && line1 === Formatter.fmtTemp(24.5) + ' / ' + Formatter.fmtHumi(56.2)
+      && line1.indexOf('24.5') >= 0 && line1.indexOf('56.2') > 0
+      && line2 === UserCopy.SENSOR_GAS + ' ' + UserCopy.GAS_OK;
+    this.cases.push({
+      seq: 57, name: '最新读数落到卡片：24.5 ℃ / 56.2 % + 燃气正常（t197）', contract: '§6.8',
+      ok: ok57, code: rGas.code, httpStatus: 200,
+      detail: `GET ${readingStub.lastUrl} → 第一行「${line1}」第二行「${line2}」`
+        + ` ok=${rGas.ok} urlGas=${readingStub.lastUrl.indexOf('type=gas') > 0} `
+        + `urlLimit=${readingStub.lastUrl.indexOf('limit=1') > 0} `
+        + `l1eq=${line1 === Formatter.fmtTemp(24.5) + ' / ' + Formatter.fmtHumi(56.2)} `
+        + `l2eq=${line2 === UserCopy.SENSOR_GAS + ' ' + UserCopy.GAS_OK}`
+    });
   }
 
   /**

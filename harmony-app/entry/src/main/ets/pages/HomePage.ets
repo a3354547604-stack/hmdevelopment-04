@@ -20,8 +20,9 @@ import { PrimaryButton } from '../components/CommonViews';
 import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
 import {
   ActivityReport, AlertItem, AlertListResult, DeviceStatus, GatewayProperties, HourlyBucket, NodeItem,
-  roomNodes
+  ReadingItem, roomDisplayName, roomNodes
 } from '../model/Types';
+import { JsonObject, optBool, optNum } from '../common/JsonUtil';
 import { ServiceHub } from '../service/ServiceHub';
 import { KEY_APP_ACTIVE, SessionStore } from '../service/SessionStore';
 import { ApiResult } from '../model/Result';
@@ -42,6 +43,8 @@ export struct HomePage {
   @State todayOk: boolean = false;
   /** 「最近一条提醒」：id=0 表示没有未处理提醒，这张卡不出现。 */
   @State latest: LatestAlert = new LatestAlert();
+  /** 各房间的最新一条读数（t197：`/status` 不带数值，只能按 type 再拉 limit=1）。 */
+  @State reads: LatestReadings = new LatestReadings();
   private vm: HomeViewModel = new HomeViewModel();
   private timerId: number = -1;
 
@@ -109,6 +112,7 @@ export struct HomePage {
     // 顶栏的在线点也由这里写：MainTabs 不轮询，只读这个键
     AppStorage.setOrCreate<boolean>('deviceOnline', next.status.online);
     await this.loadLatestAlert(next.status.pending_alerts);
+    await this.loadReadings();
     await this.loadToday();
   }
 
@@ -141,6 +145,47 @@ export struct HomePage {
     this.todayOk = r.ok;
     this.todayTotal = r.total;
     this.todayHourly = r.hourly;
+  }
+
+  /**
+   * 拉每个房间节点的最新一条读数（t197）。
+   *
+   * 为什么要多这一组请求：`GET /devices/{id}/status` 的 `nodes[]` 只有
+   * `{sn,type,online,last_seen}`，没有最新数值——首页只能靠 `§6.8 readings?limit=1`
+   * 自己补。三个房间各一条，谁缺就谁的卡显示「还没有数据」，不拿 `--` 糊弄。
+   */
+  private async loadReadings(): Promise<void> {
+    const out: LatestReadings = new LatestReadings();
+    const nodes: NodeItem[] = roomNodes(this.state.status.nodes);
+    for (let i = 0; i < nodes.length; i++) {
+      const type: string = nodes[i].type;
+      if (type !== 'gas' && type !== 'fall' && type !== 'door') {
+        continue;
+      }
+      const r = await ServiceHub.api().readings(this.deviceId, type, 1);
+      if (!r.ok || r.data === undefined || r.data.items.length === 0) {
+        continue;
+      }
+      const item: ReadingItem = r.data.items[0];
+      const p: JsonObject = item.payload;
+      if (type === 'gas') {
+        out.gasReady = true;
+        out.gasSmoke = optNum(p, 'smoke') ?? 0;
+        out.gasTemp = optNum(p, 'temp') ?? -1;
+        out.gasHumi = optNum(p, 'humi') ?? -1;
+      } else if (type === 'fall') {
+        out.fallReady = true;
+        out.fallVal = optNum(p, 'fall') ?? 0;
+      } else {
+        out.doorReady = true;
+        out.doorOpen = optBool(p, 'door') ?? false;
+        // 门磁跳变 = P0 唯一的「有人活动」数据源（§7.9）
+        if (item.ts > out.activityTs) {
+          out.activityTs = item.ts;
+        }
+      }
+    }
+    this.reads = out;
   }
 
   // ------------------------------------------------------------ 大字卡（结论）
@@ -217,9 +262,9 @@ export struct HomePage {
     if (s !== undefined && s.length > 0) {
       return s;
     }
-    // 契约 §6.7 目前只有 location（房间），没有地址字段；老数据统一归到「家」，
-    // 这样服务端没升级时节点也不会凭空消失。
-    return UserCopy.SITE_DEFAULT;
+    // 契约 §6.7 目前只有 location（房间），没有地址字段；用户没命名时写「我的家」，
+    // 比一个空的「家」更像一句人话（t197 用户原话：「我没有给它命名，它直接就显示家」）。
+    return UserCopy.SITE_HOME_UNNAMED;
   }
 
   /** 按地址归组，保持节点在接口里的原始顺序（家在前、老家在后）。 */
@@ -261,6 +306,11 @@ export struct HomePage {
   private gasLevel(): number {
     const p: GatewayProperties = this.state.status.properties;
     const smoke: number = p.smoke === undefined ? -1 : p.smoke;
+    return this.gasLevelOf(smoke);
+  }
+
+  /** 阈值判定只留一份：网关属性与最新读数（§6.8）走同一套 2500/3500 mV。 */
+  private gasLevelOf(smoke: number): number {
     if (smoke < 0) {
       return 0;
     }
@@ -292,32 +342,58 @@ export struct HomePage {
   }
 
   /** 右侧读数；节点掉线时统一显示「联系不上」，比显示旧读数安全。 */
-  private sensorValue(n: NodeItem): string {
-    // 主机（网关）离线时，房间行的读数是离线前的缓存值——替它背书等于撒谎（t186）
+  /**
+   * 房间卡第一行数值（t197）：温度/湿度、跌倒结论、门开合。
+   *
+   * 离线时统一「联系不上」（t186 的口径不变）；有节点但这一类读数一条都没有时
+   * 写「还没有数据」，不再显示 `--`。
+   */
+  private valueLine1(n: NodeItem): string {
     if (!this.state.status.online || !n.online) {
       return UserCopy.NODE_LOST;
     }
     const type: string = n.type;
-    const p: GatewayProperties = this.state.status.properties;
     if (type === 'gas') {
-      return UserCopy.gasText(this.gasLevel());
-    }
-    if (type === 'presence') {
-      if (p.presence === undefined) {
-        return LiteralConstants.PLACEHOLDER;
+      if (!this.reads.gasReady) {
+        return UserCopy.NO_DATA;
       }
-      return p.presence ? UserCopy.PRESENCE_YES : UserCopy.PRESENCE_NO;
+      const t: string = Formatter.fmtTemp(this.reads.gasTemp < 0 ? undefined : this.reads.gasTemp);
+      const h: string = Formatter.fmtHumi(this.reads.gasHumi < 0 ? undefined : this.reads.gasHumi);
+      return t + ' / ' + h;
     }
     if (type === 'fall') {
-      if (p.fall === undefined) {
-        return LiteralConstants.PLACEHOLDER;
+      if (!this.reads.fallReady) {
+        return UserCopy.NO_DATA;
       }
-      return p.fall === 1 ? UserCopy.FALL_YES : UserCopy.FALL_NO;
+      return this.reads.fallVal === 1 ? UserCopy.FALL_YES : UserCopy.FALL_NO;
     }
-    if (p.door === undefined) {
-      return LiteralConstants.PLACEHOLDER;
+    if (!this.reads.doorReady) {
+      return UserCopy.NO_DATA;
     }
-    return p.door ? UserCopy.DOOR_OPEN : UserCopy.DOOR_CLOSED;
+    return this.reads.doorOpen ? UserCopy.DOOR_OPEN : UserCopy.DOOR_CLOSED;
+  }
+
+  /** 房间卡第二行：燃气结论 / 最近有人活动的时刻；没有就留空不占位。 */
+  private valueLine2(n: NodeItem): string {
+    if (!this.state.status.online || !n.online) {
+      return '';
+    }
+    const type: string = n.type;
+    if (type === 'gas') {
+      if (!this.reads.gasReady) {
+        return '';
+      }
+      // 卡片标题已是「厨房 · 燃气」，这一行仍写全「燃气 正常」——截图里只有「正常」
+      // 会被读成「整个屋子正常」，范围不对
+      return UserCopy.SENSOR_GAS + ' ' + UserCopy.gasText(this.gasLevelOf(this.reads.gasSmoke));
+    }
+    if (type === 'fall' || type === 'door') {
+      if (this.reads.activityTs <= 0) {
+        return '';
+      }
+      return UserCopy.activityAt(Formatter.fmtClock(this.reads.activityTs));
+    }
+    return '';
   }
 
   private sensorColor(n: NodeItem): Resource {
@@ -522,7 +598,8 @@ export struct HomePage {
           .height(AppTheme.ICON_SM)
           .fillColor(AppTheme.COLOR_TEXT_SECONDARY)
           .objectFit(ImageFit.Contain)
-        Text(n.location.length > 0 ? n.location : UserCopy.ROOM_PREFIX)
+        // 标题写「厨房 · 燃气」：只写「房间」用户看不出这是跌倒雷达还是燃气（t197）
+        Text(UserCopy.sensorTitle(roomDisplayName(n), n.type))
           .fontSize(AppTheme.FONT_BODY)
           .fontWeight(FontWeight.Medium)
           .fontColor(AppTheme.COLOR_TEXT_PRIMARY)
@@ -533,17 +610,19 @@ export struct HomePage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
 
-      Text(this.sensorName(n.type))
-        .fontSize(AppTheme.FONT_LABEL)
-        .fontColor(AppTheme.COLOR_TEXT_HINT)
-        .maxLines(1)
-        .margin({ top: 2 })
-
-      Text(this.sensorValue(n))
+      Text(this.valueLine1(n))
         .fontSize(AppTheme.FONT_BODY)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.sensorColor(n))
         .maxLines(1)
+        .margin({ top: 2 })
+
+      if (this.valueLine2(n).length > 0) {
+        Text(this.valueLine2(n))
+          .fontSize(AppTheme.FONT_LABEL)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .maxLines(1)
+      }
     }
     .width('100%')
     .height(AppTheme.SITE_CELL_HEIGHT)
@@ -554,12 +633,10 @@ export struct HomePage {
     .backgroundColor(AppTheme.COLOR_BG)
     .borderRadius(AppTheme.RADIUS_CELL)
     .accessibilityGroup(true)
-    .accessibilityText(n.location + '，' + this.sensorName(n.type) + '，' + this.sensorValue(n))
+    .accessibilityText(UserCopy.sensorTitle(roomDisplayName(n), n.type) + '，'
+      + this.valueLine1(n) + (this.valueLine2(n).length > 0 ? '，' + this.valueLine2(n) : ''))
     // 按下换底色：小框整块可点，不换色的话用户不知道点没点中
     .backgroundColor(this.pressedSn === n.sn ? AppTheme.COLOR_DIVIDER : AppTheme.COLOR_BG)
-    .borderRadius(AppTheme.RADIUS_CELL)
-    .accessibilityGroup(true)
-    .accessibilityText(n.location + '，' + this.sensorName(n.type) + '，' + this.sensorValue(n))
     .onTouch((e: TouchEvent) => {
       this.pressedSn = e.type === TouchType.Down || e.type === TouchType.Move ? n.sn : '';
     })
@@ -900,6 +977,26 @@ class LatestAlert {
   sn: string = '';
   ts: number = 0;
   status: string = '';
+}
+
+/**
+ * 各房间的最新一条读数（t197）。
+ *
+ * 每个 `*Ready=false` 都代表「这一类读数一条都没有」，界面显示「还没有数据」；
+ * 不能拿 0 当默认值——0 ℃ 也是个数值，会让人以为屋里真的 0 度。
+ */
+class LatestReadings {
+  gasReady: boolean = false;
+  gasSmoke: number = 0;
+  /** -1 = 该条读数没带这个字段（AHT20 没接时服务器不会写）。 */
+  gasTemp: number = -1;
+  gasHumi: number = -1;
+  fallReady: boolean = false;
+  fallVal: number = 0;
+  doorReady: boolean = false;
+  doorOpen: boolean = false;
+  /** 最近一次门磁跳变时刻（§7.9：P0 唯一的「有人活动」数据源）。 */
+  activityTs: number = 0;
 }
 
 /** 首页按「地址」聚合后的分组：家 / 老家……一个地址下挂多个房间节点。 */

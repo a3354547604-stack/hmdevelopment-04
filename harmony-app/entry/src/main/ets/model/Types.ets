@@ -105,6 +105,11 @@ export interface GatewayProperties {
 
 export interface NodeItem {
   sn: string;
+  /**
+   * 节点名（t198 起服务器在 `/status` 的 `nodes[]` 里补）；
+   * 真实服务器当前**还没有**这个字段，所以房间名要走 `defaultRoomName()` 兜底。
+   */
+  name?: string;
   /** `gas` / `fall` / `door` / `presence` / `gateway`（契约 §6.7） */
   type: string;
   location: string;
@@ -136,6 +141,40 @@ export interface NodeItem {
  * 混进房间格会同时错两处：房间数虚高、掉线判断的基数也错。
  */
 export const ROOM_NODE_TYPES: string[] = ['gas', 'fall', 'door', 'presence'];
+
+/**
+ * 房间名的本地兜底（t197）。
+ *
+ * 为什么必须在前端兜：用户实测截图里两张卡都写「房间」——因为服务器
+ * `GET /api/devices/1/status` 的 `nodes[]` 只有 `{sn,type,online,last_seen}`，
+ * 没有 `name`。用户还没给节点命名时，界面等于什么都没说清。
+ * 所以按「SN 优先、其次类型」给一个默认房间名；服务器将来给了 `name` 就以它为准。
+ */
+export function defaultRoomName(sn: string, type: string): string {
+  const s: string = sn.trim().toUpperCase();
+  if (s === 'M1' || type === 'gas') {
+    return '厨房';
+  }
+  if (s === 'M2' || type === 'fall') {
+    return '卧室';
+  }
+  if (s === 'M4' || type === 'door') {
+    return '门厅';
+  }
+  if (s === 'M3' || type === 'presence') {
+    return '客厅';
+  }
+  return '房间';
+}
+
+/** 卡片上显示的房间名：服务器给了 `name` 就用它，否则走默认映射。 */
+export function roomDisplayName(n: NodeItem): string {
+  const named: string = n.name === undefined ? '' : n.name.trim();
+  if (named.length > 0) {
+    return named;
+  }
+  return defaultRoomName(n.sn, n.type);
+}
 
 /** 这个 type 是不是房间级传感器（hub / gateway 等上游设备返回 false）。 */
 export function isRoomNodeType(type: string): boolean {
@@ -506,8 +545,10 @@ function optBoolOf(o: JsonObject, key: string): boolean | undefined {
 }
 
 export function parseNodeItem(o: JsonObject): NodeItem {
+  const nodeName: string | undefined = optStr(o, 'name');
   return {
     sn: str(o, 'sn', 'data.nodes[]'),
+    name: nodeName,
     type: str(o, 'type', 'data.nodes[]'),
     location: optStr(o, 'location') ?? '',
     site: optStr(o, 'site'),

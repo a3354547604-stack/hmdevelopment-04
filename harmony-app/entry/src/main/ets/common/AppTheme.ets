@@ -65,7 +65,8 @@ export class AppTheme {
   static readonly PAGE_PADDING: number = 16;
   static readonly CARD_RADIUS: number = 12;
   /** 田字格里节点格子的高度与圆角（两列并排，尽量方正）。 */
-  static readonly SITE_CELL_HEIGHT: number = 88;
+  /** 房间格高度（t197）：标题 + 数值 + 结论三行，88 会挤掉第二行。 */
+  static readonly SITE_CELL_HEIGHT: number = 104;
   static readonly RADIUS_CELL: number = 10;
   static readonly CARD_PADDING: number = 16;
   static readonly CARD_GAP: number = 12;
