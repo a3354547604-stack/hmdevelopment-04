@@ -340,3 +340,39 @@ def test_device_push_schedule_override(client, device):
         row = db.fetch_one("SELECT push_count, next_push_at FROM alerts WHERE id = :i", {"i": alert_id})
         assert int(row["push_count"]) == expected
     assert row["next_push_at"] is None                     # 三档走完 → 停推
+
+
+# --------------------------------------------------------------------------- §6.13 node_sn 恒为 string（t199）
+
+def test_alert_items_always_include_node_sn_string(client, device):
+    """每条 alert 都必须带 `node_sn` 且是 str（t199）。
+
+    现场：`device_offline` 告警的 `alerts.node_sn` 是 NULL，`prune_none` 按 §0.4 把键整个省掉，
+    鸿蒙 App 按 string 校验 ⇒「data.items[].alert.node_sn 期望 string，实际 missing（-2）」
+    **整页报错**。所以这里锁死：网关级事件给空串，绝不省略、绝不给 null。
+    """
+    # 网关级：180 s 无上报 → scheduler 造一条 device_offline（node_sn 为 NULL）
+    push_alert(client, device, alert_type="fall", level=2, node_sn="M2")
+    stale = now_ms() - 200_000
+    db.execute("UPDATE device_online SET last_heartbeat_ms = :m, last_heartbeat = :d WHERE device_id = :id",
+               {"m": stale, "d": ms_to_dt(stale), "id": device["id"]})
+    tick_once()
+
+    data = client.get(f"/api/alerts?device_id={device['id']}&limit=20",
+                      headers=_auth(device["token"])).json()["data"]
+    assert data["items"], "至少应有 fall 与 device_offline 两条"
+    for item in data["items"]:
+        assert "node_sn" in item, item
+        assert isinstance(item["node_sn"], str), item
+        # §6.13 其余必填字段也一起锁住（缺哪个都会让 App 整页报错）
+        for key in ("type", "level", "ts", "status", "summary", "push_count"):
+            assert key in item and item[key] is not None, (key, item)
+
+    by_type = {it["type"]: it for it in data["items"]}
+    assert by_type["device_offline"]["node_sn"] == ""
+    assert by_type["fall"]["node_sn"] == "M2"
+
+    # 详情页同一口径
+    offline = by_type["device_offline"]
+    detail = client.get(f"/api/alerts/{offline['id']}", headers=_auth(device["token"])).json()["data"]
+    assert detail["node_sn"] == "" and isinstance(detail["node_sn"], str)

@@ -45,11 +45,17 @@ def suppress_window(alert_type: str, cfg: dict[str, Any]) -> int:
 # --------------------------------------------------------------------------- 读
 
 def alert_item(row: dict, cfg: dict[str, Any]) -> dict[str, Any]:
-    """§6.13 列表项：字段名与顺序按契约；未恢复/未推送的键直接省略（§0.4 禁 null）。"""
+    """§6.13 列表项：字段名与顺序按契约；未恢复/未推送的键直接省略（§0.4 禁 null）。
+
+    `node_sn` 是**例外**（t199）：App 按 string 校验它，网关级事件（`device_offline`/
+    `gateway_*`）本来没有节点；若按 §0.4 省掉这个键，提醒页会以「期望 string，实际
+    missing（-2）」整页报错。这里恒给字符串——无节点时是空串 `""`，不给 null。
+    """
+    node_sn = str(row["node_sn"] or "")
     return prune_none({
         "id": row["id"],
         "device_id": row["device_id"],
-        "node_sn": row["node_sn"],
+        "node_sn": node_sn,
         "type": row["type"],
         "level": row["level"],
         "ts": row["ts_ms"],
@@ -58,7 +64,7 @@ def alert_item(row: dict, cfg: dict[str, Any]) -> dict[str, Any]:
         "push_count": row["push_count"],
         "last_push_at": dt_to_ms(row["last_push_at"]),
         "next_push_at": dt_to_ms(row["next_push_at"]),
-        "summary": alert_summary(row["type"], row["level"], row["node_sn"], settings=cfg),
+        "summary": alert_summary(row["type"], row["level"], node_sn, settings=cfg),
     })
 
 
@@ -138,10 +144,13 @@ def detail(alert_id: int, cfg: dict[str, Any]) -> dict[str, Any]:
             "payload": db.jload(r["payload_json"], {}),
         }
 
+    # 详情同样恒给 `node_sn` 字符串（t199）：列表与详情口径必须一致，
+    # 否则 App 点进详情页又会被「missing」挡一次。
+    node_sn = str(row["node_sn"] or "")
     data = prune_none({
         "id": row["id"],
         "device_id": row["device_id"],
-        "node_sn": row["node_sn"],
+        "node_sn": node_sn,
         "type": row["type"],
         "level": row["level"],
         "ts": row["ts_ms"],
@@ -153,7 +162,7 @@ def detail(alert_id: int, cfg: dict[str, Any]) -> dict[str, Any]:
         "last_push_at": dt_to_ms(row["last_push_at"]),
         "next_push_at": dt_to_ms(row["next_push_at"]),
         "created_at": dt_to_ms(row["created_at"]),
-        "summary": alert_summary(row["type"], row["level"], row["node_sn"], settings=cfg),
+        "summary": alert_summary(row["type"], row["level"], node_sn, settings=cfg),
         "dispositions": [
             prune_none(
                 {
