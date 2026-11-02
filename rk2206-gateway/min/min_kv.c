@@ -93,6 +93,40 @@ int min_kv_wifi_decode(const uint8_t hdr[MIN_VENDOR_SLOT], const uint8_t pskbuf[
     return 0;
 }
 
+int min_kv_wifi_encode(const char *ssid, const char *psk, uint8_t hdr[MIN_VENDOR_SLOT],
+                       uint8_t pskbuf[MIN_VENDOR_SLOT])
+{
+    uint8_t key[16];
+    uint8_t sum = 0u;
+    uint32_t sn;
+    uint32_t sk;
+    uint32_t i;
+
+    if (ssid == NULL || psk == NULL || hdr == NULL || pskbuf == NULL) {
+        return -1;
+    }
+    sn = (uint32_t)strlen(ssid);
+    sk = (uint32_t)strlen(psk);
+    if (sn == 0u || sn > 32u || sk < 8u || sk > 63u) {
+        return -1;
+    }
+    memset(hdr, 0, MIN_VENDOR_SLOT);
+    memset(pskbuf, 0, MIN_VENDOR_SLOT);
+    hdr[0] = 0x57u;                 /* magic 'W'（gw_store.c:49-50 同一格式） */
+    hdr[1] = 1u;                    /* ver */
+    for (i = 0; i < sn; i++) {
+        sum = (uint8_t)(sum + (uint8_t)ssid[i]);
+    }
+    hdr[2] = sum;                   /* ssid 字节和：判「这槽是不是我们的」 */
+    hdr[3] = (uint8_t)sk;
+    memcpy(&hdr[4], ssid, sn);
+    cred_key(key);
+    for (i = 0; i < sk; i++) {
+        pskbuf[i] = (uint8_t)((uint8_t)psk[i] ^ key[i % 16u]);
+    }
+    return 0;
+}
+
 static uint16_t get_u16(const uint8_t *p)
 {
     return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
@@ -173,6 +207,31 @@ static int flash_ready(void)
     return (FlashInit() == LZ_HARDWARE_SUCCESS) ? 0 : -1;
 }
 
+int min_kv_save_wifi(const char *ssid, const char *psk)
+{
+    uint8_t hdr[MIN_VENDOR_SLOT];
+    uint8_t pskbuf[MIN_VENDOR_SLOT];
+
+    if (flash_ready() != 0) {
+        return -1;
+    }
+    if (min_kv_wifi_encode(ssid, psk, hdr, pskbuf) != 0) {
+        return -1;
+    }
+    if (VendorSet((VendorID)(VENDOR_ID_CUSTOM + MIN_VENDOR_CRED_HDR), hdr, sizeof(hdr)) !=
+        LZ_HARDWARE_SUCCESS) {
+        return -1;
+    }
+    if (VendorSet((VendorID)(VENDOR_ID_CUSTOM + MIN_VENDOR_CRED_PSK), pskbuf, sizeof(pskbuf)) !=
+        LZ_HARDWARE_SUCCESS) {
+        /* 头写成功、体失败 → 把头顶成无效，避免下次读出一个没有口令的半配置 */
+        memset(hdr, 0, sizeof(hdr));
+        (void)VendorSet((VendorID)(VENDOR_ID_CUSTOM + MIN_VENDOR_CRED_HDR), hdr, sizeof(hdr));
+        return -1;
+    }
+    return 0;
+}
+
 int min_kv_load_wifi(min_wifi_t *out)
 {
     uint8_t hdr[MIN_VENDOR_SLOT];
@@ -209,6 +268,13 @@ int min_kv_load_iotda(min_cred_t *out)
 }
 
 #else /* MIN_HOST_TEST */
+
+int min_kv_save_wifi(const char *ssid, const char *psk)
+{
+    (void)ssid;
+    (void)psk;
+    return -1;
+}
 
 int min_kv_load_wifi(min_wifi_t *out)
 {

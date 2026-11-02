@@ -19,7 +19,7 @@ import("//build/lite/config/component/lite_component.gni")
 
 static_library("gateway_min") {
     sources = [
-        "min_main.c",   # 入口 + 状态机 + UART 采集/上报
+        "min_main.c",   # 入口 + 状态机 + 假数据上报（v0.5 无 UART）
         "min_proto.c",  # CRC16-MODBUS + AA55 分帧 + 退避阶梯（纯逻辑，主机可测）
         "min_kv.c",     # Flash 凭证读取（Vendor 两槽 + 0x6FF000 的 256 B 块）
         "min_net.c",    # lz 层 WifiConnect + 默认网卡 + TCP/HTTP 取时
@@ -36,6 +36,9 @@ static_library("gateway_min") {
         "//kernel/liteos_m/kernel/include",
         "//third_party/musl/porting/liteos_m/kernel/include",
         "//third_party/lwip/src/include/lwip",
+        # t204：shell.h（osCmdReg / CMD_TYPE_STD / XARGS）。这条不是 board_include_dirs
+        # 里已有的路径，旧固件 BUILD.gn:58-60 也是单独加的；不加就 fatal error: shell.h。
+        "//kernel/liteos_m/components/shell/include",
     ]
 
     deps = [

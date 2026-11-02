@@ -1,0 +1,93 @@
+RK2206 网关烧录（Windows / RKDevTool）— 当前镜像 MIN-GW-v0.5-comms（最小通信验证版）
+根目录只放这一份镜像：gateway-Firmware.img
+  md5 8174a5ff08227646865d57cd49d80bb4
+  体积 2097152 B
+  TAG  MIN-GW-v0.5-comms
+★ 怎么确认板上跑的是这版：复位后首屏横幅必须出现
+    [v05] ---- RK2206 最小通信固件启动 MIN-GW-v0.5-comms (… …) ----
+
+★ 这一版是什么（先说清楚，别按正式版期待）
+  只做一条链：连 Wi-Fi → 取时 → 连 IoTDA → 每 10 秒发一条**固定假数据**。
+  故意**没有**：UART 读汇聚数据、事件缓存/补发、433、板载键、配网页、规则引擎、告警。
+  目的不是演示功能，是**逐级定位**：v1.4 死机前最后一步就是「pub=1 + recovery process 刷屏」，
+  所以先把「联网/取时/上报」和「UART/缓存/433」彻底切开——这一版要是能连跑 10 分钟不死，
+  就说明通信这条链本身没问题，下一级 v0.6 再加 UART 真实数据。
+
+★ 怎么确认刷对了
+  复位后第一屏：
+    [v05] ---- RK2206 最小通信固件启动 MIN-GW-v0.5-comms (… …) ----
+    [v05] 本版范围：Wi-Fi + 取时 + IoTDA 假数据（无 UART / 无缓存 / 无 433）
+    [v05] crc16 自检 "123456789" = 0x4B37（应为 0x4B37）
+  第三行对不上（不是 4B37）就是刷错了镜像。
+
+一、接线与进下载模式
+  1. Type-C 插板子丝印 USB_OTG 那个口（不是 UART 口）
+  2. 按住板上 MaskRom 键不松 → 点一下 Reset → 约 5 秒后松开 MaskRom
+  3. RKDevTool 底部出现「发现一个MASKROM设备」
+
+二、下载镜像（表格只留两行，多出来的行必须删掉）
+  地址          名称          文件
+  0x00000000    LoaderToDDR   rk2206_db_loader.bin     35093 B  md5 5f2ea974b0e1df5564a8e1ee910627bb
+  0x00000000    firmware      gateway-Firmware.img
+  ⚠ 若出现第三行 u-boot.itb，删掉，否则报「下载项不存在,停止执行!」
+
+三、点「执行」，等「下载完成」
+
+四、烧完把 Type-C 换到 UART 口，串口 115200 8N1（先关掉 MobaXterm，它会独占串口）
+
+★ 刷完就三步
+  1. 刷机 → 复位 → 串口出现上面那三行横幅
+  2. 配 Wi-Fi：串口敲   wifi set <热点名> <密码>
+       成功回显： [v05] 已保存 Wi-Fi：ssid=…（口令已写入，不回显）；接着敲 wifi net
+       （口令 8~63 字节；只回显 ssid，口令永不回显）
+  3. 联网：    串口敲   wifi net
+       回显： [v05] 已接受 wifi net：马上重新连接
+       之后自动走：STA 已连接 → 取时成功 → IoTDA 已连接 → pub 递增
+
+  ⚠ 这一版是**开机自动连**的（没有配网页，也没有「不自动联网」开关）：
+     Flash 里已有凭证时，上电就自己连；要换热点就 wifi set → wifi net，不用断电。
+     想临时看状态随时敲：  wifi show   （看存了什么、当前 IP）
+                          v05         （打一行状态，与 10 s 心跳同一口径）
+
+★ 预期日志（6 行，按顺序出现）
+  1  [v05] ---- RK2206 最小通信固件启动 MIN-GW-v0.5-comms (… …) ----
+  2  [v05] KV：Wi-Fi ssid=<热点名> 口令=已读到（不回显）
+  3  [v05] STA 已连接 ssid=<热点名> ip=192.168.137.x
+  4  [v05] 取时成功 epoch=<十位数字>
+  5  [v05] IoTDA 已连接 clientId=<device_id>_0_1_<UTC 十位>
+  6  [v05] pub n=1 kind=0 len=…（PUBACK 已确认）
+  之后每 10 秒：  [v05] pub n=2 … n=3 …（kind 在 0/1 之间交替：0=M1 gas，1=M2 fall）
+  取时/连接失败会打 [v05] ⚠ … 并按 30/60/120/300 秒退避重试，不会进 recovery 刷屏。
+
+★ 判据（10 分钟，就一条）
+  每 10 秒一行心跳：
+      [v05] alive n=<越涨> up=<秒> pub=<每 10 s +1> err=0 heap=<数字>B phase=run
+  通过 = 连续 10 分钟这行**不中断**、且 pub 每 10 秒 +1（10 分钟后 pub 约 60、err=0）。
+  不通过 = 出现下面任一条，把最后 30 行日志整段回传：
+      [v05] !! fatal HardFault / BusFault        → CPU 异常
+      [v05] !! fatal 主任务 xx s 没有前进        → 线程卡在 SDK 里（这条最像 v1.4 的死法）
+      [v05] !! fatal 主任务栈溢出 bOvf=1         → 栈吃紧
+      alive 断流（不再打印）                     → 整机静默，记下最后一次 pub 的 n
+      pub 停涨但 alive 还在涨                    → 链路问题（看 ⚠ 行 rc 与 phase）
+  phase 一列的判读：wifi=在连热点、time=在取时、mqtt=在连 IoTDA、run=在发数据、backoff=退避等待。
+
+五、看服务器有没有真的收到
+  ssh qinyixiang@123.206.99.28
+  docker logs -f --tail 50 hmprogram-server-api | grep iotda
+  应每 10 秒出现一次 POST /api/iotda/webhook 200；也可以在华为云 IoTDA 控制台
+  「设备 → 在线调试/消息跟踪」里看到 node_samples 消息。
+
+六、本版记账
+  镜像 TAG     MIN-GW-v0.5-comms（最小通信验证版：只有 Wi-Fi + 取时 + IoTDA 假数据）
+  md5          8174a5ff08227646865d57cd49d80bb4（当次构建；RK2206 镜像跨次不可复现，指纹口径=体积+提交号）
+  体积         2097152 B   （liteos.elf 839672 B）
+  提交号       见仓库本版提交（t204）
+  锚点（可原始字节 grep）  [v05] alive / MIN-GW-v0.5-comms / [v05] pub n= / crc16 自检
+  原始字节 grep 示例      grep -a -c -F '[v05] alive' gateway-Firmware.img   → 1
+                          grep -a -c -F 'MIN-GW-v0.5-comms' gateway-Firmware.img → 1
+                          （中文锚点必须用 grep -a；GNU strings 只输出 7 位 ASCII，会把中文整行拆掉）
+  已知限制      · 没有 UART：这一版**不读汇聚数据、不上报真实传感器值**（假数据每 10 s 一条）
+                · 没有事件缓存与补发：断网期间的数据直接丢（正式版才有）
+                · 没有 433 / 板载键 / 配网页 / 规则告警
+                · 只验证通信链路，不用于演示；演示/验收用正式版（ELDERCARE-GW-M0-v1.4 及以后）
+  回滚          archive/gateway-Firmware-ELDERCARE-GW-M0-v1.4.img（上一版正式版）

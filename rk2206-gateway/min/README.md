@@ -461,3 +461,39 @@ strings rk2206-gateway/out/gateway-Firmware.img | grep -aF 'baud-lock'
 - `min_main.c`：`uart_init()` 拆出 `uart_set_baud(baud)`（切档时重配并清 parser 残余）、
   主循环每圈 `baud_probe_step()`、`report()` 增加 head 证据行；
 - **没有动**：`alive/uart/pub/err` 心跳、PUBACK 预算与重连、MQTT/JSON 业务、取时。
+
+---
+
+## 13. t204 / MIN-GW-v0.5-comms：只验证「上云」这一条链
+
+**为什么要这一版**：正式版 v1.4 在实机上一次成功后立刻 `[wifi_api_internal:D]recovery process ...`
+刷屏并整机静默（`[bcore_device:E]M0 crashed, restart M4`）。同一个二进制里同时有 UART 采集、
+事件缓存补发、433、配网页、看门狗——出问题时无法判断是哪一段。用户拍板改成「一个功能一个功能往上加」，
+于是把 min 基线先砍到只剩通信，用实机 10 分钟验证「Wi-Fi + 取时 + MQTT QoS1」本身稳不稳。
+
+**这一版有什么**
+- Wi-Fi STA：lz 层 `WifiEnable` + `WifiStartStation` + `WifiConnect(ssid,psk)`（不经适配层 `ConnectTo`）
+- 取时：`GET http://<time_host>/api/time`，取 `utc_epoch`
+- IoTDA：MQTT 3.1.1 CONNECT / PUBLISH QoS1 / PUBACK / PINGREQ，keepalive 120 s
+- 上报：每 10 s 一条**固定假数据**，M1 gas 与 M2 fall 交替，走 `min_msg_node_samples()` 的 §4.6 形状
+- 串口命令（`min_main.c` 内，`min_shell_register()` 注册）：`wifi set <ssid> <口令>` / `wifi net` / `wifi show` / `v05`
+
+**这一版故意没有**：UART 读取与 `AA55` 分帧、波特率自适应、`gw_cache` 缓存/补发/限流、433、板载键、
+配网 AP/H5、规则引擎与告警。（下一级 v0.6 先把 UART 真实数据加回来。）
+
+**日志与判据**
+- 每 10 s：`[v05] alive n=… up=…s pub=… err=… heap=…B phase=…`
+- 相位变化才打：`[v05] phase=wifi|time|mqtt|run|backoff`
+- 通过判据：连续 10 分钟 `alive` 不中断且 `pub` 每 10 s +1
+- 失败判据：`[v05] !! fatal HardFault/BusFault` / `[v05] !! fatal 主任务 N s 没有前进` / 栈溢出 / alive 断流
+
+**这一轮踩到的两个构建坑（都写进了代码注释）**
+1. `#include "los_memory.h"` 与 `lz_hardware/log.h` 都会定义 `PRINT_WARN`，`-Werror` 下直接编译失败 →
+   改为就地在 `min_main.c` 里声明 `LOS_MemInfoGet` + `m_aucSysMem0`（ABI 固定，比调头文件顺序稳）。
+2. 把解析器摘掉后 `min_crc16` 被 `--gc-sections` 回收，`gw-build-min.sh` 的「liteos.elf 必须含该符号」
+   断言会误报成「app_LIBS 没生效」→ 启动时打一行 `[v05] crc16 自检 "123456789" = 0x4B37`，既保住符号
+   又真正自检了 CRC 表。
+
+**另外**：`shell.h`（`osCmdReg`）的 include 目录 `//kernel/liteos_m/components/shell/include`
+不是 board 默认路径，`min/BUILD.gn` 里单独加了一条；新增 `.c` 会撞上构建脚本「必须 6 个 .c」的断言，
+所以串口命令折进 `min_main.c`，没有单独成文件。

@@ -29,7 +29,7 @@
  * 不注入时默认值照样能单独编过；注入只影响横幅与锚点，不影响业务逻辑）。
  */
 #ifndef MIN_IMAGE_TAG
-#define MIN_IMAGE_TAG       "MIN-GW-v0.4-autobaud"
+#define MIN_IMAGE_TAG       "MIN-GW-v0.5-comms"
 #endif
 #define MIN_LOG_TAG         "min"
 #define MIN_DEVICE_SN       "M0-3F1A2B"            /* 与旧固件 gw_config.h:302 一致：
@@ -157,6 +157,12 @@ int min_kv_iotda_decode(const uint8_t blk[MIN_KV_BLOCK], min_cred_t *out);
 uint32_t min_fnv1a(const uint8_t *d, uint32_t n);
 
 /* 板级读（VendorGet / FlashRead）；主机单测里编译为空实现 */
+/* t204：`wifi set` 要能把凭证写回同一个 Vendor 槽（格式与旧固件 gw_store.c 一致，
+ * 这样 v0.5 配一次、后续版本不用重配）。encode 是纯逻辑，主机可测。 */
+int min_kv_wifi_encode(const char *ssid, const char *psk, uint8_t hdr[MIN_VENDOR_SLOT],
+                       uint8_t pskbuf[MIN_VENDOR_SLOT]);
+int min_kv_save_wifi(const char *ssid, const char *psk);
+
 int min_kv_load_wifi(min_wifi_t *out);
 int min_kv_load_iotda(min_cred_t *out);
 
@@ -199,6 +205,12 @@ int min_mqtt_ping(min_mqtt_t *m);
 /* 报文拼装（纯逻辑，单测用）：把节点原始 JSON 包成 §4.6 的 device.message 形状 */
 int min_msg_node_samples(const char *device_id, uint64_t epoch_ms, const uint8_t *node_json,
                          uint32_t n, char *out, uint32_t cap);
+
+/* ---------------------------------------------------------------- shell */
+
+/* t204：最小串口命令（只有 wifi set / wifi net / wifi show + v05 状态）。
+ * 命令名走 XARGS 口径：argv[0] 是命令名本身（t139 踩过这个坑）。 */
+int min_shell_register(void);
 
 /* ---------------------------------------------------------------- main */
 
