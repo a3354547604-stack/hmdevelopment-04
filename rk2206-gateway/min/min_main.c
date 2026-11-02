@@ -13,7 +13,7 @@
  * 解析器不新写：直接用 min_proto.c —— 它从 t192 起就是正式固件 gw_proto.c 的同一算法
  * （AA55 帧头 + VER/TYPE/SEQ/LEN + CRC16-MODBUS 尾），单测里跑的就是契约 §3.7 的真实帧。
  *
- * 判据（烧录说明里写死）：连续 10 分钟 `[v06] alive` 不中断、frames 持续增长、
+ * 判据（烧录说明里写死）：连续 10 分钟 `[v06.1] alive` 不中断、frames 持续增长、
  * pub 与 frames 同步增长、服务器 /api/iotda/webhook 计数同步涨、err=0、无 [ERR]stack-protector。
  *
  * 诊断（不是业务）：HardFault/BusFault 强定义 + **软件守卫** —— t206 卡面要求不再新建线程
@@ -38,6 +38,9 @@
 #define V05_HB_MS        10000u          /* 心跳 10 s 一行（卡面判据就是这个节奏） */
 #define MIN_UART_RATE_MS 500u            /* 上报限速：最多 2 条/秒（t206 卡面） */
 #define MIN_UART_NOFRAME_MS 5000u        /* 开机 5 s 还没解出帧就提示一次（之后不再刷） */
+#define MIN_UART_REINIT_MS  1500u        /* t207：开机那次 LzUartInit 实测不生效（t201 同现象），
+                                          * 1.5 s 后再来一次 Deinit+PinctrlSet+Init */
+#define MIN_UART_HEAD_BYTES 32u          /* head 证据行只打前 32 字节 */
 #define V05_IDLE_MS      50u             /* 空转让出 50 ms，不忙等 */
 #define V05_STALL_S      20u             /* 主任务静止多少秒算卡死 */
 
@@ -68,6 +71,13 @@ static volatile uint32_t g_drop_offline; /* 未连上期间解出但丢掉（无
 static min_parser_t s_parser;          /* AA55 分帧器（min_proto.c） */
 static uint8_t s_noframe_report;       /* 5 s 无帧提示只打一次 */
 static uint32_t s_uart_ready;          /* UART0 初始化成功标志 */
+static uint8_t  s_head[MIN_UART_HEAD_BYTES];   /* 第一次收到的字节（re-init 前） */
+static uint32_t s_head_len;
+static uint8_t  s_head_done;
+static uint8_t  s_head2[MIN_UART_HEAD_BYTES];  /* re-init 之后再收的头 32 字节，用于对照 */
+static uint32_t s_head2_len;
+static uint8_t  s_head2_done;
+static uint8_t  s_reinit_done;                 /* 开机补 init 是否已做过 */
 static volatile uint32_t g_stage;      /* 0=WIFI 1=TIME 2=MQTT 3=RUN 4=BACKOFF */
 
 static const char *g_phase = "boot";   /* 心跳里那一列 phase= 的内容 */
@@ -80,14 +90,14 @@ uint32_t min_now_ms(void)
     return (uint32_t)LOS_Tick2MS((uint32_t)LOS_TickCountGet());
 }
 
-/* 相位切换只在**变化时**打一行：死机现场最后一行 [v06] phase=… 就是死在哪一段 */
+/* 相位切换只在**变化时**打一行：死机现场最后一行 [v06.1] phase=… 就是死在哪一段 */
 static void phase_set(const char *name)
 {
     if (name == NULL || name == g_phase || strcmp(name, g_phase) == 0) {
         return;
     }
     g_phase = name;
-    printf("[v06] phase=%s（n=%u pub=%u err=%u）\n", g_phase, (unsigned)g_loops,
+    printf("[v06.1] phase=%s（n=%u pub=%u err=%u）\n", g_phase, (unsigned)g_loops,
            (unsigned)g_pub_ok, (unsigned)g_pub_err);
 }
 
@@ -148,10 +158,10 @@ static void stack_report(void)
     if (LOS_TaskInfoGet(g_work_tid, &info) != LOS_OK) {
         return;
     }
-    printf("[v06] stk 已用 %u B / 峰值 %u B / 栈 %u B\n", (unsigned)info.uwCurrUsed,
+    printf("[v06.1] stk 已用 %u B / 峰值 %u B / 栈 %u B\n", (unsigned)info.uwCurrUsed,
            (unsigned)info.uwPeakUsed, (unsigned)info.uwStackSize);
     if (info.bOvf) {
-        printf("[v06] !! fatal 主任务栈溢出 bOvf=1（峰值 %u B / 栈 %u B）\n",
+        printf("[v06.1] !! fatal 主任务栈溢出 bOvf=1（峰值 %u B / 栈 %u B）\n",
                (unsigned)info.uwPeakUsed, (unsigned)info.uwStackSize);
     }
 }
@@ -202,7 +212,7 @@ static void backoff_note(uint32_t now)
     g_pub_err++;
     wait = min_backoff_ms(s_ctx.fails - 1u);
     s_ctx.next_try = now + wait;
-    printf("[v06] %s 失败（第 %u 次），%u s 后重试\n", state_name(s_ctx.st),
+    printf("[v06.1] %s 失败（第 %u 次），%u s 后重试\n", state_name(s_ctx.st),
            (unsigned)s_ctx.fails, (unsigned)(wait / 1000u));
 }
 
@@ -213,6 +223,61 @@ static void backoff_note(uint32_t now)
  * 引脚与复用照官方 b6_uart0 与正式固件 gw_plat.c 的做法：GPIO0_PB6=UART0_RX_M0（上拉，
  * 汇聚侧空闲时 RX 悬空会被当噪声）、GPIO0_PB7=UART0_TX_M0。
  */
+/*
+ * t207 的取证行：把收到的前 32 字节按 hex 原样打出来。
+ * 判读只有两条路，一步分流：
+ *   开头是 AA 55  → 帧头在流里，问题在分帧器/LEN/CRC（那就去对 min_proto 与 gw_proto）
+ *   开头不是 AA55 → 串口这一层就不对（波特率/引脚复用/线序），别去动解析器
+ */
+static void head_print(const char *what, const uint8_t *b, uint32_t n)
+{
+    char line[MIN_UART_HEAD_BYTES * 3u + 4u];
+    uint32_t i;
+    uint32_t o = 0u;
+
+    for (i = 0u; i < n && o + 4u < (uint32_t)sizeof(line); i++) {
+        o += (uint32_t)snprintf(&line[o], (uint32_t)sizeof(line) - o, "%02X ", b[i]);
+    }
+    if (o > 0u) {
+        line[o - 1u] = '\0';
+    } else {
+        line[0] = '\0';
+    }
+    /* 两个 printf 字面量分开写：镜像锚点要能 grep 到连续的 "uart head=" / "uart head2="
+     * （用 "%s=" 拼参数时字符串在 .rodata 里是断的，t207 验收项会查不到）。 */
+    if (what[4] == '2') {
+        printf("[v06.1] uart head2=%s\n", line);
+    } else {
+        printf("[v06.1] uart head=%s\n", line);
+    }
+}
+
+/* 把本次读到的字节攒进 head/head2，攒满就打印一次（每块只打一次） */
+static void head_capture(const uint8_t *rx, uint32_t got)
+{
+    uint8_t *dst;
+    uint32_t *len;
+    uint8_t *done;
+    const char *what;
+
+    if (s_reinit_done == 0u) {
+        dst = s_head; len = &s_head_len; done = &s_head_done; what = "head";
+    } else {
+        dst = s_head2; len = &s_head2_len; done = &s_head2_done; what = "head2";
+    }
+    if (*done != 0u) {
+        return;
+    }
+    while (got > 0u && *len < MIN_UART_HEAD_BYTES) {
+        dst[(*len)++] = *rx++;
+        got--;
+    }
+    if (*len >= MIN_UART_HEAD_BYTES) {
+        *done = 1u;
+        head_print(what, dst, *len);
+    }
+}
+
 static int uart_init(void)
 {
     UartAttribute attr;
@@ -226,17 +291,18 @@ static int uart_init(void)
     attr.parity = UART_PARITY_NONE;
     attr.rxBlock = UART_BLOCK_STATE_NONE_BLOCK;
     attr.txBlock = UART_BLOCK_STATE_NONE_BLOCK;
+    attr.pad = FLOW_CTRL_NONE;   /* t207：与 v1.4 gw_plat.c:51 逐字段对齐（该枚举首值为 0） */
     (void)PinctrlSet(GPIO0_PB6, MUX_FUNC2, PULL_UP, DRIVE_LEVEL2);
     (void)PinctrlSet(GPIO0_PB7, MUX_FUNC2, PULL_KEEP, DRIVE_LEVEL2);
     rc = LzUartInit(MIN_UART_ID, &attr);
     if (rc != LZ_HARDWARE_SUCCESS) {
-        printf("[v06] ⚠ UART0 初始化失败 baud=%u rc=0x%08X\n", (unsigned)MIN_UART_BAUD,
+        printf("[v06.1] ⚠ UART0 初始化失败 baud=%u rc=0x%08X\n", (unsigned)MIN_UART_BAUD,
                (unsigned)rc);
         return -1;
     }
     min_parser_init(&s_parser);
     s_uart_ready = 1u;
-    printf("[v06] UART0 已就绪 baud=%u 8N1（GPIO0_PB6=RX / PB7=TX）\n",
+    printf("[v06.1] UART0 已就绪 baud=%u 8N1（GPIO0_PB6=RX / PB7=TX）\n",
            (unsigned)MIN_UART_BAUD);
     return 0;
 }
@@ -250,12 +316,12 @@ static int publish_frame(const min_frame_t *fr, uint32_t now)
 
     /* publish 前先留一行：rc 是上一次的返回码（首发 0）。现场对时间戳用 ——
      * 这行出现而「已上报」没出现 ⇒ 卡死在 publish 里。 */
-    printf("[v06] pub seq=%u len=%u rc=%d\n", (unsigned)fr->seq, (unsigned)fr->plen,
+    printf("[v06.1] pub seq=%u len=%u rc=%d\n", (unsigned)fr->seq, (unsigned)fr->plen,
            (int)g_last_rc);
     bl = min_msg_node_samples(s_cred.device_id, (uint64_t)now, fr->payload, (uint32_t)fr->plen,
                               s_ctx.body, (uint32_t)sizeof(s_ctx.body));
     if (bl <= 0) {
-        printf("[v06] ⚠ 报文拼装失败（转义溢出或超长）seq=%u len=%u → 丢这一帧\n",
+        printf("[v06.1] ⚠ 报文拼装失败（转义溢出或超长）seq=%u len=%u → 丢这一帧\n",
                (unsigned)fr->seq, (unsigned)fr->plen);
         return 1;
     }
@@ -264,16 +330,16 @@ static int publish_frame(const min_frame_t *fr, uint32_t now)
     s_last_pub_ms = now;
     if (rc == 0) {
         g_pub_ok++;
-        printf("[v06] 已上报 seq=%u len=%u（PUBACK）\n", (unsigned)fr->seq, (unsigned)bl);
+        printf("[v06.1] 已上报 seq=%u len=%u（PUBACK）\n", (unsigned)fr->seq, (unsigned)bl);
         return 0;
     }
     if (rc == -2) {
         /* 等 PUBACK 超预算：不是致命错，断开重连；绝不在原地重发（t193 教训） */
-        printf("[v06] ⚠ PUBACK 超时（%us 预算内没等到）→ 重连 seq=%u\n",
+        printf("[v06.1] ⚠ PUBACK 超时（%us 预算内没等到）→ 重连 seq=%u\n",
                (unsigned)(MIN_MQTT_PUB_BUDGET_MS / 1000u), (unsigned)fr->seq);
         return -1;
     }
-    printf("[v06] ⚠ 上报失败 rc=%d（seq=%u）\n", rc, (unsigned)fr->seq);
+    printf("[v06.1] ⚠ 上报失败 rc=%d（seq=%u）\n", rc, (unsigned)fr->seq);
     return -1;
 }
 
@@ -297,7 +363,7 @@ static void handle_frame(const min_frame_t *fr, uint32_t now)
     ty[0] = '\0';
     (void)min_json_str_field(fr->payload, (uint32_t)fr->plen, "sn", sn, (uint32_t)sizeof(sn));
     (void)min_json_str_field(fr->payload, (uint32_t)fr->plen, "type", ty, (uint32_t)sizeof(ty));
-    printf("[v06] frame seq=%u sn=%s type=%s len=%u\n", (unsigned)fr->seq,
+    printf("[v06.1] frame seq=%u sn=%s type=%s len=%u\n", (unsigned)fr->seq,
            (sn[0] != '\0') ? sn : "?", (ty[0] != '\0') ? ty : "?",
            (unsigned)fr->plen);
 
@@ -317,7 +383,7 @@ static void handle_frame(const min_frame_t *fr, uint32_t now)
     }
     if (prc != 0) {
         g_pub_err++;
-        printf("[v06] ⚠ MQTT 断开重连 n=%u rc=%d\n", (unsigned)(s_ctx.fails + 1u),
+        printf("[v06.1] ⚠ MQTT 断开重连 n=%u rc=%d\n", (unsigned)(s_ctx.fails + 1u),
                (int)g_last_rc);
         sess_close();
         backoff_note(now);
@@ -336,9 +402,26 @@ static void uart_pump(uint32_t now)
     if (s_uart_ready == 0u) {
         return;
     }
+    /* t207：开机那次 LzUartInit 实测不生效（v1.4 在 2026-11-02 也踩到同一处，见
+     * src/gw_plat.c 的 t201 注释：rx 一直涨、frames=0、crc_err/fmt_err 全 0，
+     * 重新 init 一次立刻 baud-lock）。这里 1.5 s 后照同一段代码补一次，
+     * 并且把 re-init 前后的头 32 字节都打出来，现场一眼就能看出是不是这一段救回来的。 */
+    if (s_reinit_done == 0u && now >= MIN_UART_REINIT_MS) {
+        int rc;
+
+        s_reinit_done = 1u;
+        rc = uart_init();                 /* Deinit → PinctrlSet(RX 上拉) → Init，与 v1.4 同 */
+        printf("[v06.1] uart re-init @%ums rc=%d（开机那次 init 不生效：t201 同现象）\n",
+               (unsigned)MIN_UART_REINIT_MS, rc);
+        if (s_head_done == 0u && s_head_len > 0u) {
+            s_head_done = 1u;
+            head_print("head", s_head, s_head_len);   /* re-init 前那截，作对照 */
+        }
+    }
     got = LzUartRead(MIN_UART_ID, rx, sizeof(rx));
     if (got > 0u) {
         g_rx_bytes += got;
+        head_capture(rx, got);            /* t207：先留证，再喂解析器 */
         have = (min_parser_feed(&s_parser, rx, got, &fr) == 1);
     } else {
         have = (min_parser_pull(&s_parser, &fr) == 1);   /* 缓冲里可能还压着帧 */
@@ -355,9 +438,18 @@ static void uart_pump(uint32_t now)
     /* 开机 5 s 一帧都没解出来：只提示一次（卡面：不自动换波特率，把现状摆出来就行） */
     if (s_noframe_report == 0u && g_frames == 0u && now >= MIN_UART_NOFRAME_MS) {
         s_noframe_report = 1u;
-        printf("[v06] uart no-frame 5s, baud=%u（rx=%u B crc=%u fmt=%u drop=%u）\n",
-               (unsigned)MIN_UART_BAUD, (unsigned)g_rx_bytes, (unsigned)s_parser.crc_err,
-               (unsigned)s_parser.fmt_err, (unsigned)s_parser.drop);
+        printf("[v06.1] uart no-frame 5s, baud=%u（rx=%u B crc=%u fmt=%u drop=%u "
+               "reinit=%u）\n", (unsigned)MIN_UART_BAUD, (unsigned)g_rx_bytes,
+               (unsigned)s_parser.crc_err, (unsigned)s_parser.fmt_err,
+               (unsigned)s_parser.drop, (unsigned)s_reinit_done);
+        if (s_head_done == 0u && s_head_len > 0u) {
+            s_head_done = 1u;
+            head_print("head", s_head, s_head_len);
+        }
+        if (s_head2_done == 0u && s_head2_len > 0u) {
+            s_head2_done = 1u;
+            head_print("head2", s_head2, s_head2_len);
+        }
     }
 }
 
@@ -371,7 +463,7 @@ static void state_step(uint32_t now)
         phase_set("wifi");
         rc = min_net_wifi_up(&s_wifi);
         if (rc != 0) {
-            printf("[v06] ⚠ Wi-Fi 连接失败 rc=%d（ssid=%s）\n", rc, s_wifi.ssid);
+            printf("[v06.1] ⚠ Wi-Fi 连接失败 rc=%d（ssid=%s）\n", rc, s_wifi.ssid);
             backoff_note(now);
             break;
         }
@@ -379,7 +471,7 @@ static void state_step(uint32_t now)
             char ip[24];
 
             (void)min_net_local_ip(ip, (uint32_t)sizeof(ip));
-            printf("[v06] STA 已连接 ssid=%s ip=%s\n", s_wifi.ssid, (ip[0] != '\0') ? ip : "0.0.0.0");
+            printf("[v06.1] STA 已连接 ssid=%s ip=%s\n", s_wifi.ssid, (ip[0] != '\0') ? ip : "0.0.0.0");
         }
         s_ctx.fails = 0u;
         s_ctx.st = ST_TIME;
@@ -390,12 +482,12 @@ static void state_step(uint32_t now)
         phase_set("time");
         rc = min_net_http_epoch(s_cred.time_host, s_cred.time_port, &s_ctx.epoch);
         if (rc != 0 || s_ctx.epoch == 0u) {
-            printf("[v06] ⚠ 取时失败 rc=%d（%s:%u）\n", rc, s_cred.time_host,
+            printf("[v06.1] ⚠ 取时失败 rc=%d（%s:%u）\n", rc, s_cred.time_host,
                    (unsigned)s_cred.time_port);
             backoff_note(now);
             break;
         }
-        printf("[v06] 取时成功 epoch=%llu\n", (unsigned long long)s_ctx.epoch);
+        printf("[v06.1] 取时成功 epoch=%llu\n", (unsigned long long)s_ctx.epoch);
         s_ctx.fails = 0u;
         s_ctx.st = ST_MQTT;
         break;
@@ -406,7 +498,7 @@ static void state_step(uint32_t now)
         phase_set("mqtt");
         if (min_iotda_client_id(s_cred.device_id, s_ctx.epoch, s_ctx.client_id,
                                 (uint32_t)sizeof(s_ctx.client_id)) != 0) {
-            printf("[v06] ⚠ clientId 拼装失败（device_id=%s）\n", s_cred.device_id);
+            printf("[v06.1] ⚠ clientId 拼装失败（device_id=%s）\n", s_cred.device_id);
             backoff_note(now);
             s_ctx.st = ST_TIME;
             break;
@@ -416,7 +508,7 @@ static void state_step(uint32_t now)
                            s_ctx.pass);
         s_mqtt.fd = min_net_tcp_open(s_cred.mqtt_host, s_cred.mqtt_port);
         if (s_mqtt.fd < 0) {
-            printf("[v06] ⚠ TCP 连接失败 %s:%u\n", s_cred.mqtt_host, (unsigned)s_cred.mqtt_port);
+            printf("[v06.1] ⚠ TCP 连接失败 %s:%u\n", s_cred.mqtt_host, (unsigned)s_cred.mqtt_port);
             backoff_note(now);
             break;
         }
@@ -424,12 +516,12 @@ static void state_step(uint32_t now)
         if (rc != 0) {
             (void)close(s_mqtt.fd);
             s_mqtt.fd = -1;
-            printf("[v06] ⚠ IoTDA 连接失败 rc=%d（第 %u 次），clientId=%s\n", rc,
+            printf("[v06.1] ⚠ IoTDA 连接失败 rc=%d（第 %u 次），clientId=%s\n", rc,
                    (unsigned)(s_ctx.fails + 1u), s_ctx.client_id);
             backoff_note(now);
             break;
         }
-        printf("[v06] IoTDA 已连接 clientId=%s\n", s_ctx.client_id);
+        printf("[v06.1] IoTDA 已连接 clientId=%s\n", s_ctx.client_id);
         s_ctx.fails = 0u;
         s_ctx.last_ping = now;
         s_ctx.last_pub = now;             /* v0.6：不造假数据，等真实帧 */
@@ -449,14 +541,14 @@ static void run_step(uint32_t now)
 
         s_ctx.last_ping = now;
         if (rc != 0) {
-            printf("[v06] ⚠ PINGRESP 没回来 rc=%d：断开重连 n=%u\n", rc,
+            printf("[v06.1] ⚠ PINGRESP 没回来 rc=%d：断开重连 n=%u\n", rc,
                    (unsigned)(s_ctx.fails + 1u));
             sess_close();
             backoff_note(now);
             s_ctx.st = ST_MQTT;
             return;
         }
-        printf("[v06] PINGRESP ok\n");
+        printf("[v06.1] PINGRESP ok\n");
     }
     phase_set("run");
 }
@@ -473,11 +565,12 @@ static void report(uint32_t now)
      * since_last = 主循环距上次前进过了多少秒 —— t206 的**软件守卫**：
      * v0.5.1 现场建不了独立守卫线程（ret=0x02000203 内存不足），改成主循环自己记时。
      * 这一行出现就说明主循环还活着；若 since_last 明显 > 10 说明中间被谁卡过。 */
-    printf("[v06] alive n=%u up=%us uart=%uB frames=%u crc=%u pub=%u err=%u heap=%uB "
-           "phase=%s since_last=%us\n", (unsigned)g_loops, (unsigned)(now / 1000u),
-           (unsigned)g_rx_bytes, (unsigned)g_frames, (unsigned)s_parser.crc_err,
-           (unsigned)g_pub_ok, (unsigned)g_pub_err, (unsigned)min_free_heap(), g_phase,
-           (unsigned)((now - s_loop_ms) / 1000u));
+    printf("[v06.1] alive n=%u up=%us uart=%uB frames=%u crc=%u pub=%u err=%u heap=%uB "
+           "drop=%u fmt=%u phase=%s since_last=%us\n", (unsigned)g_loops,
+           (unsigned)(now / 1000u), (unsigned)g_rx_bytes, (unsigned)g_frames,
+           (unsigned)s_parser.crc_err, (unsigned)g_pub_ok, (unsigned)g_pub_err,
+           (unsigned)min_free_heap(), (unsigned)s_parser.drop, (unsigned)s_parser.fmt_err,
+           g_phase, (unsigned)((now - s_loop_ms) / 1000u));
     stack_report();
 }
 
@@ -490,7 +583,7 @@ int min_wifi_reload(void)
 
     memset(&w, 0, sizeof(w));
     if (min_kv_load_wifi(&w) != 0) {
-        printf("[v06] ⚠ KV 里没有可用的 Wi-Fi 凭证（先 wifi set <ssid> <口令>）\n");
+        printf("[v06.1] ⚠ KV 里没有可用的 Wi-Fi 凭证（先 wifi set <ssid> <口令>）\n");
         return -1;
     }
     min_net_wifi_down();
@@ -498,7 +591,7 @@ int min_wifi_reload(void)
     s_ctx.fails = 0u;
     s_ctx.next_try = 0u;
     s_ctx.st = ST_WIFI;
-    printf("[v06] 将以 ssid=%s 重新连接\n", s_wifi.ssid);
+    printf("[v06.1] 将以 ssid=%s 重新连接\n", s_wifi.ssid);
     return 0;
 }
 
@@ -510,12 +603,13 @@ void min_v06_report(void)
     uint32_t now = min_now_ms();
 
     (void)min_net_local_ip(ip, (uint32_t)sizeof(ip));
-    printf("[v06] alive n=%u up=%us uart=%uB frames=%u crc=%u pub=%u err=%u heap=%uB "
-           "phase=%s since_last=%us\n", (unsigned)g_loops, (unsigned)(now / 1000u),
-           (unsigned)g_rx_bytes, (unsigned)g_frames, (unsigned)s_parser.crc_err,
-           (unsigned)g_pub_ok, (unsigned)g_pub_err, (unsigned)min_free_heap(), g_phase,
-           (unsigned)((now - s_loop_ms) / 1000u));
-    printf("[v06] 态：%s fails=%u epoch=%llu ip=%s drop_offline=%u uart_ready=%u\n",
+    printf("[v06.1] alive n=%u up=%us uart=%uB frames=%u crc=%u pub=%u err=%u heap=%uB "
+           "drop=%u fmt=%u phase=%s since_last=%us\n", (unsigned)g_loops,
+           (unsigned)(now / 1000u), (unsigned)g_rx_bytes, (unsigned)g_frames,
+           (unsigned)s_parser.crc_err, (unsigned)g_pub_ok, (unsigned)g_pub_err,
+           (unsigned)min_free_heap(), (unsigned)s_parser.drop, (unsigned)s_parser.fmt_err,
+           g_phase, (unsigned)((now - s_loop_ms) / 1000u));
+    printf("[v06.1] 态：%s fails=%u epoch=%llu ip=%s drop_offline=%u uart_ready=%u\n",
            state_name(s_ctx.st), (unsigned)s_ctx.fails, (unsigned long long)s_ctx.epoch,
            (ip[0] != '\0') ? ip : "0.0.0.0", (unsigned)g_drop_offline,
            (unsigned)s_uart_ready);
@@ -573,7 +667,7 @@ void BusFault_Handler(void);
 
 void HardFault_Handler(void)
 {
-    printf("\n[v06] !! fatal HardFault（stage=%u n=%u pub=%u err=%u phase=%s）\n",
+    printf("\n[v06.1] !! fatal HardFault（stage=%u n=%u pub=%u err=%u phase=%s）\n",
            (unsigned)g_stage, (unsigned)g_loops, (unsigned)g_pub_ok, (unsigned)g_pub_err,
            g_phase);
     for (;;) {
@@ -582,7 +676,7 @@ void HardFault_Handler(void)
 
 void BusFault_Handler(void)
 {
-    printf("\n[v06] !! fatal BusFault（stage=%u n=%u phase=%s）\n", (unsigned)g_stage,
+    printf("\n[v06.1] !! fatal BusFault（stage=%u n=%u phase=%s）\n", (unsigned)g_stage,
            (unsigned)g_loops, g_phase);
     for (;;) {
     }
@@ -604,26 +698,26 @@ static UINT32 min_wifi_shell(UINT32 argc, const CHAR **argv)
         base = 1u;
     }
     if (argc <= base) {
-        printf("[v06] 用法：wifi set <ssid> <口令> | wifi net | wifi show\n");
+        printf("[v06.1] 用法：wifi set <ssid> <口令> | wifi net | wifi show\n");
         return (UINT32)-1;
     }
     sub = argv[base];
     if (strcmp((const char *)sub, "set") == 0) {
         if (argc < base + 3u) {
-            printf("[v06] 用法：wifi set <ssid> <口令>（口令 8~63 字节）\n");
+            printf("[v06.1] 用法：wifi set <ssid> <口令>（口令 8~63 字节）\n");
             return (UINT32)-1;
         }
         if (min_kv_save_wifi((const char *)argv[base + 1u], (const char *)argv[base + 2u]) != 0) {
-            printf("[v06] ✗ 保存失败（ssid 1~32 字节、口令 8~63 字节；或 Flash 不可用）\n");
+            printf("[v06.1] ✗ 保存失败（ssid 1~32 字节、口令 8~63 字节；或 Flash 不可用）\n");
             return (UINT32)-1;
         }
-        printf("[v06] 已保存 Wi-Fi：ssid=%s（口令已写入，不回显）；接着敲 wifi net\n",
+        printf("[v06.1] 已保存 Wi-Fi：ssid=%s（口令已写入，不回显）；接着敲 wifi net\n",
                (const char *)argv[base + 1u]);
         return 0u;
     }
     if (strcmp((const char *)sub, "net") == 0) {
         int rc = min_wifi_reload();
-        printf("[v06] %s wifi net：马上重新连接\n", (rc == 0) ? "已接受" : "⚠ 失败");
+        printf("[v06.1] %s wifi net：马上重新连接\n", (rc == 0) ? "已接受" : "⚠ 失败");
         return (rc == 0) ? 0u : (UINT32)-1;
     }
     if (strcmp((const char *)sub, "show") == 0) {
@@ -633,12 +727,12 @@ static UINT32 min_wifi_shell(UINT32 argc, const CHAR **argv)
         memset(&w, 0, sizeof(w));
         (void)min_kv_load_wifi(&w);
         (void)min_net_local_ip(ip, (uint32_t)sizeof(ip));
-        printf("[v06] 已保存 ssid=%s（口令%s）当前 IP=%s\n",
+        printf("[v06.1] 已保存 ssid=%s（口令%s）当前 IP=%s\n",
                (w.ssid[0] != '\0') ? w.ssid : "(无)",
                (w.psk[0] != '\0') ? "已存" : "空", (ip[0] != '\0') ? ip : "0.0.0.0");
         return 0u;
     }
-    printf("[v06] 未知子命令 %s：只支持 set / net / show\n", (const char *)sub);
+    printf("[v06.1] 未知子命令 %s：只支持 set / net / show\n", (const char *)sub);
     return (UINT32)-1;
 }
 
@@ -655,7 +749,7 @@ int min_shell_register(void)
     UINT32 rc = osCmdReg(CMD_TYPE_STD, "wifi", XARGS, (CMD_CBK_FUNC)min_wifi_shell);
 
     (void)osCmdReg(CMD_TYPE_STD, "v06", XARGS, (CMD_CBK_FUNC)min_v06_shell);
-    printf("[v06] 串口命令：wifi set|net|show、v06（注册%s）\n", (rc == 0u) ? "成功" : "失败");
+    printf("[v06.1] 串口命令：wifi set|net|show、v06（注册%s）\n", (rc == 0u) ? "成功" : "失败");
     return (rc == 0u) ? 0 : -1;
 }
 
@@ -667,26 +761,26 @@ static void min_entry(void)
     uint32_t tid = 0;
     uint32_t ret;
 
-    printf("\n[v06] ---- RK2206 最小通信固件启动 %s (%s %s) ----\n", MIN_IMAGE_TAG, __DATE__,
+    printf("\n[v06.1] ---- RK2206 最小通信固件启动 %s (%s %s) ----\n", MIN_IMAGE_TAG, __DATE__,
            __TIME__);
-    printf("[v06] 本版范围：Wi-Fi + 取时 + IoTDA + UART 真实节点数据（无缓存 / 无 433 / 无按键）\n");
+    printf("[v06.1] 本版范围：Wi-Fi + 取时 + IoTDA + UART 真实节点数据（无缓存 / 无 433 / 无按键）\n");
 
     {
         int wr = min_kv_load_wifi(&s_wifi);
         int cr = min_kv_load_iotda(&s_cred);
 
         if (wr == 0) {
-            printf("[v06] KV：Wi-Fi ssid=%s 口令=%s（不回显）\n", s_wifi.ssid,
+            printf("[v06.1] KV：Wi-Fi ssid=%s 口令=%s（不回显）\n", s_wifi.ssid,
                    (s_wifi.psk[0] != '\0') ? "已读到" : "空");
         } else {
-            printf("[v06] KV：没读到 Wi-Fi 凭证 → 串口执行 wifi set <ssid> <口令> 再 wifi net\n");
+            printf("[v06.1] KV：没读到 Wi-Fi 凭证 → 串口执行 wifi set <ssid> <口令> 再 wifi net\n");
         }
         if (cr == 0) {
-            printf("[v06] KV：IoTDA %s:%u 设备 %s，取时 %s:%u\n", s_cred.mqtt_host,
+            printf("[v06.1] KV：IoTDA %s:%u 设备 %s，取时 %s:%u\n", s_cred.mqtt_host,
                    (unsigned)s_cred.mqtt_port, s_cred.device_id, s_cred.time_host,
                    (unsigned)s_cred.time_port);
         } else {
-            printf("[v06] KV：没有 IoTDA 凭证块（Flash 0x%06X）→ 只联网不上云\n",
+            printf("[v06.1] KV：没有 IoTDA 凭证块（Flash 0x%06X）→ 只联网不上云\n",
                    (unsigned)MIN_KV_FLASH_OFF);
         }
     }
@@ -695,15 +789,15 @@ static void min_entry(void)
      * 那条断言就会误报成「app_LIBS 没生效」。 */
     (void)uart_init();                 /* t206：固定 9600 8N1，失败也只打日志继续跑 */
 
-    printf("[v06] crc16 自检 \"123456789\" = 0x%04X（应为 0x4B37）\n",
+    printf("[v06.1] crc16 自检 \"123456789\" = 0x%04X（应为 0x4B37）\n",
            (unsigned)min_crc16((const uint8_t *)"123456789", 9u));
-    printf("[v06] 逻辑时基=启动时刻；heap 空闲=%uB\n", (unsigned)min_free_heap());
+    printf("[v06.1] 逻辑时基=启动时刻；heap 空闲=%uB\n", (unsigned)min_free_heap());
     /*
      * t205 自证行：上面 min_free_heap() 是本轮越界的唯一现场（20 B 缓冲被内核按 24 B 清零）。
      * 这一行放在它之后，能打出来就说明这一次调用返回时 canary 仍然完好；再顺手把
      * 栈帧里几块大缓冲的尺寸打出来，日后谁再改结构体一眼能对账。
      */
-    printf("[v06] stack guard ok（heap 调用返回、canary 完好；最大局部缓冲 %u B）\n",
+    printf("[v06.1] stack guard ok（heap 调用返回、canary 完好；最大局部缓冲 %u B）\n",
            (unsigned)sizeof(min_mem_pool_st_t));
     (void)min_shell_register();
 
@@ -719,11 +813,11 @@ static void min_entry(void)
     p.pcName = "v06Work";
     ret = LOS_TaskCreate(&tid, &p);
     if (ret != LOS_OK) {
-        printf("[v06] ✗ 主任务创建失败 ret=0x%08X：固件不会做任何事\n", (unsigned)ret);
+        printf("[v06.1] ✗ 主任务创建失败 ret=0x%08X：固件不会做任何事\n", (unsigned)ret);
         return;
     }
     g_work_tid = tid;
-    printf("[v06] 主任务已启动（栈 %u B，优先级 %u）；心跳 %u s / UART 限速 %u ms / "
+    printf("[v06.1] 主任务已启动（栈 %u B，优先级 %u）；心跳 %u s / UART 限速 %u ms / "
            "软件守卫 停滞≥%u s\n", (unsigned)MIN_TASK_STACK, (unsigned)MIN_TASK_PRIO,
            (unsigned)(V05_HB_MS / 1000u), (unsigned)MIN_UART_RATE_MS, (unsigned)V05_STALL_S);
 }

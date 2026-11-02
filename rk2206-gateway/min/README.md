@@ -583,3 +583,83 @@ v0.5.1 现场开机打 `[v06] ⚠ 守卫任务创建失败 ret=0x02000203` —�
   `uart no-frame 5s` / `[v06] stack guard ok` 各 1
 - `bash tools/gw-build-min.sh --check`：主机单测 **91/0**（v0.5.1 是 81，新增 10 条 JSON 字段用例），
   6 个 .c 交叉语法检查全 OK
+
+---
+
+## 15. v0.6.1-uart：为什么 v0.6 收得到字节却一帧都解不出（t207）
+
+### 15.1 现场数据（用户 2026-11-02 实机，COM19）
+```
+[v06] alive n=1   up=11s uart=64B    frames=0 crc=0 pub=0 err=0 heap=7118276B phase=wifi
+[v06] uart no-frame 5s, baud=9600（rx=128 B crc=0 fmt=0 drop=127）
+[v06] alive n=195 up=21s uart=5064B  frames=0 crc=0 pub=0 err=0 heap=7116180B phase=run
+[v06] alive n=393 up=31s uart=10413B frames=0 crc=0 pub=0 err=0 heap=7116180B phase=run
+```
+同一块板、同一根线、同样 9600，**v1.4 全量固件能解出 `frames=157 crc_err=8`**。
+
+### 15.2 三个量把「字节对不对」和「解析器对不对」分开了
+| 观察 | 含义 |
+|---|---|
+| `uart` 每 10 s 涨 ~5 KB，`phase=run` | 读循环在跑、`LzUartRead` 有返回值，**不是没收到** |
+| `crc=0`（`s_parser.crc_err`）连续为 0 | **从来没有凑够过一帧**去算 CRC：只要流里出现过 `AA 55` + 一个假 LEN，`crc_err` 或 `fmt_err` 就会涨 |
+| `drop=127`（5 s 那行） | 解析器在缓冲里**一个 `AA 55` 都没找到**，整段当垃圾丢了 |
+
+⇒ 断点在「进解析器之前」：字节流里没有帧头。**解析器不是嫌疑人。**
+
+> `drop` 看起来「停在 127」是打印口径造成的：那一行由 `s_noframe_report` 只打一次（5 s 快照）。
+> v0.6.1 已把 `drop=` 和 `fmt=` 放进 10 s 的 alive 行，下一版现场一眼能看出它是不是继续涨。
+
+### 15.3 根因：开机那次 `LzUartInit()` 不生效（v1.4 早就踩过并记了档）
+`rk2206-gateway/src/gw_plat.c:69-73`（t201 加的注释，原文）：
+
+> t201：开机那次 LzUartInit 实测不生效（min 版 2026-11-02 实机：rx 一直涨、frames=0、
+> crc_err/fmt_err 全 0，重新 init 一次立刻 baud-lock seq=1223）。
+
+**一模一样的三个量。** v1.4 因此有 `gw_uart_guard` 的 1.5 s boot re-init；v0.6 只在
+`min_entry()` 里 init 一次，于是原样复现了 t201 那个状态（UART 被按错误的采样率读取 → 垃圾流 → 无 AA55）。
+
+### 15.4 改哪一行
+`rk2206-gateway/min/min_main.c`：
+1. `uart_pump()` 开头新增一次性补 init（`MIN_UART_REINIT_MS 1500u`，`:41`）：到点调用**同一个**
+   `uart_init()`（`LzUartDeinit → PinctrlSet(RX 上拉) → LzUartInit`），与 v1.4 的
+   `gw_plat_uart0_boot_reinit()` 是同一段动作；打印
+   `[v06.1] uart re-init @1500ms rc=0（开机那次 init 不生效：t201 同现象）`。
+2. 新增 `head_print()` / `head_capture()`（`min_main.c:232`、`:268`）：把**收到字节的头 32 字节**按 hex 打一行 ——
+   `[v06.1] uart head=AA 55 01 01 …`（re-init 前）与 `[v06.1] uart head2=AA 55 …`（re-init 后）。
+   两个都打，就是为了让现场直接对比「补 init 前后线上到底是什么」，一次定案。
+3. `report()` 的 alive 行补 `drop=` `fmt=`（`min_main.c:607`）；`attr.pad = FLOW_CTRL_NONE` 显式写上（`min_main.c:294`，
+   与 v1.4 `gw_plat.c:51` 逐字段一致，原来靠 `memset 0` 隐式等价）。
+
+### 15.5 分帧器差异对照（卡面要求逐条列，结论：无差异）
+| 项 | v1.4 `src/gw_proto.c` | v0.6 `min/min_proto.c` | 结论 |
+|---|---|---|---|
+| SOF / VER | `GW_FRAME_SOF0/1=0xAA/0x55`、`GW_FRAME_VER=0x01`（`gw_proto.h:17-19`） | `MIN_SOF0/1`、`MIN_VER`（`min_gw.h:82-84`） | 相同 |
+| LEN 语义 | `plen=buf[6]\|buf[7]<<8`；`total=GW_FRAME_OVERHEAD+plen=10+plen`（`gw_proto.c:291-295`） | 同（`min_proto.c:115,124`） | 相同：LEN 只算 payload，不含 8 B 头与 2 B CRC |
+| CRC 覆盖 | `gw_crc16_modbus(buf+2, 6+plen)`，尾部 2 B 小端（`gw_proto.c:326-327`） | 同（`min_proto.c:89-90`） | 相同：覆盖 VER..PAYLOAD，跳过 SOF 与 CRC |
+| CRC 多项式 | MODBUS（0xA001 反射，初值 0xFFFF） | 同 | 相同（单测 `"123456789"→0x4B37`） |
+| 半包/假 LEN | 残余顶满缓冲 → 丢 1 字节 resync（`gw_proto.c:305-311`，t183 修） | `feed()` 的 `take==0` 分支丢 1 字节（`min_proto.c:160-164`） | 等价 |
+| 无帧头 | 整段丢、末字节是 `0xAA` 才留 1 B | 整段丢、无条件留 1 B | 等价（min 更宽松，只会多扫几次） |
+| 缓冲上限 | `GW_PARSER_LIMIT` | `MIN_BUF_MAX = MIN_PAYLOAD_MAX+16 = 1040` | 不同规格，与本问题无关 |
+
+### 15.6 读循环核对（卡面第 3 条）
+- `LzUartRead(id, buf, len)` 语义：返回**本次读到的字节数**（`attr.rxBlock = UART_BLOCK_STATE_NONE_BLOCK`
+  即非阻塞，无数据返回 0）。
+- `min_main.c` 里 `g_rx_bytes += got` 与 `min_parser_feed(...)` 在**同一个 `if (got > 0u)` 分支**内
+  （`min_main.c:423-433`），不存在「计数了却没喂解析器」。
+- ring 缓冲由 SDK 持有，`LzUartRead` 每次最多 256 B，主循环 50 ms 一圈 → 9600 8N1 的 960 B/s
+  远低于消费能力，不存在覆盖。
+- `drop` 冻结只是打印口径（见 15.2 注），不是解析器停了。
+
+### 15.7 引脚复用核对（卡面第 4 条）
+`gw_config.h:28-29`：`GW_PIN_UART0_RX = GPIO0_PB6`、`GW_PIN_UART0_TX = GPIO0_PB7`；
+v1.4 用 `PinctrlSet(RX, MUX_FUNC2, PULL_UP, DRIVE_LEVEL2)` / `PinctrlSet(TX, MUX_FUNC2, PULL_KEEP, DRIVE_LEVEL2)`
+（`gw_plat.c:56-57`）。v0.6 的 `uart_init()` **逐参数相同**，只是 `pad` 原来靠 memset 隐式 0，现显式写
+`FLOW_CTRL_NONE`（枚举首值 0）—— 引脚这条**不是**差异点。
+
+### 15.8 本版指纹与判据
+- TAG `MIN-GW-v0.6.1-uart`，镜像 2097152 B，md5 `c2eaa97146119f1b726002c93f7b3309`（当次），
+  `liteos.elf` 841400 B
+- 锚点（`grep -a -c -F`）：`MIN-GW-v0.6.1-uart`、`[v06.1]`、`uart head=`、`uart head2=`、
+  `uart re-init @`、`uart no-frame 5s` 各命中
+- `bash tools/gw-build-min.sh --check`：主机单测 **91/0**，6 个 .c 交叉语法全 OK
+- 判据不变：10 分钟 alive 不断 / `frames` 涨 / `pub` 与 `frames` 同步 / `err=0` / 服务器 webhook 同步涨
