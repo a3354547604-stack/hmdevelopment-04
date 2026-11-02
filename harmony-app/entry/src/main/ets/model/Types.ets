@@ -674,21 +674,63 @@ export function parseDemoResult(o: JsonObject): DemoResult {
   };
 }
 
+/** `summary` 缺省时的兜底文案（t200：服务器少给一个字段不该让整页变红）。 */
+export const ALERT_SUMMARY_FALLBACK: string = '有新的提醒';
+
+/**
+ * 解析一条告警（t200：**只有 `id` 缺失才算致命**）。
+ *
+ * 为什么放宽：用户实测里服务器少给了 `nodes[].node_sn`，`str()` 直接抛错，
+ * 整页只剩「重试」。缺一个字段的正确后果是「这一格显示兜底值」，
+ * 而不是「一条提醒都看不到」——尤其提醒页是出事时才会打开的页面。
+ * 兜底口径：`node_sn`→空串、`type`→`unknown`、`level`→1、`ts`→0、
+ * `status`→`pending`、`summary`→「有新的提醒」、`device_id`/`push_count`→0。
+ */
 export function parseAlertItem(o: JsonObject, path: string): AlertItem {
   return {
     id: num(o, 'id', path),
-    device_id: num(o, 'device_id', path),
-    node_sn: str(o, 'node_sn', path),
-    type: str(o, 'type', path),
-    level: num(o, 'level', path),
-    ts: num(o, 'ts', path),
-    status: str(o, 'status', path),
+    device_id: optNum(o, 'device_id') ?? 0,
+    node_sn: optStr(o, 'node_sn') ?? '',
+    type: optStr(o, 'type') ?? 'unknown',
+    level: optNum(o, 'level') ?? 1,
+    ts: optNum(o, 'ts') ?? 0,
+    status: optStr(o, 'status') ?? 'pending',
     recovered_at: optNum(o, 'recovered_at'),
-    push_count: num(o, 'push_count', path),
+    push_count: optNum(o, 'push_count') ?? 0,
     last_push_at: optNum(o, 'last_push_at'),
     next_push_at: optNum(o, 'next_push_at'),
-    summary: str(o, 'summary', path)
+    summary: optStr(o, 'summary') ?? ALERT_SUMMARY_FALLBACK
   };
+}
+
+/** 列表兜底结果：`degraded=true` 表示「这一屏是缓存，不是最新的」。 */
+export class AlertListFallback {
+  items: AlertItem[] = [];
+  total: number = 0;
+  degraded: boolean = false;
+}
+
+/**
+ * 提醒列表的缓存降级（t200）。
+ *
+ * 为什么要有：整页解析失败/网络断时，用户最需要的是**上一次看到的提醒**，
+ * 而不是一个错误码加「重试」。所以只要拿不到新数据就退回内存里上一次成功的快照，
+ * 并用 `degraded` 让页面挂一条轻提示「暂时取不到最新提醒」。
+ */
+export function withAlertFallback(fresh: AlertItem[], freshTotal: number, errText: string,
+  cached: AlertItem[], cachedTotal: number): AlertListFallback {
+  const out: AlertListFallback = new AlertListFallback();
+  const failed: boolean = errText.length > 0 || fresh.length === 0;
+  if (failed && cached.length > 0) {
+    out.items = cached;
+    out.total = cachedTotal;
+    out.degraded = true;
+    return out;
+  }
+  out.items = fresh;
+  out.total = freshTotal;
+  out.degraded = false;
+  return out;
 }
 
 export function parseAlertList(o: JsonObject): AlertListResult {
@@ -714,9 +756,14 @@ export function parseDispositionItem(o: JsonObject): DispositionItem {
  * 即**平铺**在 data 上（不是嵌套在 alert 里）。
  */
 export function parseAlertDetail(o: JsonObject): AlertDetail {
-  const dispositions: JsonObject[] = objArray(o, 'dispositions', P_DETAIL);
-  const before: JsonObject[] = objArray(o, 'readings_before', P_DETAIL);
-  const after: JsonObject[] = objArray(o, 'readings_after', P_DETAIL);
+  // t200：这三个数组按「缺省 = 空」处理——详情页缺一个数组不该整页变红。
+  // 用「先判键存在再过 objArray」，避免把 JsonArray 直接赋给 JsonObject[]（ArkTS 不做隐式转换）。
+  const dispositions: JsonObject[] = o['dispositions'] === undefined || o['dispositions'] === null
+    ? [] : objArray(o, 'dispositions', P_DETAIL);
+  const before: JsonObject[] = o['readings_before'] === undefined || o['readings_before'] === null
+    ? [] : objArray(o, 'readings_before', P_DETAIL);
+  const after: JsonObject[] = o['readings_after'] === undefined || o['readings_after'] === null
+    ? [] : objArray(o, 'readings_after', P_DETAIL);
   return {
     alert: parseAlertItem(o, P_DETAIL),
     dispositions: dispositions.map((e: JsonObject) => parseDispositionItem(e)),

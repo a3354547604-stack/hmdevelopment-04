@@ -20,7 +20,9 @@ import { UserCopy } from '../common/UserCopy';
 import { AlertRow } from '../components/AlertRow';
 import { SegmentedBar } from '../components/SettingRows';
 import { LoadingView, EmptyView, ErrorView } from '../components/StateViews';
-import { DeviceStatus, NodeItem, AlertItem } from '../model/Types';
+import {
+  AlertItem, AlertListFallback, DeviceStatus, NodeItem, withAlertFallback
+} from '../model/Types';
 import { ServiceHub } from '../service/ServiceHub';
 import { KEY_APP_ACTIVE } from '../service/SessionStore';
 import { ApiResult } from '../model/Result';
@@ -42,6 +44,10 @@ export struct AlertListPage {
   @State refreshing: boolean = false;
   /** 节点 SN → 房间名（提醒行要写「厨房」而不是 `M1`）。 */
   @State rooms: string[] = [];
+  /** 上一次成功拿到的列表（内存缓存，t200）：解析失败/断网时整页退回这一屏。 */
+  @State degraded: boolean = false;
+  private cachedItems: AlertItem[] = [];
+  private cachedTotal: number = 0;
   private vm: AlertListViewModel = new AlertListViewModel();
   private timerId: number = -1;
 
@@ -112,6 +118,10 @@ export struct AlertListPage {
   }
 
   private roomOf(sn: string): string {
+    if (sn.length === 0) {
+      // 服务器没给 node_sn（t200 现场就是这样）：宁可写「网关」，也不留空白
+      return UserCopy.ALERT_NODE_UNKNOWN;
+    }
     for (let i = 0; i < this.rooms.length; i++) {
       const one: string = this.rooms[i];
       const eq: number = one.indexOf('=');
@@ -135,11 +145,17 @@ export struct AlertListPage {
     }
     const next: AlertListState = await this.vm.load(this.deviceId, this.statusOf(this.state.filterIndex));
     next.filterIndex = this.state.filterIndex;
-    // 保留旧数据，只在真的拿到新数据时覆盖——避免一次网络抖动整页变空
-    if (next.errorText.length > 0 && this.state.items.length > 0) {
-      next.items = this.state.items;
-      next.total = this.state.total;
+    // 缓存降级（t200）：拿不到新数据就退回上一次成功的那一屏，并挂一条轻提示，
+    // 绝不把整页换成一个错误码——提醒页是出事时才打开的页面。
+    const kept: AlertListFallback = withAlertFallback(next.items, next.total, next.errorText,
+      this.cachedItems, this.cachedTotal);
+    if (!kept.degraded && next.errorText.length === 0) {
+      this.cachedItems = kept.items;
+      this.cachedTotal = kept.total;
     }
+    this.degraded = kept.degraded;
+    next.items = kept.items;
+    next.total = kept.total;
     this.state = next;
     this.refreshing = false;
     // 本页也维护「未处理总数」：用户可能一进 App 就停在提醒页，
@@ -319,6 +335,15 @@ export struct AlertListPage {
 
   build() {
     Column({ space: 8 }) {
+      if (this.degraded && this.state.items.length > 0) {
+        Text(UserCopy.ALERT_STALE_TIP)
+          .fontSize(AppTheme.FONT_LABEL)
+          .fontColor(AppTheme.COLOR_TEXT_SECONDARY)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+          .padding({ top: 6, bottom: 2 })
+      }
+
       if (!this.state.loading && this.state.errorText.length === 0 && this.state.items.length > 0) {
         Column() {
           this.summaryCard()
@@ -348,8 +373,9 @@ export struct AlertListPage {
 
       if (this.state.loading && this.state.items.length === 0) {
         LoadingView({ hint: UserCopy.LOADING })
-      } else if (this.state.errorText.length > 0) {
-        // 拉取失败时不能落到「没有提醒」的空态：那会让家属以为今天没事
+      } else if (this.state.errorText.length > 0 && this.state.items.length === 0) {
+        // 拉取失败时不能落到「没有提醒」的空态：那会让家属以为今天没事；
+        // 但只要有缓存就照常渲染列表（t200），错误只在顶部那条轻提示里体现
         ErrorView({
           message: this.state.errorText,
           code: this.state.errorCode,

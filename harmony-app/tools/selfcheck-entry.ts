@@ -34,7 +34,8 @@ import { AppConfig } from '../ets/common/AppConfig';
 import { RuntimeConfig } from '../ets/common/RuntimeConfig';
 import { UserCopy } from '../ets/common/UserCopy';
 import {
-  defaultRoomName, isRoomNodeType, onlineRoomCount, roomDisplayName, roomNodes
+  ALERT_SUMMARY_FALLBACK, AlertItem, AlertListFallback, defaultRoomName, isRoomNodeType,
+  onlineRoomCount, roomDisplayName, roomNodes, withAlertFallback
 } from '../ets/model/Types';
 import { KEY_AUTH_SEQ, KEY_USERNAME } from '../ets/service/SessionStore';
 
@@ -792,6 +793,51 @@ class Runner {
     await this.bindCases();
     this.offlineAndHubCases();
     await this.roomNameAndReadingCases();
+    await this.alertResilienceCases();
+  }
+
+  /**
+   * t200：提醒页不能因为一个字段缺失就整页变红。
+   *
+   * 现场那条错误是 `data.items[].alert.node_sn 期望 string，实际 missing`（code -2）。
+   * 判据放在 `parseAlertItem`（缺字段走安全默认）与 `withAlertFallback`（拿不到新数据就退回缓存）。
+   */
+  private async alertResilienceCases(): Promise<void> {
+    // #58 node_sn 缺失/为 null 仍能解析出 1 条（只有 id 缺失才致命）
+    const stub: BindStubTransport = new BindStubTransport();
+    stub.body = '{"code":0,"message":"ok","ts":1793000000000,"data":{"total":1,"items":['
+      + '{"id":21,"device_id":1,"type":"gas","level":2,"ts":1792999999000,'
+      + '"status":"pending","push_count":0}]}}';
+    const apiA: HttpApiService = new HttpApiService('http://127.0.0.1:80/api', stub);
+    const rList: ApiResult<AlertListResult> = await apiA.listAlerts(1, 'all', 50);
+    const one: AlertItem | undefined = rList.data === undefined ? undefined : rList.data.items[0];
+    const ok58: boolean = rList.ok && rList.data !== undefined && rList.data.total === 1
+      && rList.data.items.length === 1 && one !== undefined
+      && one.node_sn === '' && one.summary === ALERT_SUMMARY_FALLBACK
+      && one.level === 2 && one.status === 'pending' && one.ts === 1792999999000;
+    this.cases.push({
+      seq: 58, name: 'node_sn 缺失仍渲染出 1 条提醒（t200）', contract: '§6.13',
+      ok: ok58, code: rList.code, httpStatus: 200,
+      detail: `ok=${rList.ok} total=${rList.data === undefined ? -1 : rList.data.total} `
+        + `items=${rList.data === undefined ? -1 : rList.data.items.length} `
+        + `node_sn=「${one === undefined ? '?' : one.node_sn}」 summary=「${one === undefined ? '?' : one.summary}」`
+    });
+
+    // #59 缓存降级：新数据为空/报错时退回上一次成功的列表，并标 degraded
+    const cached: AlertItem[] = [{
+      id: 21, device_id: 1, node_sn: 'M1', type: 'gas', level: 2, ts: 1792999999000,
+      status: 'pending', push_count: 0, summary: ALERT_SUMMARY_FALLBACK
+    }];
+    const down: AlertListFallback = withAlertFallback([], 0, '响应数据不符合契约', cached, 1);
+    const upOne: AlertListFallback = withAlertFallback(cached, 1, '', cached, 1);
+    const ok59: boolean = down.degraded && down.items.length === 1 && down.total === 1
+      && !upOne.degraded && upOne.items.length === 1;
+    this.cases.push({
+      seq: 59, name: '列表解析失败退回内存缓存并标 degraded（t200）', contract: '§6.13',
+      ok: ok59, code: -2, httpStatus: 200,
+      detail: `失败时 items=${down.items.length} total=${down.total} degraded=${down.degraded}；`
+        + `成功时 degraded=${upOne.degraded} items=${upOne.items.length}`
+    });
   }
 
   /**

@@ -51,6 +51,10 @@ export class UserCopy {
   static readonly SITE_HOME_UNNAMED: string = '我的家';
   /** 某类读数一条都没有时的兜底文案（t197：不显示 `--`）。 */
   static readonly NO_DATA: string = '还没有数据';
+  /** 提醒行拿不到节点 SN 时的兜底（t200）：不留空白。 */
+  static readonly ALERT_NODE_UNKNOWN: string = '网关';
+  /** 缓存降级时的轻提示（t200）：不把整页换成错误码。 */
+  static readonly ALERT_STALE_TIP: string = '暂时取不到最新提醒';
 
   /** 卡片标题：「厨房 · 燃气」——只写「房间」用户看不出这是跌倒雷达还是燃气。 */
   static sensorTitle(room: string, type: string): string {
@@ -279,7 +283,7 @@ export class UserCopy {
       UserCopy.GAS_OK, UserCopy.GAS_HIGH, UserCopy.GAS_VERY_HIGH, UserCopy.DOOR_OPEN,
       UserCopy.DOOR_CLOSED, UserCopy.PRESENCE_YES, UserCopy.PRESENCE_NO, UserCopy.NODE_NORMAL,
       UserCopy.NODE_LOST, UserCopy.ENV_TEMP, UserCopy.ENV_HUMI, UserCopy.NODE_ADD_TITLE,
-      UserCopy.SITE_HOME_UNNAMED, UserCopy.NO_DATA,
+      UserCopy.SITE_HOME_UNNAMED, UserCopy.NO_DATA, UserCopy.ALERT_STALE_TIP, UserCopy.ALERT_NODE_UNKNOWN,
       UserCopy.NODE_TYPE_LABEL, UserCopy.NODE_STATE_LABEL, UserCopy.NODE_SIGNAL_LABEL,
       UserCopy.ADD_NODE_SCANNING, UserCopy.ADD_NODE_EMPTY, UserCopy.ADD_NODE_DONE,
       UserCopy.ALERT_FILTER_ALL, UserCopy.ALERT_FILTER_PENDING, UserCopy.ALERT_EMPTY,
