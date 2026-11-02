@@ -315,12 +315,24 @@ bash tools/build-lock.sh bash tools/gw-build-min.sh
 
 ### 11.4 桌面烧录包同步（装机口径）
 
-`C:\Users\Administrator\Desktop\rk2206-烧录包\` 每次出镜像都要同步这两份：
+`C:\Users\Administrator\Desktop\rk2206-烧录包\` 每次出镜像都要同步：
 
-| 文件 | 说明 |
-|---|---|
-| `gateway-Firmware.img` | RKDevTool 固定加载名，覆盖成最新 |
-| `gateway-Firmware-<TAG>.img` | 带版本号副本，留着回溯/回滚 |
+| 位置 | 内容 | 规矩 |
+|---|---|---|
+| 根目录 `gateway-Firmware.img` | RKDevTool 固定加载名，覆盖成**本次构建** | **根目录只允许有这一个 `.img`**（用户原话：「只放一个镜像，要不然我不知道刷哪个」） |
+| `archive\gateway-Firmware-<TAG>.img` | 带版本号副本，回溯/回滚用 | 历史版本一律进 `archive\`，根目录不留 |
 
-并把 `烧录说明.txt` 的「文件指纹」段改成当次的 `TAG / 构建时间 / md5`，
-再加一句判据：**「首屏横幅不是这个 TAG 就是刷错了」**。
+`ls -1 *.img` 在根目录必须**只有一行**；`ls -1 archive/*.img` 能看到历史版本。
+
+`烧录说明.txt` 首段固定格式（改动时保持这个骨架）：
+
+```
+RK2206 网关烧录（Windows / RKDevTool）— 当前镜像 <TAG>
+根目录只放这一份镜像：gateway-Firmware.img
+  md5 <md5>
+★ 怎么确认板上跑的是这版：复位后首屏横幅必须是
+    [min] ---- RK2206 最小网关启动 <TAG> (<构建日期时间>) ----
+```
+
+并在下面补一句「本版相对上一版改了什么」（只写一句，否则版本号只是数字），
+以及判据：**「首屏横幅不是这个 TAG 就是刷错了」**。
