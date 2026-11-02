@@ -9,9 +9,15 @@
 #
 # 用法：
 #   bash tools/gw-build-min.sh --check     只做主机侧检查（不联网、不构建）
-#                                          ① 主机单测（55 条断言，含 3 条契约 §3.7 真帧）
+#                                          ① 主机单测（58 条断言，含契约 §3.7 真帧与 PUBACK 超时）
 #                                          ② arm-none-eabi-gcc -fsyntax-only 过一遍 5 个 .c
 #   bash tools/build-lock.sh bash tools/gw-build-min.sh     出镜像（2097152 B）
+#
+# 版本号（t194）：脚本**从源码里读** `MIN_IMAGE_TAG`（rk2206-gateway/min/min_gw.h），
+# 不再手抄常量。每次构建产两份：
+#   out/gateway-Firmware.img                      RKDevTool 用的固定名（永远=本次构建）
+#   out/gateway-Firmware-<TAG>-<md5 前 6 位>.img   带版本号，留档用；同名不同 md5 不可能出现
+# 并在结尾打印一行「版本对照：TAG=… BUILD=… md5=… 文件=…」，与开机横幅对得上。
 #
 # 退出码：0 = 全部通过；非 0 = 失败（日志在 rk2206-gateway/out/）
 # =============================================================================
@@ -31,7 +37,16 @@ OBJDIR=/home/openharmony/out/rk2206/lockzhiner-rk2206
 LIB=gateway_min
 FEAT='./t5_min:gateway_min'
 SYM=min_crc16
-ANCHOR='MIN-GW-v0.2-diag'
+# 版本串的**唯一真源**是 min_gw.h 的 MIN_IMAGE_TAG（t194：以前脚本里再抄一份，
+# 手改一处忘另一处就会「镜像里是 v0.2、脚本按 v0.1 断言」→ 刷错版本）。
+TAG="$(sed -n 's/^#define[[:space:]]\{1,\}MIN_IMAGE_TAG[[:space:]]\{1,\}"\([^"]*\)".*/\1/p' \
+        "$ROOT/rk2206-gateway/min/min_gw.h" | head -n 1)"
+[ -n "$TAG" ] || { echo "[gw-build-min] 从 rk2206-gateway/min/min_gw.h 读不到 MIN_IMAGE_TAG" >&2; exit 2; }
+if [ -n "${GW_MIN_TAG:-}" ] && [ "$GW_MIN_TAG" != "$TAG" ]; then
+    echo "[gw-build-min] GW_MIN_TAG=$GW_MIN_TAG 与 min_gw.h 的 $TAG 不一致：改版本请改 min_gw.h" >&2
+    exit 2
+fi
+ANCHOR="$TAG"
 LOGNAME=build-min
 
 CHECK=0
@@ -100,7 +115,23 @@ if [ "$CHECK" = "1" ]; then
         else echo ERR; head -8 /tmp/gw-min/err.txt; fi; done" 2>&1 | tee "$OUT/min-compile-check.log"
     set -e
     grep -q "ERR" "$OUT/min-compile-check.log" && fail "交叉语法检查有文件报错（见 $OUT/min-compile-check.log）"
-    log "--check 通过：主机单测 + 交叉语法检查"
+
+    log "③ 版本串两种写法都能编过（默认宏 / -D 注入）"
+    # t194：min_gw.h 里的 MIN_IMAGE_TAG 用 #ifndef 兜底，所以
+    #   ① 不注入也能单独编过（默认值）；
+    #   ② 需要临时打一版试验镜像时，可以 -DMIN_IMAGE_TAG='"MIN-GW-v9.9-test"' 覆盖。
+    # 这里把两条都真编一遍，避免哪天把 #ifndef 写丢。
+    set +e
+    dv "export PATH=$TOOLCHAIN:\$PATH; cd /tmp/gw-min && \
+        arm-none-eabi-gcc -fsyntax-only -Wall $FLAGS -I/tmp/gw-min min_main.c && echo '   ✓ 默认 MIN_IMAGE_TAG 编过' && \
+        arm-none-eabi-gcc -fsyntax-only -Wall $FLAGS -I/tmp/gw-min \
+            -DMIN_IMAGE_TAG='\"MIN-GW-v9.9-test\"' min_main.c && echo '   ✓ -D 注入 MIN_IMAGE_TAG 也编过'" \
+        2>&1 | tee "$OUT/min-tag-check.log"
+    rc=$?
+    set -e
+    [ "$rc" = "0" ] || fail "版本串自检失败（见 $OUT/min-tag-check.log）"
+
+    log "--check 通过：主机单测 + 交叉语法检查 + 版本串两种写法"
     exit 0
 fi
 
@@ -189,8 +220,17 @@ if [ -f "$img" ]; then
       echo "build_log=$LOGNAME.log"; echo "firmware_img=images/Firmware.img"; echo "firmware_size=$sz";
       echo "liteos_elf_size=$elf"; echo "firmware_sha256=$sha"; echo "firmware_md5=$md5";
       echo "assert_symbol=$SYM"; echo "assert_string=$ANCHOR"; } > "$OUT/$LOGNAME.evidence.txt"
-    cp -f "$img" "$OUT/gateway-Firmware.img"
-    printf '   ✓ 烧录副本 out/gateway-Firmware.img\n'
+    bdate="$(date '+%Y-%m-%d %H:%M:%S')"
+    fixed="$OUT/gateway-Firmware.img"
+    verimg="$OUT/gateway-Firmware-$TAG-${md5:0:6}.img"
+    cp -f "$img" "$fixed"
+    cp -f "$img" "$verimg"
+    printf '   ✓ 烧录副本 out/gateway-Firmware.img（RKDevTool 固定名）\n'
+    printf '   ✓ 带版本号副本 %s\n' "${verimg#"$ROOT"/}"
+    printf '\n   ★ 版本对照：TAG=%s BUILD=%s md5=%s 文件=%s\n\n' \
+        "$TAG" "$bdate" "$md5" "${verimg#"$ROOT"/}"
+    { echo "image_tag=$TAG"; echo "image_build=$bdate"; echo "image_versioned=${verimg#"$ROOT"/}"; } \
+        >> "$OUT/$LOGNAME.evidence.txt"
 else
     bad=1; printf '   ✗ 没有生成 images/Firmware.img\n'
 fi

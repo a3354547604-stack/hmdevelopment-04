@@ -248,3 +248,79 @@ bash tools/gw-build-min.sh --check        # 58 条断言，其中 3 条就是这
 
 `LzUartRead` 一次可能返回两帧以上：`min_parser_pull()` 不喂新字节、只从缓冲里再解一帧，
 `uart_pump()` 会把缓冲里的帧全部取完再回去睡 `MIN_IDLE_MS = 20 ms`（读 0 字节也不忙等）。
+
+## 11. 版本号与产物命名（t194：多次刷机怎么分清哪版）
+
+### 11.1 版本串只有一个真源
+
+版本号写在 `rk2206-gateway/min/min_gw.h` 的 `MIN_IMAGE_TAG`（唯一的 `#define`）。
+**构建脚本从这一行读**，不再另抄一份——t194 之前脚本里写死 `ANCHOR='MIN-GW-v0.2-diag'`，
+手改源码忘改脚本（或反过来）就会出现「镜像里是 v0.2、脚本按 v0.1 断言」，
+本轮就因此把 v0.1 当成 v0.2 刷进了板子。
+
+命名规则：`MIN-GW-v<主>.<次>-<用途>`
+
+| 版本 | 用途 | 备注 |
+|---|---|---|
+| `MIN-GW-v0.1` | 首版（t192） | 四件事跑通 |
+| `MIN-GW-v0.2-diag` | 运行态自证（t193） | 心跳 / 计数 / `!! fatal` / PUBACK 预算 |
+| `MIN-GW-v0.3-ver` | 版本号与产物命名（t194） | 只改构建脚本与版本串，业务逻辑未动 |
+
+**规矩：每次出镜像必须让 `<主>.<次>` 递增，或换用途后缀**；`README` 这张表同步加一行。
+业务代码没动、只重编一遍也要换号（必须能靠版本号区分「哪次构建」）。
+
+两种写法都能编过（`--check` 的第 ③ 步每次都真编一遍验证）：
+
+```c
+#define MIN_IMAGE_TAG "MIN-GW-v0.3-ver"         /* 默认：直接改这一行 */
+```
+
+```bash
+# 临时打一版试验镜像：不改源文件，编译时注入（min_gw.h 里有 #ifndef 兜底）
+arm-none-eabi-gcc ... -DMIN_IMAGE_TAG='"MIN-GW-v9.9-test"' min_main.c
+```
+
+### 11.2 每次构建产两份镜像
+
+```bash
+bash tools/build-lock.sh bash tools/gw-build-min.sh
+```
+
+| 文件 | 用途 |
+|---|---|
+| `rk2206-gateway/out/gateway-Firmware.img` | **RKDevTool 用的固定名**，永远等于本次构建结果 |
+| `rk2206-gateway/out/gateway-Firmware-<TAG>-<md5 前 6 位>.img` | 带版本号留档，例：`gateway-Firmware-MIN-GW-v0.3-ver-4c4b1e.img` |
+
+构建结尾固定打印一行「版本对照」，贴进报告/群里就不用再猜：
+
+```
+★ 版本对照：TAG=MIN-GW-v0.3-ver BUILD=2026-11-02 10:31:07 md5=<32 位> 文件=out/gateway-Firmware-MIN-GW-v0.3-ver-<6 位>.img
+```
+
+> 为什么文件名带 md5 前 6 位：RK2206 镜像**跨次不可复现**（同源两次 md5 不同，只差
+> `__TIME__` 那几个字节），所以「同 TAG 不同构建」必然存在；带上 md5 前缀就不会互相覆盖。
+
+### 11.3 一眼确认板上跑的是哪版
+
+看**开机第一屏横幅**（`min_main.c` 第一行 printf，原样打印 `MIN_IMAGE_TAG`）：
+
+```
+[min] ---- RK2206 最小网关启动 MIN-GW-v0.3-ver (Nov  2 2026 10:31:07) ----
+```
+
+- 横幅里的 `<TAG>` 与 `烧录说明.txt`「文件指纹」里的 TAG **必须一致**；
+- 不一致 = 刷错了镜像（或者板子没复位、还在跑旧固件）；
+- 后面的 `(Nov 2 2026 10:31:07)` 是**编译器写入的构建时间**（`__DATE__ __TIME__`），
+  和构建结尾那行 `BUILD=` 能对上，可以进一步确认不是旧包。
+
+### 11.4 桌面烧录包同步（装机口径）
+
+`C:\Users\Administrator\Desktop\rk2206-烧录包\` 每次出镜像都要同步这两份：
+
+| 文件 | 说明 |
+|---|---|
+| `gateway-Firmware.img` | RKDevTool 固定加载名，覆盖成最新 |
+| `gateway-Firmware-<TAG>.img` | 带版本号副本，留着回溯/回滚 |
+
+并把 `烧录说明.txt` 的「文件指纹」段改成当次的 `TAG / 构建时间 / md5`，
+再加一句判据：**「首屏横幅不是这个 TAG 就是刷错了」**。
