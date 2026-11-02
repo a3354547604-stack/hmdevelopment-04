@@ -35,7 +35,7 @@ import { RuntimeConfig } from '../ets/common/RuntimeConfig';
 import { UserCopy } from '../ets/common/UserCopy';
 import {
   ALERT_SUMMARY_FALLBACK, AlertItem, AlertListFallback, defaultRoomName, isRoomNodeType,
-  onlineRoomCount, roomDisplayName, roomNodes, withAlertFallback
+  onlineRoomCount, parseAlertItem, roomDisplayName, roomNodes, withAlertFallback
 } from '../ets/model/Types';
 import { KEY_AUTH_SEQ, KEY_USERNAME } from '../ets/service/SessionStore';
 
@@ -837,6 +837,30 @@ class Runner {
       ok: ok59, code: -2, httpStatus: 200,
       detail: `失败时 items=${down.items.length} total=${down.total} degraded=${down.degraded}；`
         + `成功时 degraded=${upOne.degraded} items=${upOne.items.length}`
+    });
+
+    // #60 契约 §6.13 的**平铺**样例：房间名要能落到「卧室」（t201）
+    // 夹具就是契约里那段 JSON：items[] 顶层直接是告警对象，没有 alert 包裹
+    stub.body = '{"code":0,"message":"ok","ts":1793000000000,"data":{"total":1,"items":['
+      + '{"id":12,"device_id":1,"node_sn":"M2","type":"fall","level":2,"ts":1792990000000,'
+      + '"status":"pending","push_count":1,"summary":"卧室检测到跌倒"}]}}';
+    const rFlat: ApiResult<AlertListResult> = await apiA.listAlerts(1, 'all', 50);
+    const flat: AlertItem | undefined = rFlat.data === undefined ? undefined : rFlat.data.items[0];
+    const room: string = flat === undefined ? '' : defaultRoomName(flat.node_sn, flat.type);
+    // 历史嵌套形态（item.alert.*）也仍要能读出来，避免回退旧服务器时不显示
+    // 第三个参数 = 允许历史嵌套形态（只列表开；详情必须严格平铺，否则会静默吃下错形状）
+    const nestedItem: AlertItem = parseAlertItem({
+      alert: { id: 13, node_sn: 'M4', type: 'door', level: 1, ts: 1, status: 'pending' }
+    } as JsonObject, 'data.items[]', true);
+    const ok60: boolean = rFlat.ok && flat !== undefined && flat.node_sn === 'M2'
+      && flat.type === 'fall' && flat.summary === '卧室检测到跌倒'
+      && room === '卧室' && nestedItem.node_sn === 'M4' && nestedItem.id === 13;
+    this.cases.push({
+      seq: 60, name: '§6.13 平铺 items[] → 房间名「卧室」（t201）', contract: '§6.13',
+      ok: ok60, code: rFlat.code, httpStatus: 200,
+      detail: `平铺：node_sn=「${flat === undefined ? '?' : flat.node_sn}」 `
+        + `type=${flat === undefined ? '?' : flat.type} → 房间「${room}」；`
+        + `兼容嵌套 alert.*：node_sn=「${nestedItem.node_sn}」 id=${nestedItem.id}`
     });
   }
 

@@ -14,7 +14,7 @@
  */
 
 import {
-  JsonObject, bool, must, num, numMap, objArray, optNum, optStr, str, strArray
+  JsonObject, bool, must, num, numMap, objArray, optNum, optObject, optStr, str, strArray
 } from '../common/JsonUtil';
 
 // ============================================================ §6.3 / §6.4 认证
@@ -460,8 +460,11 @@ export interface HealthResult {
 const P_LOGIN: string = 'data.login';
 const P_DEVICE: string = 'data.items[]';
 const P_STATUS: string = 'data.status';
-const P_ALERT: string = 'data.items[].alert';
-const P_DETAIL: string = 'data.alert';
+// t201：契约 §6.13 / §6.14 的响应是**平铺**的（`items[]` 直接是告警对象，
+// 详情 `data` 直接是告警全字段），曾经的 `data.items[].alert` 只是报错里的
+// 路径标签写错了，会让人误以为解析器在找嵌套（真服务器上永远 undefined）。
+const P_ALERT: string = 'data.items[]';
+const P_DETAIL: string = 'data';
 const P_REPORT: string = 'data.report';
 
 export function parseUser(o: JsonObject): UserInfo {
@@ -686,20 +689,52 @@ export const ALERT_SUMMARY_FALLBACK: string = '有新的提醒';
  * 兜底口径：`node_sn`→空串、`type`→`unknown`、`level`→1、`ts`→0、
  * `status`→`pending`、`summary`→「有新的提醒」、`device_id`/`push_count`→0。
  */
-export function parseAlertItem(o: JsonObject, path: string): AlertItem {
+/** 平铺优先、嵌套兜底的取值器（t201）：顶层没有才去 `alert` 里找，都没有再交给调用方兜底。 */
+function alertStr(o: JsonObject, nested: JsonObject | undefined, key: string): string | undefined {
+  const top: string | undefined = optStr(o, key);
+  if (top !== undefined) {
+    return top;
+  }
+  return nested === undefined ? undefined : optStr(nested, key);
+}
+
+function alertNum(o: JsonObject, nested: JsonObject | undefined, key: string): number | undefined {
+  const top: number | undefined = optNum(o, key);
+  if (top !== undefined) {
+    return top;
+  }
+  return nested === undefined ? undefined : optNum(nested, key);
+}
+
+/**
+ * 解析一条告警（t200/t201）。
+ *
+ * 读取顺序：**顶层字段优先**（契约 §6.13 / §6.14 就是平铺），
+ * 顶层没有才兼容历史嵌套形态 `item.alert.*`，两者都没有才走安全默认。
+ * 只有 `id` 缺失才算致命——少一个字段的正确后果是「这一格显示兜底值」。
+ */
+export function parseAlertItem(o: JsonObject, path: string, allowNested: boolean = false): AlertItem {
+  // 嵌套兼容只给「列表」开（历史服务器曾把告警包在 alert 里）；详情必须严格平铺，
+  // 否则 `{"alert":{…}}` 这种错形状会被静默接受，页面拿到一堆默认值却不报错。
+  const nested: JsonObject | undefined = allowNested ? optObject(o, 'alert', path) : undefined;
+  const id: number | undefined = alertNum(o, nested, 'id');
+  if (id === undefined) {
+    // 没有 id 就点不进详情、也无法处置：这一条是真的不能要
+    num(o, 'id', path);
+  }
   return {
-    id: num(o, 'id', path),
-    device_id: optNum(o, 'device_id') ?? 0,
-    node_sn: optStr(o, 'node_sn') ?? '',
-    type: optStr(o, 'type') ?? 'unknown',
-    level: optNum(o, 'level') ?? 1,
-    ts: optNum(o, 'ts') ?? 0,
-    status: optStr(o, 'status') ?? 'pending',
-    recovered_at: optNum(o, 'recovered_at'),
-    push_count: optNum(o, 'push_count') ?? 0,
-    last_push_at: optNum(o, 'last_push_at'),
-    next_push_at: optNum(o, 'next_push_at'),
-    summary: optStr(o, 'summary') ?? ALERT_SUMMARY_FALLBACK
+    id: id === undefined ? 0 : id,
+    device_id: alertNum(o, nested, 'device_id') ?? 0,
+    node_sn: alertStr(o, nested, 'node_sn') ?? '',
+    type: alertStr(o, nested, 'type') ?? 'unknown',
+    level: alertNum(o, nested, 'level') ?? 1,
+    ts: alertNum(o, nested, 'ts') ?? 0,
+    status: alertStr(o, nested, 'status') ?? 'pending',
+    recovered_at: alertNum(o, nested, 'recovered_at'),
+    push_count: alertNum(o, nested, 'push_count') ?? 0,
+    last_push_at: alertNum(o, nested, 'last_push_at'),
+    next_push_at: alertNum(o, nested, 'next_push_at'),
+    summary: alertStr(o, nested, 'summary') ?? ALERT_SUMMARY_FALLBACK
   };
 }
 
@@ -736,7 +771,8 @@ export function withAlertFallback(fresh: AlertItem[], freshTotal: number, errTex
 export function parseAlertList(o: JsonObject): AlertListResult {
   return {
     total: num(o, 'total', 'data.alerts'),
-    items: objArray(o, 'items', 'data.alerts').map((e: JsonObject) => parseAlertItem(e, P_ALERT))
+    items: objArray(o, 'items', 'data.alerts')
+      .map((e: JsonObject) => parseAlertItem(e, P_ALERT, true))
   };
 }
 
@@ -765,7 +801,7 @@ export function parseAlertDetail(o: JsonObject): AlertDetail {
   const after: JsonObject[] = o['readings_after'] === undefined || o['readings_after'] === null
     ? [] : objArray(o, 'readings_after', P_DETAIL);
   return {
-    alert: parseAlertItem(o, P_DETAIL),
+    alert: parseAlertItem(o, P_DETAIL, false),
     dispositions: dispositions.map((e: JsonObject) => parseDispositionItem(e)),
     readings_before: before.map((e: JsonObject) => parseReadingItem(e)),
     readings_after: after.map((e: JsonObject) => parseReadingItem(e))
