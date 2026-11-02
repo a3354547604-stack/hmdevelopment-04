@@ -58,6 +58,14 @@ static uint32_t g_work_tid;
 static uint32_t s_hb_last;
 static uint32_t s_rx_last;
 
+/* t195：波特率自适应状态与「收不到帧」时的字节证据 */
+static min_baud_probe_t s_baud;
+static uint8_t  s_head[16];     /* 本次试探档位下收到的前 16 字节 */
+static uint32_t s_head_len;
+static uint32_t s_head_last;    /* 上一次打 head 的时刻（每 8 s 一行） */
+static uint32_t s_lock_seq;     /* 锁定那一帧的序号，打在锁定行里 */
+static volatile uint32_t g_baud;/* 当前波特率（诊断/心跳用） */
+
 /* 全局时基：min_iotda.c 的「等 PUBACK 总预算」要用同一个刻度，所以不 static。
  * 用 LOS_TickCountGet（LOS_GetTick 在本 SDK 未声明，t192 踩过）。 */
 uint32_t min_now_ms(void)
@@ -67,14 +75,23 @@ uint32_t min_now_ms(void)
 
 /* ---------------------------------------------------------------- UART */
 
+static int uart_set_baud(uint32_t baud);
+
 static int uart_init(void)
+{
+    return uart_set_baud(MIN_UART_BAUD);
+}
+
+/* t195：按给定波特率重配 UART0。切换档位时 parser 里的残余必须清掉——
+ * 那半截是上一档的乱码，留着只会挡住新档的帧头。 */
+static int uart_set_baud(uint32_t baud)
 {
     UartAttribute attr;
     unsigned int rc;
 
     (void)LzUartDeinit(MIN_UART_ID);
     memset(&attr, 0, sizeof(attr));
-    attr.baudRate = MIN_UART_BAUD;
+    attr.baudRate = baud;
     attr.dataBits = UART_DATA_BIT_8;
     attr.stopBits = UART_STOP_BIT_1;
     attr.parity = UART_PARITY_NONE;
@@ -86,9 +103,12 @@ static int uart_init(void)
     (void)PinctrlSet(GPIO0_PB7, MUX_FUNC2, PULL_KEEP, DRIVE_LEVEL2);
     rc = LzUartInit(MIN_UART_ID, &attr);
     if (rc != LZ_HARDWARE_SUCCESS) {
-        printf("[min] ⚠ UART0 初始化失败 rc=0x%08X\n", (unsigned)rc);
+        printf("[min] ⚠ UART0 初始化失败 baud=%u rc=0x%08X\n", (unsigned)baud, (unsigned)rc);
         return -1;
     }
+    g_baud = baud;
+    min_parser_init(&s_parser);   /* 旧档位的残余字节作废 */
+    s_head_len = 0u;
     return 0;
 }
 
@@ -153,6 +173,27 @@ static void report(uint32_t now)
         s_rx_last = now;
         printf("[min] uart rx=%uB frames=%u\n", (unsigned)g_rx_bytes,
                (unsigned)g_frames);
+    }
+    /*
+     * t195：一帧都没解出来的周期里，每 8 s 给一行字节证据。判读口径：
+     *   head 以 AA 55 开头 → 波特率对了，问题在帧体/CRC；
+     *   head 全是 00 或 FF   → 接线/RX 悬空（对端没在发或接错线）；
+     *   head 是别的乱码     → 波特率不对，看下一行「波特率试探 → …」是否已经切档。
+     */
+    if (g_frames == 0u && (int32_t)(now - s_head_last) >= (int32_t)MIN_HEAD_REPORT_MS) {
+        uint32_t i;
+
+        s_head_last = now;
+        printf("[min] uart head=");
+        if (s_head_len == 0u) {
+            printf("(无字节)");
+        }
+        for (i = 0u; i < s_head_len; i++) {
+            printf("%s%02X", (i == 0u) ? "" : " ", (unsigned)s_head[i]);
+        }
+        printf(" baud=%u crc_err=%u fmt_err=%u drop=%u\n", (unsigned)g_baud,
+               (unsigned)s_parser.crc_err, (unsigned)s_parser.fmt_err,
+               (unsigned)s_parser.drop);
     }
 }
 
@@ -230,6 +271,9 @@ static void handle_frame(const min_frame_t *fr, uint32_t now)
 {
     int prc;
 
+    if (g_frames == 0u) {
+        s_lock_seq = fr->seq;      /* t195：锁定行里报「第一帧的 seq」，便于与汇聚日志对齐 */
+    }
     g_frames++;
     if (s_ctx.st != ST_RUN || fr->type != 0x01u) {
         return;                       /* 0x01 = 节点 JSON 原样（契约 §3.4），别的类型只计数 */
@@ -259,6 +303,19 @@ static void uart_pump(uint32_t now)
 
     if (got > 0u) {
         g_rx_bytes += got;                          /* 每读到字节就累加（t193） */
+        /* t195：还没解出过帧时，留前 16 字节做「像不像 AA55」的证据 */
+        if (g_frames == 0u && s_head_len < sizeof(s_head)) {
+            uint32_t n = (uint32_t)sizeof(s_head) - s_head_len;
+            uint32_t i;
+
+            if (n > got) {
+                n = got;
+            }
+            for (i = 0u; i < n; i++) {
+                s_head[s_head_len + i] = rx[i];
+            }
+            s_head_len += n;
+        }
         have = (min_parser_feed(&s_parser, rx, got, &fr) == 1);
     } else {
         have = (min_parser_pull(&s_parser, &fr) == 1);   /* 缓冲里可能还压着帧 */
@@ -352,9 +409,41 @@ static void state_step(uint32_t now)
     }
 }
 
+/*
+ * t195：波特率试探一步。命中就打「串口锁定」并停止切换；没命中且该换档就先重配串口再打一行。
+ * 放在主循环里而不是单独任务：切档必须与 uart_pump 串行，别让两处同时碰 UART0。
+ */
+static void baud_probe_step(uint32_t now)
+{
+    uint32_t next = 0u;
+    int rc;
+
+    if (s_baud.locked != 0u) {
+        return;
+    }
+    rc = min_baud_probe_step(&s_baud, now, g_frames, g_rx_bytes, &next);
+    if (rc == 2) {
+        /* ASCII 在前、中文在后：`strings` 默认只认 7 位 ASCII，中文锚点用
+         * `strings -e S` 或直接 `grep -a` 镜像才能看到；两个锚点都留，流水线两边都能查。 */
+        printf("[min] baud-lock baud=%u seq=%u（串口锁定 baud=%u 收到首帧 seq=%u）\n",
+               (unsigned)next, (unsigned)s_lock_seq, (unsigned)next, (unsigned)s_lock_seq);
+        return;
+    }
+    if (rc == 1) {
+        printf("[min] baud-probe -> %u（波特率试探 → %u）\n", (unsigned)next,
+               (unsigned)next);
+        if (uart_set_baud(next) != 0) {
+            printf("[min] ⚠ 切档失败，留在 %u\n", (unsigned)g_baud);
+        }
+        s_head_last = now;    /* 新档位重新计 head 证据 */
+    }
+}
+
 static void work_loop(void)
 {
     min_parser_init(&s_parser);
+    min_baud_probe_init(&s_baud, MIN_UART_BAUD);
+    g_baud = MIN_UART_BAUD;
     (void)snprintf(s_ctx.topic_msg, sizeof(s_ctx.topic_msg), "$oc/devices/%s/sys/messages/up",
                    s_cred.device_id);
     s_ctx.fails = 0;
@@ -375,6 +464,7 @@ static void work_loop(void)
             state_step(now);
         }
 
+        baud_probe_step(now);                           /* t195：先看要不要换档，再报态 */
         report(min_now_ms());                           /* ← 无条件：任何分支都不断心跳 */
         LOS_Msleep(MIN_IDLE_MS);                    /* 读 0 字节也不忙等（20 ms 让出） */
     }

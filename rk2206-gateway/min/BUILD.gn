@@ -1,6 +1,6 @@
 # 最小网关固件的 GN 目标（t192）
 #
-# 与 rk2206-gateway/BUILD.gn 的关系：只借 GN 骨架，不借源码。sources 只有 min/ 下的 5 个 .c，
+# 与 rk2206-gateway/BUILD.gn 的关系：只借 GN 骨架，不借源码。sources 只有 min/ 下的 6 个 .c，
 # 没有 paho / cJSON / shell —— MQTT 与 JSON 全是自己写的（见 min_iotda.c 头注释），
 # 所以这里**不** deps paho、**不** 引 MQTTPacket 的 include，任何一条多引都可能把
 # 旧那套的链接期行为再带回来。
@@ -24,6 +24,7 @@ static_library("gateway_min") {
         "min_kv.c",     # Flash 凭证读取（Vendor 两槽 + 0x6FF000 的 256 B 块）
         "min_net.c",    # lz 层 WifiConnect + 默认网卡 + TCP/HTTP 取时
         "min_iotda.c",  # SHA-256/HMAC + clientId + MQTT(CONNECT/PUBLISH/PUBACK/PING)
+        "min_baud.c",   # t195：串口波特率自适应（候选表/5 s 窗口/命中即锁，纯逻辑）
     ]
 
     include_dirs = [

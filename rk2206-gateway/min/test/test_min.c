@@ -405,6 +405,57 @@ static void test_puback_timeout(void)
     (void)close(sv[1]);
 }
 
+/*
+ * t195：波特率自适应纯逻辑。三件事必须可判定：
+ *   ① 候选表遍历 9600 → 115200 → 57600 → 38400 → 回到 9600（全失败不卡在某一档）；
+ *   ② 命中即锁：哪怕只解出一帧也立刻锁定，且此后不再动（否则真断线时会来回跳）；
+ *   ③ 窗口内**一个字节都没有**时不换档（接线/RX 悬空换波特率没有意义）。
+ * 另外验两条口径：窗口必须满 MIN_UART_BAUD_PROBE_MS 才切；rx 涨了才算「有字节」。
+ */
+static void test_baud_probe(void)
+{
+    min_baud_probe_t p;
+    uint32_t next = 0u;
+
+    CHECK(MIN_UART_BAUD_COUNT == 4u, "候选表应为 4 档（9600/115200/57600/38400）");
+    CHECK(min_baud_table[0] == 9600u && min_baud_table[1] == 115200u && min_baud_table[2] == 57600u && min_baud_table[3] == 38400u,
+          "候选表顺序必须是 9600 → 115200 → 57600 → 38400");
+
+    /* ① 遍历：每 5 s 一档，rx 一直在涨、frames 一直是 0 */
+    min_baud_probe_init(&p, MIN_UART_BAUD);
+    CHECK(p.baud == 9600u && p.idx == 0u && p.locked == 0u, "初始化应停在 9600、未锁定");
+
+    CHECK(min_baud_probe_step(&p, 100u, 0u, 100u, &next) == 0, "上电首圈只建窗口，不该立刻切档");
+    CHECK(p.baud == 9600u, "首圈后仍应是 9600");
+
+    CHECK(min_baud_probe_step(&p, 3000u, 0u, 400u, &next) == 0, "窗口未满 5 s 不许切档");
+    CHECK(p.baud == 9600u, "窗口未满时波特率不变");
+
+    CHECK(min_baud_probe_step(&p, 5200u, 0u, 900u, &next) == 1 && next == 115200u, "5 s 后应切到 115200");
+    CHECK(p.baud == 115200u && p.probes == 1u, "切档后当前档位与计数要更新");
+
+    CHECK(min_baud_probe_step(&p, 10300u, 0u, 1800u, &next) == 1 && next == 57600u, "下一轮应切到 57600");
+    CHECK(min_baud_probe_step(&p, 15400u, 0u, 2700u, &next) == 1 && next == 38400u, "再下一轮应切到 38400");
+    CHECK(min_baud_probe_step(&p, 20500u, 0u, 3600u, &next) == 1 && next == 9600u, "全失败后必须回到 9600（循环而非卡死）");
+    CHECK(p.probes == 4u, "四档都试过后切换计数应为 4");
+
+    /* ② 命中即锁：判断依据是「帧数动了」，不是「字节数动了」 */
+    min_baud_probe_init(&p, MIN_UART_BAUD);
+    CHECK(min_baud_probe_step(&p, 100u, 0u, 100u, &next) == 0, "命中前首圈照常只建窗口");
+    CHECK(min_baud_probe_step(&p, 200u, 1u, 300u, &next) == 2 && next == 9600u, "解出首帧应立即锁定当前档");
+    CHECK(p.locked == 1u && p.baud == 9600u, "锁定后要记住锁定的波特率");
+    CHECK(min_baud_probe_step(&p, 60000u, 1u, 99999u, &next) == 0, "锁定后即便长时间没有新帧也不再换档");
+    CHECK(p.baud == 9600u && p.probes == 0u, "锁定后档位与切换计数都不许再变");
+
+    /* ③ 没有字节就不切（区分「波特率错」与「接线错」） */
+    min_baud_probe_init(&p, MIN_UART_BAUD);
+    CHECK(min_baud_probe_step(&p, 100u, 0u, 0u, &next) == 0, "无字节时首圈只建窗口");
+    CHECK(min_baud_probe_step(&p, 9000u, 0u, 0u, &next) == 0, "窗口满但一个字节都没收到：不切档");
+    CHECK(p.baud == 9600u && p.probes == 0u, "无字节时波特率与切换计数都不变");
+    CHECK(min_baud_probe_step(&p, 9100u, 0u, 1u, &next) == 0, "刚收到 1 字节还没满窗口：仍不切");
+    CHECK(min_baud_probe_step(&p, 14200u, 0u, 200u, &next) == 1 && next == 115200u, "有了字节并满窗口才切");
+}
+
 int main(void)
 {
     printf("min 固件主机单测（t192 + t193）\n");
@@ -415,6 +466,7 @@ int main(void)
     test_crypto();
     test_auth_and_shape();
     test_puback_timeout();
+    test_baud_probe();
     printf("通过 %d / 失败 %d\n", g_pass, g_fail);
     return (g_fail == 0) ? 0 : 1;
 }

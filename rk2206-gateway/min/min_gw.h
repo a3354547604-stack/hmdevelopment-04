@@ -22,13 +22,14 @@
  * 版本串（t194 起：**这是唯一真源**，构建脚本从这一行读，不再另抄一份）。
  * 命名规则 `MIN-GW-v<主>.<次>-<用途>`：每次产出必须让 <主>.<次> 递增，或换用途后缀。
  *   历史：v0.1=首版 / v0.2-diag=运行态自证（t193 诊断）/ v0.3-ver=版本号与产物命名（t194）
+ *         v0.4-autobaud=串口波特率自适应（t195）
  * 开机横幅会原样打印它（min_main.c 第一行），所以「板上跑的是哪版」看横幅即可。
  *
  * 也支持构建时注入：`-DMIN_IMAGE_TAG='"MIN-GW-v9.9-test"'`（下面有 #ifndef 兜底，
  * 不注入时默认值照样能单独编过；注入只影响横幅与锚点，不影响业务逻辑）。
  */
 #ifndef MIN_IMAGE_TAG
-#define MIN_IMAGE_TAG       "MIN-GW-v0.3-ver"
+#define MIN_IMAGE_TAG       "MIN-GW-v0.4-autobaud"
 #endif
 #define MIN_LOG_TAG         "min"
 #define MIN_DEVICE_SN       "M0-3F1A2B"            /* 与旧固件 gw_config.h:302 一致：
@@ -49,6 +50,34 @@
 #define MIN_UART_ID         0u
 #define MIN_UART_BAUD       9600u
 
+/*
+ * 波特率自适应（t195）。现场证据：`[min] uart rx` 每 5 s 涨 4–6 KB（≈800–1350 B/s，
+ * 已超 9600 8N1 的理论上限 960 B/s）却 frames=0 ⇒ 对端按 115200 发、本地按 9600 收，
+ * 收到的是乱码。板上那颗汇聚很可能还停在 t23 之前的 115200 镜像，所以固件必须自己试。
+ *
+ * 顺序：先按 MIN_UART_BAUD 收，MIN_UART_BAUD_PROBE_MS 内一帧都没解出来**且有收到字节**
+ * 就换下一档；命中（解出第一帧）即锁死，不再切。有字节没帧才叫波特率不对；
+ * 一个字节都没有通常是接线/RX 悬空，切了也没用，所以那种情况不切、只打 head 证据。
+ */
+#define MIN_UART_BAUD_COUNT     4u
+#define MIN_UART_BAUD_PROBE_MS  5000u
+extern const uint32_t min_baud_table[MIN_UART_BAUD_COUNT];
+
+typedef struct {
+    uint8_t  idx;          /* 当前档位下标（对应 min_baud_table） */
+    uint8_t  locked;       /* 1 = 已收到首帧，锁死不再切 */
+    uint32_t baud;         /* 当前波特率 */
+    uint32_t window_ms;    /* 本档观察起点 */
+    uint32_t rx_base;      /* 本档起点时的累计收到字节 */
+    uint32_t frames_base;  /* 本档起点时的累计解帧数 */
+    uint32_t probes;       /* 已切换次数（诊断用） */
+} min_baud_probe_t;
+
+void min_baud_probe_init(min_baud_probe_t *p, uint32_t start_baud);
+/* 0 = 保持不动；1 = 该换档（*next 为下一档）；2 = 已命中并锁定（*next 为锁定的波特率） */
+int min_baud_probe_step(min_baud_probe_t *p, uint32_t now_ms, uint32_t frames_total,
+                        uint32_t rx_total, uint32_t *next);
+
 /* 帧：AA 55 | VER | TYPE | SEQ(2,LE) | LEN(2,LE) | PAYLOAD | CRC16(2,LE) */
 #define MIN_SOF0            0xAAu
 #define MIN_SOF1            0x55u
@@ -60,6 +89,7 @@
 #define MIN_IDLE_MS         20u      /* 每轮最多睡这么久：LzUartRead 返回 0 也不忙等 */
 #define MIN_HB_MS           5000u    /* 心跳 5 s 一行 [min] alive ... */
 #define MIN_RX_REPORT_MS    8000u    /* UART 计数 8 s 一行 [min] uart rx=... */
+#define MIN_HEAD_REPORT_MS  8000u    /* t195：frames 还是 0 时，8 s 一行 [min] uart head=AA 55 ... */
 #define MIN_STALL_S         20u      /* 守卫任务：主循环 20 s 不前进就报 [min] !! fatal */
 #define MIN_MQTT_RECV_SLICE_MS 1000u /* select 单次等待切片（到点再看总预算，避免一次等死） */
 #define MIN_MQTT_PUB_BUDGET_MS 5000u /* 一次 publish 等 PUBACK 的总预算，超时返回 -2（可重试） */

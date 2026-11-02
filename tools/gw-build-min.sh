@@ -82,7 +82,7 @@ if [ "$CHECK" = "1" ]; then
     log "① 主机单测（gcc -DMIN_HOST_TEST）"
     set +e
     dv "cd /tmp/gw-min && gcc -DMIN_HOST_TEST -I. -std=gnu99 -Wall -Wextra -Werror -O1 \
-        -o /tmp/gw-min/t_min min_proto.c min_kv.c min_iotda.c test/test_min.c" \
+        -o /tmp/gw-min/t_min min_proto.c min_kv.c min_iotda.c min_baud.c test/test_min.c" \
         > "$OUT/min-host-build.log" 2>&1
     rc=$?
     set -e
@@ -109,7 +109,7 @@ if [ "$CHECK" = "1" ]; then
                    再来 --check。宁可要一次分钟级构建，也不要一堆假编译错误。"
     fi
     set +e
-    dv "export PATH=$TOOLCHAIN:\$PATH; cd /tmp/gw-min && for f in min_main.c min_proto.c min_kv.c min_net.c min_iotda.c; do \
+    dv "export PATH=$TOOLCHAIN:\$PATH; cd /tmp/gw-min && for f in min_main.c min_proto.c min_kv.c min_net.c min_iotda.c min_baud.c; do \
         printf '%-14s ' \"\$f\"; \
         if arm-none-eabi-gcc -fsyntax-only -Wall $FLAGS -I/tmp/gw-min \$f 2>/tmp/gw-min/err.txt; then echo OK; \
         else echo ERR; head -8 /tmp/gw-min/err.txt; fi; done" 2>&1 | tee "$OUT/min-compile-check.log"
@@ -161,7 +161,7 @@ mkdir -p "$STAGE"
 cp "$SRC"/*.c "$SRC"/*.h "$STAGE/"
 cp "$SRC/BUILD.gn" "$STAGE/BUILD.gn"
 n_c="$(ls "$STAGE"/*.c | wc -l)"
-[ "$n_c" = "5" ] || fail "暂存目录 .c 数量 $n_c（应为 5）"
+[ "$n_c" = "6" ] || fail "暂存目录 .c 数量 $n_c（应为 6：min_main/min_proto/min_kv/min_net/min_iotda/min_baud）"
 
 log "启用 feature $FEAT"
 if grep -q "^ *\"$FEAT\"," "$SAMPLES_GN"; then
@@ -198,7 +198,7 @@ miss=""
 for src in $(cd "$STAGE" && ls *.c | sed 's/\.c$//'); do
     grep -q "lib$LIB\.$src\.o" "$blog" || miss="$miss $src"
 done
-if [ -z "$miss" ]; then printf '   ✓ 5 个源文件都有编译记录\n'; else bad=1; printf '   ✗ 这些源文件没编到:%s\n' "$miss"; fi
+if [ -z "$miss" ]; then printf '   ✓ %s 个源文件都有编译记录\n' "$(cd "$STAGE" && ls *.c | wc -l | tr -d ' ')"; else bad=1; printf '   ✗ 这些源文件没编到:%s\n' "$miss"; fi
 dv "test -f $OBJDIR/libs/lib$LIB.a" && printf '   ✓ 产物 libs/lib%s.a 存在\n' "$LIB" || { bad=1; printf '   ✗ 产物 libs/lib%s.a 不存在\n' "$LIB"; }
 if dv "export PATH=$TOOLCHAIN:\$PATH; arm-none-eabi-nm $OBJDIR/liteos.elf | grep -qE ' [Tt] $SYM\$'"; then
     printf '   ✓ liteos.elf 含符号 %s（已链进最终镜像）\n' "$SYM"
