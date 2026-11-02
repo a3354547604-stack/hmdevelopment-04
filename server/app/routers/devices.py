@@ -184,6 +184,50 @@ def _offline_properties(properties: dict[str, Any]) -> dict[str, Any]:
     return {**properties, "nodes_online": db.jdump(offline) if isinstance(raw, str) else offline}
 
 
+# §6.7 `nodes[].name` 的兜底表（t198）：现场真机的 `nodes.location` 是 NULL，
+# App 首页房间名只能退回通用「房间」；这里先按 sn、再按 type 给一个人话名字。
+NODE_NAME_BY_SN: dict[str, str] = {
+    "H1": "网关", "M1": "厨房", "M2": "卧室", "M3": "卧室", "M4": "门厅", "M5": "门厅",
+}
+NODE_NAME_BY_TYPE: dict[str, str] = {
+    "hub": "网关", "gas": "厨房", "fall": "卧室", "door": "门厅", "presence": "门厅",
+}
+
+
+def _node_name(row: dict[str, Any]) -> str:
+    """节点显示名：库里的 `location` 优先，其次 sn 映射，再次 type 映射，最后退回 sn。"""
+    return (
+        row.get("location")
+        or NODE_NAME_BY_SN.get(str(row.get("sn")))
+        or NODE_NAME_BY_TYPE.get(str(row.get("type")))
+        or str(row.get("sn") or "")
+    )
+
+
+def _latest_readings(device_id: int) -> dict[str, dict[str, dict[str, Any]]]:
+    """每个节点**每种 type** 的最新一条读数（t198），返回 `{sn: {type: {ts, payload}}}`。
+
+    为什么不是每节点一条 SQL：`nodes` 有好几个节点、每节点又有若干 type，N+1 会把首页首屏
+    拖成十几条往返。这里一次聚合取全：先 `GROUP BY (node_sn,type)` 取最大 `ts_ms`，再回表取那一行。
+    索引：唯一键 `uk_readings(device_id,node_sn,type,ts_ms)` 的最左前缀正好覆盖，无需新增索引。
+    """
+    rows = db.fetch_all(
+        "SELECT r.node_sn, r.type, r.ts_ms, r.payload_json FROM sensor_readings r "
+        "JOIN (SELECT node_sn, type, MAX(ts_ms) AS mts FROM sensor_readings "
+        "      WHERE device_id = :did GROUP BY node_sn, type) g "
+        "  ON g.node_sn = r.node_sn AND g.type = r.type AND g.mts = r.ts_ms "
+        "WHERE r.device_id = :did",
+        {"did": device_id},
+    )
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        out.setdefault(str(row["node_sn"]), {})[str(row["type"])] = {
+            "ts": row["ts_ms"],
+            "payload": db.jload(row["payload_json"], {}) or {},
+        }
+    return out
+
+
 @router.get("/{device_id}/status")
 def device_status(device_id: int, user: CurrentUser) -> dict:
     device = device_context(user, device_id)
@@ -199,6 +243,7 @@ def device_status(device_id: int, user: CurrentUser) -> dict:
         "WHERE device_id = :did ORDER BY id ASC",
         {"did": device_id},
     )
+    latest = _latest_readings(device_id)
     return ok(
         prune_none(
             {
@@ -217,6 +262,11 @@ def device_status(device_id: int, user: CurrentUser) -> dict:
                             # 只增字段不改旧字段，老客户端忽略即可（契约 §6.7 的 type 语义不变）。
                             "kind": "hub" if row["type"] == "hub" else "sensor",
                             "location": row["location"],
+                            # t198：App 首页的房间卡直接消费 name 与 latest——
+                            # 以前 nodes[] 只有 sn/type/online，App 无论怎么写都拿不到温湿度与燃气值，
+                            # 只能显示 `--` 与「正常」。两字段都是**只增不改**，老客户端忽略即可。
+                            "name": _node_name(row),
+                            "latest": latest.get(str(row["sn"])),
                             "online": bool(row["online"]) and is_online,
                             "last_seen": row["last_seen_ms"],
                             "rssi": row["rssi"],

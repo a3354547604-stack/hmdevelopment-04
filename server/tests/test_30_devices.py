@@ -113,8 +113,10 @@ def test_device_status_shape(client, device):
                          "nodes", "pending_alerts", "server_ts"}
     assert [n["sn"] for n in data["nodes"]] == ["H1", "M1", "M2", "M4"]
     assert all({"sn", "type", "kind", "location", "online", "last_seen"} <= set(n) for n in data["nodes"])
-    assert all(set(n) <= {"sn", "type", "kind", "location", "online", "last_seen", "rssi", "battery"}
-               for n in data["nodes"])
+    # t198：`name`（房间显示名，location 为空时按 sn/type 兜底）与 `latest`（每种 type 最新一条）
+    # 是新增字段——只增不改，因此这里把允许集合扩两个键，旧键一个都不许少。
+    assert all(set(n) <= {"sn", "type", "kind", "location", "name", "latest", "online", "last_seen",
+                          "rssi", "battery"} for n in data["nodes"])
     assert data["properties"] == {}          # 还没收到属性上报 → 空对象而不是 null
 
 

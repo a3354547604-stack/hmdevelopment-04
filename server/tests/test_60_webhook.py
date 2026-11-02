@@ -386,3 +386,111 @@ def test_real_iotda_passthrough_message_envelope(client, device):
 
     node = db.fetch_one("SELECT online FROM nodes WHERE device_id = :d AND sn = 'M1'", {"d": device["id"]})
     assert node is not None and int(node["online"]) == 1
+
+
+# --------------------------------------------------------------------------- §6.7 首页数据（t198）
+
+def _node_samples(client, samples: list[dict]) -> dict:
+    ts = now_ms()
+    content = json.dumps(samples)
+    resp = _post(client, _envelope("device.message", GATEWAY_SN, {"services": [{
+        "service_id": "gateway", "name": "node_samples", "id": f"{GATEWAY_SN}-{ts}", "content": content}]}))
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
+def _status(client, device) -> dict:
+    resp = client.get(f"/api/devices/{device['id']}/status",
+                      headers={"Authorization": f"Bearer {device['token']}"})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
+def test_status_nodes_have_name_and_latest(client, device):
+    """首页房间卡的两根支柱：`nodes[].name` 与 `nodes[].latest`（t198）。
+
+    现场症状是 App 只显示 `--` 与「正常」：`nodes[]` 只有 sn/type/online，房间名与最新读数
+    都拿不到。这里锁死「每个节点都有非空 name」与「latest 按 type 给出最新一条 payload」。
+    """
+    ts = now_ms()
+    _node_samples(client, [
+        {"sn": "M1", "ts": ts, "type": "gas", "payload": {"smoke": 630, "co": 2094, "temp": 29.1, "humi": 34.0}},
+        {"sn": "M2", "ts": ts + 1, "type": "fall", "payload": {"fall": 0, "presence": 1, "dist": 2.4}},
+    ])
+    data = _status(client, device)
+    nodes = {n["sn"]: n for n in data["nodes"]}
+    assert all(n.get("name") for n in data["nodes"]), data["nodes"]
+    assert nodes["M1"]["name"] == "厨房" and nodes["M2"]["name"] == "卧室"
+
+    gas = nodes["M1"]["latest"]["gas"]
+    assert gas["payload"]["smoke"] == 630 and gas["payload"]["co"] == 2094
+    assert gas["ts"] == nodes["M1"]["latest"]["gas"]["ts"] and isinstance(gas["ts"], int)
+    assert nodes["M2"]["latest"]["fall"]["payload"]["dist"] == 2.4
+
+
+def test_status_latest_is_newest_per_type(client, device):
+    """`latest` 取的是**每种 type 的最新一条**，不是最早一条、也不是只有最后一批。"""
+    base = now_ms()
+    _node_samples(client, [{"sn": "M1", "ts": base, "type": "gas", "payload": {"smoke": 100}}])
+    # 第二批：同一 type、更晚的 ts（node_samples 两批不同 id，避免幂等吃掉）
+    resp = _post(client, _envelope("device.message", GATEWAY_SN, {"services": [{
+        "service_id": "gateway", "name": "node_samples", "id": f"{GATEWAY_SN}-later",
+        "content": json.dumps([{"sn": "M1", "ts": base + 5000, "type": "gas", "payload": {"smoke": 777}}])}]}))
+    assert resp.status_code == 200
+    latest = {n["sn"]: n for n in _status(client, device)["nodes"]}["M1"]["latest"]
+    assert latest["gas"]["payload"]["smoke"] == 777, latest
+
+
+def test_message_reattributes_sn_type_mismatch(client, device):
+    """网关串台时服务端按 `nodes.type` 纠正：现场 DB 里出现过 `M2 gas`、`M1 fall`（t198）。
+
+    gas 只在 M1、fall 只在 M2（`nodes` 表里各自唯一），所以这种串台能无歧义地改挂；
+    改挂后既不留 `M2 gas` 脏行，也不影响 `latest` 的取值。
+    """
+    ts = now_ms()
+    handled = _node_samples(client, [
+        {"sn": "M2", "ts": ts, "type": "gas", "payload": {"smoke": 640, "co": 2000}},
+        {"sn": "M1", "ts": ts + 1, "type": "fall", "payload": {"fall": 1, "dist": 2.1}},
+    ])
+    assert handled["handled"] == 2
+
+    combos = {(r["node_sn"], r["type"]) for r in db.fetch_all(
+        "SELECT node_sn, type FROM sensor_readings WHERE device_id = :d", {"d": device["id"]})}
+    assert ("M2", "gas") not in combos and ("M1", "fall") not in combos, combos
+    assert ("M1", "gas") in combos and ("M2", "fall") in combos, combos
+
+    nodes = {n["sn"]: n for n in _status(client, device)["nodes"]}
+    assert nodes["M1"]["latest"]["gas"]["payload"]["smoke"] == 640
+    assert nodes["M2"]["latest"]["fall"]["payload"]["fall"] == 1
+
+
+def test_status_frames_downsampled_per_minute(client, device):
+    """同一节点同一分钟的 status 只落 1 行（t198）：真机 status 占了 50%+ 的行。"""
+    ts = now_ms()
+    bucket = ts - ts % 60_000
+    _node_samples(client, [
+        {"sn": "M1", "ts": bucket, "type": "status", "payload": {"uptime_s": 10}},
+        {"sn": "M1", "ts": bucket + 1000, "type": "status", "payload": {"uptime_s": 11}},
+        {"sn": "M1", "ts": bucket + 2000, "type": "status", "payload": {"uptime_s": 12}},
+    ])
+    rows = db.fetch_all("SELECT ts_ms, payload_json FROM sensor_readings "
+                        "WHERE device_id = :d AND node_sn = 'M1' AND type = 'status'", {"d": device["id"]})
+    assert len(rows) == 1, [(r["ts_ms"], db.jload(r["payload_json"])) for r in rows]
+    assert int(rows[0]["ts_ms"]) == bucket
+
+
+def test_node_samples_upserts_missing_nodes(client, user):
+    """`node_samples` 到达就 upsert `nodes`（t198）：没有这步，App 的在线状态永远缺数据。"""
+    device_id = create_device(owner_id=user["id"])
+    from conftest import create_membership
+    create_membership(user["id"], device_id, "owner")
+    assert db.fetch_one("SELECT id FROM nodes WHERE device_id = :d", {"d": device_id}) is None
+
+    ts = now_ms()
+    _post(client, _envelope("device.message", GATEWAY_SN, {"services": [{
+        "service_id": "gateway", "name": "node_samples", "id": f"{GATEWAY_SN}-{ts}",
+        "content": json.dumps([{"sn": "M1", "ts": ts, "type": "gas", "payload": {"smoke": 320}}])}]}))
+
+    node = db.fetch_one("SELECT sn, type, online FROM nodes WHERE device_id = :d AND sn = 'M1'",
+                        {"d": device_id})
+    assert node is not None and node["type"] == "gas" and int(node["online"]) == 1

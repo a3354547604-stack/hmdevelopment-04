@@ -192,6 +192,57 @@ def _node_type(sn: str) -> str:
     return _NODE_TYPES.get((sn or "").split("-")[0], "unknown")
 
 
+# §6.7 的 `latest` 只认「节点自己那几种类型」，这些 type 才是读数：
+# status 是节点自报（uptime/fw），hub 的 status 同理；两者都不参与 sn/type 一致性纠正。
+_STATUS_ONLY_TYPES = {"status"}
+
+
+def _node_type_map(device_id: int) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """库里 `nodes` 的 `{sn: type}` 与反查表 `{type: [sn…]}`（t198）。
+
+    用库里的真实映射而不是硬编码 `_NODE_TYPES`：节点可能是派生板编号（`M1-3FA2`），
+    硬编码只会命中型号前缀；而 `nodes` 表是 upsert 出来的实况。
+    """
+    rows = db.fetch_all("SELECT sn, type FROM nodes WHERE device_id = :did", {"did": device_id})
+    by_sn = {str(r["sn"]): str(r["type"]) for r in rows}
+    by_type: dict[str, list[str]] = {}
+    for sn, node_type in by_sn.items():
+        by_type.setdefault(node_type, []).append(sn)
+    return by_sn, by_type
+
+
+def _reconcile_reading_target(
+    node_sn: str, rtype: str, by_sn: dict[str, str], by_type: dict[str, list[str]]
+) -> tuple[str, str]:
+    """纠正 `sn` 与 `type` 串台（t198）。
+
+    现场库里有 `M2 gas`、`M1 fall` 这种组合：网关聚合时把某一帧挂到了同批另一个节点上。
+    服务端只做**有把握**的纠正——该 type 在 `nodes` 里唯一对应一个节点时才改挂，
+    否则原样入库（宁可留脏数据也不猜）。status 与 hub 不参与（status 谁都能报）。
+    """
+    if rtype in _STATUS_ONLY_TYPES:
+        return node_sn, rtype
+    owner_type = by_sn.get(node_sn)
+    if not owner_type or owner_type == rtype:
+        return node_sn, rtype
+    candidates = by_type.get(rtype) or []
+    if len(candidates) != 1:
+        log.warning("读数 sn/type 不符但不纠正：sn=%s（库中 type=%s）上报 type=%s，候选 %s",
+                    node_sn, owner_type, rtype, candidates)
+        return node_sn, rtype
+    log.warning("读数 sn/type 不符，按节点类型纠正：%s/%s → %s/%s", node_sn, rtype, candidates[0], rtype)
+    return candidates[0], rtype
+
+
+def _status_bucket_ms(ts_ms: int) -> int:
+    """status 帧按分钟对齐（t198）：同一节点每分钟只留 1 行。
+
+    现场 `status` 占了一半以上的行（每节点 16–28 条/分），把真正有用的 gas/fall 挤到分页外面。
+    对齐到分钟边界后，`uk_readings(device,node,type,ts_ms)` 让同分钟后续帧自然被 INSERT IGNORE 吃掉。
+    """
+    return ts_ms - ts_ms % 60_000
+
+
 # --------------------------------------------------------------------------- 三类资源
 
 def handle_property(device: dict[str, Any], body: dict[str, Any]) -> int:
@@ -326,6 +377,8 @@ def handle_message(device: dict[str, Any], body: dict[str, Any]) -> int:
 
     now = now_ms()
     inserted = 0
+    # 节点实况映射取一次（不是每条读数一条 SQL）：用于纠正 sn/type 串台（t198）。
+    by_sn, by_type = _node_type_map(device["id"])
     for index, item in enumerate(items):
         if not isinstance(item, dict) or not item.get("sn"):
             continue
@@ -335,7 +388,11 @@ def handle_message(device: dict[str, Any], body: dict[str, Any]) -> int:
         ts = (now + index) if settings.clock_source == "server" else int(raw_ts or now) + index
         node_sn = str(item["sn"])
         rtype = str(item.get("type") or "status")
+        node_sn, rtype = _reconcile_reading_target(node_sn, rtype, by_sn, by_type)
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        if rtype in _STATUS_ONLY_TYPES:
+            # 每节点每分钟只落 1 条 status（t198）：否则 node_samples 的一半行都是 uptime 快照。
+            ts = _status_bucket_ms(ts)
         if _insert_reading(device["id"], node_sn, rtype, ts, payload):
             inserted += 1
         _update_nodes(
