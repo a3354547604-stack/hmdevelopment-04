@@ -143,6 +143,14 @@
 #define GW_TASK_PRIO_MAIN       25
 #define GW_TASK_PRIO_NET        26          /* 联网最不急：UART/声光必须先跑 */
 #define GW_LOG_TAG              "gw"
+/* t201：现场诊断口径（从 min 版带过来，演示排障要看这三行）
+ *   [gw] alive n=.. up=..s uart=..B frames=.. pub=.. err=..      每 5 s
+ *   [gw] uart head=AA 55 .. baud=.. crc_err=.. fmt_err=.. drop=.. 每 8 s（仅 frames==0）
+ *   [gw] stk used=..B peak=..B / ..B                              每 5 s（可关）
+ * 5 s 是现场判读的节奏：比 10 s 快一倍，又不至于把串口刷满。 */
+#define GW_ALIVE_PERIOD_MS      5000u
+#define GW_UART_HEAD_MS         8000u
+#define GW_STK_REPORT_ENABLE    1
 
 /* 临时诊断：tick 循环分阶段打点（定位"心跳只打一次"）。定位完置 0。 */
 #define GW_TICK_TRACE           1
@@ -155,7 +163,7 @@
 /* 构建脚本的断言锚点（tools/gw-build.sh 到 images/Firmware.img 里 grep 这个整串，
  * 用来证明"从源码编出来的固件里确实有网关代码"，而不是只有 SDK 自带的壳）。
  * 改这个值时要同步 tools/gw-build.sh 的 GW_IMAGE_TAG。 */
-#define GW_IMAGE_TAG            "ELDERCARE-GW-M0-v1.2"
+#define GW_IMAGE_TAG            "ELDERCARE-GW-M0-v1.3"
 
 /* ------------------------------------------------------------------ *
  * 7. 节拍与时序（t4：数值来自契约 §8 与队长 2026-10-17 的取时顺序决策）

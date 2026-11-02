@@ -195,13 +195,28 @@ static void creds_init(void)
 }
 
 /* ============================== 上云发送 ============================== */
+/* t201：alive 行要报「发布成功/失败各多少」。原来的代码只打 rc、不累计，
+ * 现场只能靠数日志行，所以这里包一层统计——调用点语义不变（返回原 rc）。 */
+static uint32_t g_pub_ok;
+static uint32_t g_pub_err;
+
+static int pub_tracked(int rc)
+{
+    if (rc == 0) {
+        g_pub_ok++;
+    } else {
+        g_pub_err++;
+    }
+    return rc;
+}
+
 static void gw_publish_events(const char *json, uint32_t len)
 {
     char topic[128];
 
     gw_iotda_topic_events(topic, sizeof(topic), s_cloud.device_id);
     if (gw_cloud_is_connected(&s_cloud) &&
-        gw_cloud_publish(&s_cloud, topic, json, len) == 0) {
+        pub_tracked(gw_cloud_publish(&s_cloud, topic, json, len)) == 0) {
         return;
     }
     /* 断网：事件是不可重建的，必须落缓存（§4.7）；属性不落缓存，见 gw_cache.h 的理由 */
@@ -216,7 +231,7 @@ static void gw_publish_samples(const char *json, uint32_t len)
 
     gw_iotda_topic_messages(topic, sizeof(topic), s_cloud.device_id);
     if (gw_cloud_is_connected(&s_cloud) &&
-        gw_cloud_publish(&s_cloud, topic, json, len) == 0) {
+        pub_tracked(gw_cloud_publish(&s_cloud, topic, json, len)) == 0) {
         return;
     }
     if (gw_cache_push(&s_cache, GW_CACHE_KIND_SAMPLES, json, (uint16_t)len) != 0) {
@@ -805,7 +820,7 @@ static void gw_report_props(uint32_t now)
     }
     gw_iotda_topic_props(topic, sizeof(topic), s_cloud.device_id);
     if (gw_cloud_is_connected(&s_cloud)) {
-        int prc = gw_cloud_publish_qos(&s_cloud, topic, body, len, GW_MQTT_QOS_PROPS);
+        int prc = pub_tracked(gw_cloud_publish_qos(&s_cloud, topic, body, len, GW_MQTT_QOS_PROPS));
         printf("[%s] 属性上报 rc=%d len=%u qos=%d paho=%d\n", GW_LOG_TAG, prc,
                (unsigned)len, GW_MQTT_QOS_PROPS, s_cloud.client.isconnected);
     }
@@ -853,7 +868,7 @@ static void gw_report_samples(uint32_t now)
     }
     gw_iotda_topic_messages(topic, sizeof(topic), s_cloud.device_id);
     if (gw_cloud_is_connected(&s_cloud)) {
-        if (gw_cloud_publish(&s_cloud, topic, body, len) == 0) {
+        if (pub_tracked(gw_cloud_publish(&s_cloud, topic, body, len)) == 0) {
             s_sample_count = 0;
         }
     } else {
@@ -941,6 +956,20 @@ static uint32_t g_parse_err_suppressed;
 static gw_uart_guard_t s_uart_guard;
 static int      s_boot_reinit_done;
 
+/* t201：现场诊断口径（从 min 版带过来）
+ *   s_head/s_head_len —— 本次「还没解出帧」期间收到的前 16 字节，用来区分
+ *                        波特率错（乱码）/ 接线错（全 00 或全 FF）/ 帧头对但 CRC 错；
+ *   s_baud_probe     —— 自适应波特率状态机（9600→115200→57600→38400→回环）；
+ *   s_baud_locked    —— 命中首帧后锁死，日志里只用来看「确定通了」；
+ *   s_first_seq      —— 锁定时那第一帧的 SEQ，便于和汇聚日志对齐。 */
+static uint8_t  s_head[16];
+static uint32_t s_head_len;
+static uint32_t s_head_last_ms;
+static gw_uart_baud_probe_t s_baud_probe;
+static uint8_t  s_baud_locked;
+static uint16_t s_first_seq;
+static int      s_boot_cond_done;   /* 「首帧前重 init」是否已经做过（只做一次） */
+
 static void uart_task(void *arg)
 {
     uint8_t rx[256];
@@ -955,6 +984,7 @@ static void uart_task(void *arg)
 
     (void)arg;
     gw_uart_guard_init(&s_uart_guard);
+    gw_uart_baud_probe_init(&s_baud_probe, (uint32_t)GW_UART0_BAUD);
     t_start = gw_now_ms();
     for (;;) {
         now = gw_now_ms();
@@ -968,10 +998,32 @@ static void uart_task(void *arg)
             printf("[UART] boot re-init baud=%u rc=%d\n",
                    (unsigned)GW_UART0_BAUD, rc);
         }
+        /* t201：首帧前重 init 的**带证据**版本（与上面 1.5 s 那次不冲突，是第二次机会）。
+         * 判据在 gw_uart_guard.h 的 gw_uart_boot_reinit_due()：满 N 秒 + 收到过字节 + 一帧未解出。
+         * min 版实机证明「重新 init 一次就通」，所以这里把结论固化成可关闭的自动动作。 */
+        if (gw_uart_boot_reinit_due((uint32_t)(now - t_start), g_rx_bytes, g_rx_frames,
+                                    (uint8_t)(s_boot_cond_done != 0)) != 0) {
+            int rc;
+            s_boot_cond_done = 1;
+            rc = gw_plat_uart0_boot_reinit((unsigned int)GW_UART0_BAUD);
+            gw_parser_reset(&s_parser);
+            s_head_len = 0u;
+            printf("[UART] boot re-init baud=%u rc=%d reason=no-frames rx_bytes=%u frames=%u\n",
+                   (unsigned)GW_UART0_BAUD, rc, (unsigned)g_rx_bytes, (unsigned)g_rx_frames);
+        }
         n = gw_plat_uart0_read(rx, sizeof(rx));
         if (n > 0) {
             uint32_t k;
             g_rx_bytes += n;
+            /* t201：还没解出任何帧时，留前 16 字节做「像不像 AA55」的证据（切档/重 init 时清空） */
+            if (g_rx_frames == 0u && s_head_len < sizeof(s_head)) {
+                uint32_t m = (uint32_t)sizeof(s_head) - s_head_len;
+                if (m > n) {
+                    m = n;
+                }
+                memcpy(&s_head[s_head_len], rx, m);
+                s_head_len += m;
+            }
             for (k = 0; k < n; k++) {
                 g_rx_ring[g_rx_w] = rx[k];
                 g_rx_w = (uint8_t)((g_rx_w + 1u) % sizeof(g_rx_ring));
@@ -981,6 +1033,9 @@ static void uart_task(void *arg)
         for (;;) {
             r = gw_parser_poll(&s_parser, &frame, &err);
             if (r == GW_PARSE_FRAME) {
+                if (g_rx_frames == 0u) {
+                    s_first_seq = frame.seq;   /* t201：锁定行要报「第一帧是谁」 */
+                }
                 g_rx_frames++;
                 handle_frame(&frame, now);
                 continue;
@@ -1045,6 +1100,49 @@ static void uart_task(void *arg)
                 }
             }
         }
+        /* t201：自适应波特率。每圈只做几个算术判断，不碰硬件；该换档时才重配串口。
+         * 为什么放在这里而不是单独任务：换档必须与上面的读串口串行，两个任务同时碰 UART0
+         * 会把正在收的半帧撕开（t174 的教训）。 */
+        if (s_baud_locked == 0u) {
+            uint32_t next = 0u;
+            int prc = gw_uart_baud_probe_step(&s_baud_probe, now, g_rx_frames, g_rx_bytes, &next);
+
+            if (prc == 2) {
+                s_baud_locked = 1u;
+                /* ASCII 在前、中文在后：`strings` 默认只认 7 位 ASCII，两个锚点都留 */
+                printf("[UART] baud-lock baud=%u seq=%u（串口锁定 baud=%u 收到首帧 seq=%u）\n",
+                       (unsigned)next, (unsigned)s_first_seq, (unsigned)next,
+                       (unsigned)s_first_seq);
+            } else if (prc == 1) {
+                int rc = gw_plat_uart0_boot_reinit((unsigned int)next);
+                gw_parser_reset(&s_parser);
+                s_head_len = 0u;
+                s_head_last_ms = now;      /* 新档位重新计 head 证据的节奏 */
+                printf("[UART] baud-probe -> %u（波特率试探 → %u）rc=%d probes=%u\n",
+                       (unsigned)next, (unsigned)next, rc, (unsigned)s_baud_probe.probes);
+            }
+        }
+
+        /* t201：一帧都没解出来的周期里，每 8 s 给一行字节证据。判读口径：
+         *   head 以 AA 55 开头 → 波特率对了，问题在帧体/CRC；
+         *   head 全是 00 或 FF   → 接线/RX 悬空（对端没发或接错线）；
+         *   别的乱码           → 波特率不对，看下一行 baud-probe 有没有切档。 */
+        if (g_rx_frames == 0u && (uint32_t)(now - s_head_last_ms) >= GW_UART_HEAD_MS) {
+            uint32_t i;
+
+            s_head_last_ms = now;
+            printf("[%s] uart head=", GW_LOG_TAG);
+            if (s_head_len == 0u) {
+                printf("(无字节)");
+            }
+            for (i = 0u; i < s_head_len; i++) {
+                printf("%s%02X", (i == 0u) ? "" : " ", (unsigned)s_head[i]);
+            }
+            printf(" baud=%u crc_err=%u fmt_err=%u drop=%u\n",
+                   (unsigned)s_baud_probe.baud, (unsigned)s_parser.crc_err,
+                   (unsigned)s_parser.fmt_err, (unsigned)s_parser.overflow);
+        }
+
         LOS_Msleep(GW_UART_POLL_MS);
     }
 }
@@ -1442,7 +1540,7 @@ static void tick_task(void *arg)
          * 心跳紧挨着它打印，就是为了把「循环没转」与「采样函数自己早退」分开：
          *   心跳停在第 N 条        → 循环卡住或任务已死；
          *   心跳一直有、samp 恒 0  → 采样函数提前返回（看 gw_hw.c 的早退条件）。 */
-        if (gw_hb_due(now, &hb_last_ms, GW_HB_PERIOD_MS) != 0) {
+        if (gw_hb_due(now, &hb_last_ms, GW_ALIVE_PERIOD_MS) != 0) {
             uint32_t samp = 0u;
             uint32_t base_done = 0u;
             uint32_t last_mv = 0u;
@@ -1450,9 +1548,28 @@ static void tick_task(void *arg)
             gw_hw_key_stat(&samp, &base_done, &last_mv);
 #endif
             hb_n++;
-            printf("[%s] tick alive n=%u key(samp=%u base_done=%u last=%u mV)\n",
-                   GW_LOG_TAG, (unsigned)hb_n, (unsigned)samp, (unsigned)base_done,
+            /* t201：把 min 版的 alive 口径搬过来（演示排障第一眼就看这一行）：
+             *   n=循环圈数 up=开机秒数 uart=累计字节 frames=累计帧 pub/err=发布成败
+             * 原来那行 `tick alive n=.. key(..)` 的按键采样信息保留在行尾，不丢诊断能力。 */
+            printf("[%s] alive n=%u up=%us uart=%uB frames=%u pub=%u err=%u "
+                   "key(samp=%u base_done=%u last=%u mV)\n",
+                   GW_LOG_TAG, (unsigned)hb_n, (unsigned)(now / 1000u),
+                   (unsigned)g_rx_bytes, (unsigned)g_rx_frames, (unsigned)g_pub_ok,
+                   (unsigned)g_pub_err, (unsigned)samp, (unsigned)base_done,
                    (unsigned)last_mv);
+#if GW_STK_REPORT_ENABLE
+            /* t201：栈峰值。低频、可关；峰值只增不减，能证明「有没有哪次真的贴到边界」。 */
+            {
+                TSK_INFO_S ti;
+
+                memset(&ti, 0, sizeof(ti));
+                if (LOS_TaskInfoGet(LOS_CurTaskIDGet(), &ti) == LOS_OK) {
+                    printf("[%s] stk used=%uB peak=%uB / %uB%s\n", GW_LOG_TAG,
+                           (unsigned)ti.uwCurrUsed, (unsigned)ti.uwPeakUsed,
+                           (unsigned)ti.uwStackSize, (ti.bOvf != 0u) ? " !! 溢出" : "");
+                }
+            }
+#endif
         }
 #if GW_KEY_ENABLE_BOARD
         gw_hw_key_tick(now);
@@ -1923,7 +2040,7 @@ static void on_cmd(void *arg, const char *request_id, const char *command_name, 
         return;
     }
     gw_iotda_topic_cmd_response(topic, sizeof(topic), s_cloud.device_id, request_id);
-    (void)gw_cloud_publish(&s_cloud, topic, resp, resp_len);
+    (void)pub_tracked(gw_cloud_publish(&s_cloud, topic, resp, resp_len));
     printf("[%s] 命令响应 %s(%s) result=%d\n", GW_LOG_TAG, command_name, request_id, result_code);
 }
 

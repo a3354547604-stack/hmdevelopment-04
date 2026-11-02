@@ -65,6 +65,19 @@ int gw_plat_uart0_init(void)
     return gw_plat_uart0_set_baud(GW_UART0_BAUD);
 }
 
+/*
+ * t201：开机那次 LzUartInit 实测不生效（min 版 2026-11-02 实机：rx 一直涨、frames=0、
+ * crc_err/fmt_err 全 0，重新 init 一次立刻 baud-lock seq=1223）。
+ * 这个入口专给「首帧前的重初始化 / 自适应换档」用，语义与串口命令 `uartbaud` 完全一致：
+ * LzUartDeinit → PinctrlSet(RX 上拉) → LzUartInit，所以现场两种修法（固件自动 / 人敲命令）
+ * 走的是同一段代码，不会出现「命令能救、自动逻辑救不了」的分叉。
+ * 返回 0 = 驱动接受了这一档；rc 存在 g_gw_uart_init_rc 里供 uinfo 查。
+ */
+int gw_plat_uart0_boot_reinit(unsigned int baud)
+{
+    return gw_plat_uart0_set_baud(baud);
+}
+
 int gw_plat_uart0_write(const uint8_t *buf, uint32_t len)
 {
     int wr;

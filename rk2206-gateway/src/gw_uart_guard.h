@@ -168,4 +168,159 @@ static inline gw_uart_guard_reason_t gw_uart_guard_step(gw_uart_guard_t *g,
     return reason;
 }
 
+/* ==========================================================================
+ * t201：从 min 版（MIN-GW-v0.4-autobaud）移植过来的两段判定
+ *
+ * 为什么放在这个头里、继续用 static inline：BUILD.gn 是逐文件枚举的，新增 .c 就变成改构建
+ * 清单；这两段都只有几十行纯算术，两个调用方（gw_main.c 的 uart_task / gw_selftest.c）够用。
+ * ========================================================================== */
+
+/* ---------------- ① 首帧前重 init（问题 1） ----------------
+ * min 版实机证据（2026-11-02）：开机后 rx 一直在涨但 frames=0，crc_err/fmt_err 也都是 0；
+ * 把 uart_init() 拆成 uart_set_baud() 并重新 init 一次后立刻 baud-lock seq=1223 ——
+ * 说明波特率本来是对的，是「开机那次 LzUartInit 没真正生效」。
+ *
+ * 所以除了 t174 那条「开机 1.5 s 无条件补一次」之外，再加一条带证据的判定：
+ * 启动满 N 秒时，若**收到过字节**却**一帧都没解出**，说明首帧还没通 → 再补一次。
+ * 没收到字节时不动手（对端还没起来，重 init 只会丢掉正在建立的电平）；已经出帧更不动手。
+ */
+#define GW_UART_BOOT_REINIT_ENABLE  1      /* 0 = 整条逻辑编掉（现象已消失时可关） */
+#define GW_UART_BOOT_NODATA_MS      5000u  /* N：这个时刻做判定（t174 那次是 1.5 s） */
+
+static inline int gw_uart_boot_reinit_due(uint32_t elapsed_ms, uint32_t rx_bytes,
+                                          uint32_t frames, uint8_t done)
+{
+#if GW_UART_BOOT_REINIT_ENABLE
+    if (done != 0u) {
+        return 0;                       /* 已经补过一次，不再重复（重 init 会丢字节） */
+    }
+    if (elapsed_ms < GW_UART_BOOT_NODATA_MS) {
+        return 0;                       /* 时间没到：还没有足够证据 */
+    }
+    if (rx_bytes == 0u) {
+        return 0;                       /* 一个字节都没有：对端没发/接线问题，重 init 没用 */
+    }
+    if (frames != 0u) {
+        return 0;                       /* 已经在出帧：首帧通了，别打断它 */
+    }
+    return 1;
+#else
+    (void)elapsed_ms;
+    (void)rx_bytes;
+    (void)frames;
+    (void)done;
+    return 0;
+#endif
+}
+
+/* ---------------- ② 波特率自适应（问题 2） ----------------
+ * 现场可能出现「网关 9600、板上那颗汇聚还是 t23 之前的 115200 镜像」——纸面一致救不了
+ * 现场不一致。移植 min 版口径：候选表回环试探，换档三条件缺一不切：
+ *   ① 本档观察满 GW_UART_BAUD_PROBE_MS；
+ *   ② 本档一帧都没解出来（frames 未涨）；
+ *   ③ 本档确实收到过字节（rx 涨）—— 没字节是接线/RX 悬空，换档没意义。
+ * 命中（解出首帧）即锁死，此后永不换档（否则对端真断线时会来回跳）。
+ */
+#define GW_UART_BAUD_COUNT      4u
+#define GW_UART_BAUD_PROBE_MS   5000u
+
+/* 顺序：9600（纸面约定）→ 115200（旧汇聚镜像）→ 57600 → 38400 → 回环。
+ * 用函数取而不是全局数组：头文件被两个 TU 包含，数组会产生两份只读副本。 */
+static inline uint32_t gw_uart_baud_at(uint8_t idx)
+{
+    switch (idx % GW_UART_BAUD_COUNT) {
+    case 1u:  return 115200u;
+    case 2u:  return 57600u;
+    case 3u:  return 38400u;
+    default:  return 9600u;
+    }
+}
+
+typedef struct {
+    uint8_t  idx;          /* 当前档位下标 */
+    uint8_t  locked;       /* 1 = 已收到首帧，锁死不再切 */
+    uint32_t baud;         /* 当前波特率 */
+    uint32_t window_ms;    /* 本档观察起点（0 = 还没建窗口） */
+    uint32_t rx_base;      /* 本档起点时的累计字节 */
+    uint32_t frames_base;  /* 本档起点时的累计帧数 */
+    uint32_t probes;       /* 已切换次数（诊断用） */
+} gw_uart_baud_probe_t;
+
+static inline uint8_t gw_uart_baud_index_of(uint32_t baud)
+{
+    uint8_t i;
+
+    for (i = 0u; i < GW_UART_BAUD_COUNT; i++) {
+        if (gw_uart_baud_at(i) == baud) {
+            return i;
+        }
+    }
+    return 0u;   /* 非候选值一律从表头开始，别让下标跑飞 */
+}
+
+static inline void gw_uart_baud_probe_init(gw_uart_baud_probe_t *p, uint32_t start_baud)
+{
+    if (p == NULL) {
+        return;
+    }
+    p->idx = gw_uart_baud_index_of(start_baud);
+    p->locked = 0u;
+    p->baud = gw_uart_baud_at(p->idx);
+    p->window_ms = 0u;
+    p->rx_base = 0u;
+    p->frames_base = 0u;
+    p->probes = 0u;
+}
+
+/* 返回 0 = 保持不动；1 = 该换档（*next 为下一档）；2 = 已命中并锁定（*next 为锁定档）。 */
+static inline int gw_uart_baud_probe_step(gw_uart_baud_probe_t *p, uint32_t now_ms,
+                                          uint32_t frames_total, uint32_t rx_total,
+                                          uint32_t *next)
+{
+    uint32_t elapsed;
+
+    if (p == NULL || next == NULL) {
+        return 0;
+    }
+    if (p->locked != 0u) {
+        return 0;
+    }
+
+    /* ① 命中：帧数动了就锁死（哪怕只解出一帧，也证明这档是对的） */
+    if (frames_total != p->frames_base) {
+        p->locked = 1u;
+        *next = p->baud;
+        return 2;
+    }
+
+    /* 首圈：把当前时刻当窗口起点，避免上电瞬间（now 还是 0）就直接切档 */
+    if (p->window_ms == 0u && now_ms != 0u) {
+        p->window_ms = now_ms;
+        p->rx_base = rx_total;
+        p->frames_base = frames_total;
+        return 0;
+    }
+
+    elapsed = now_ms - p->window_ms;      /* 无符号相减：32 位回绕天然正确 */
+    if (elapsed < GW_UART_BAUD_PROBE_MS) {
+        return 0;
+    }
+
+    if (rx_total == p->rx_base) {
+        /* ②③ 都不满足：这段时间一个字节都没收到 → 不动手，只把窗口前移 */
+        p->window_ms = now_ms;
+        p->frames_base = frames_total;
+        return 0;
+    }
+
+    p->idx = (uint8_t)((p->idx + 1u) % GW_UART_BAUD_COUNT);
+    p->baud = gw_uart_baud_at(p->idx);
+    p->window_ms = now_ms;
+    p->rx_base = rx_total;
+    p->frames_base = frames_total;
+    p->probes++;
+    *next = p->baud;
+    return 1;
+}
+
 #endif /* GW_UART_GUARD_H */

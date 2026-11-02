@@ -3151,6 +3151,78 @@ static void test_timesync_diag(void)
  * 每个反例都刻意让它**只差一个条件**（间隔够了、名额还有），这样把那条判断删掉就必然转红
  * ——否则「被别的条件顺手挡住」的用例是假绿（本文件曾踩到：frames 反例被 min_gap 挡住，
  * 删掉 frames 判断仍 556/0）。 */
+/* t201：两条判定——「首帧前重 init 的触发条件」与「自适应波特率换档三条件 + 锁死」。
+ * 这两条是 min 版实机验证出来的（MIN-GW-v0.4-autobaud），正式版必须同样能断言，
+ * 否则演示现场再遇到「rx 在涨、frames=0」就只能靠人敲命令。 */
+static void test_uart_boot_reinit_due(void)
+{
+    t_start("t201 首帧前重 init：N 秒 / 有字节 / 无帧 / 只做一次 / 可关闭");
+
+    /* ① 时间没到：即便有字节、没帧，也不动手（太早没有证据） */
+    t_ok(gw_uart_boot_reinit_due(0u, 0u, 0u, 0u) == 0, "0 ms 不触发");
+    t_ok(gw_uart_boot_reinit_due(GW_UART_BOOT_NODATA_MS - 1u, 500u, 0u, 0u) == 0,
+         "差 1 ms 到 N 秒不触发（边界往下）");
+    /* ② 满 N 秒 + 收到过字节 + 一帧未解出 → 该重 init（这正是本卡现场症状） */
+    t_ok(gw_uart_boot_reinit_due(GW_UART_BOOT_NODATA_MS, 500u, 0u, 0u) == 1,
+         "满 N 秒 + rx=500 + frames=0 → 触发");
+    /* ③ 一个字节都没有：不触发（对端没发/接线错，重 init 没用） */
+    t_ok(gw_uart_boot_reinit_due(GW_UART_BOOT_NODATA_MS * 2u, 0u, 0u, 0u) == 0,
+         "满 N 秒但一个字节都没收到 → 不触发");
+    /* ④ 已经在出帧：不触发（首帧通了就别打断） */
+    t_ok(gw_uart_boot_reinit_due(GW_UART_BOOT_NODATA_MS * 2u, 900u, 3u, 0u) == 0,
+         "已经在出帧（frames=3）→ 不触发");
+    /* ⑤ 只做一次：done=1 之后永不触发（重 init 会丢字节，不能反复） */
+    t_ok(gw_uart_boot_reinit_due(GW_UART_BOOT_NODATA_MS * 10u, 99999u, 0u, 1u) == 0,
+         "已经重 init 过（done=1）→ 不再触发");
+    t_ok(GW_UART_BOOT_NODATA_MS == 5000u, "N 默认 5 s（卡面口径）");
+}
+
+static void test_uart_baud_probe(void)
+{
+    gw_uart_baud_probe_t p;
+    uint32_t next = 0u;
+
+    t_start("t201 自适应波特率：候选表 / 5 s 窗口 / 无字节不切 / 命中即锁 / 全失败回环");
+
+    /* ① 候选表顺序（现场要按「先试最常见的 115200」这个顺序试） */
+    t_ok(GW_UART_BAUD_COUNT == 4u, "候选 4 档");
+    t_ok(gw_uart_baud_at(0u) == 9600u && gw_uart_baud_at(1u) == 115200u &&
+             gw_uart_baud_at(2u) == 57600u && gw_uart_baud_at(3u) == 38400u,
+         "候选表顺序 9600 → 115200 → 57600 → 38400");
+    t_ok(gw_uart_baud_at(4u) == 9600u, "下标回绕到 0（4 % 4）仍取 9600");
+
+    /* ② 窗口未满不切；满 5 s 且有字节才切 */
+    gw_uart_baud_probe_init(&p, 9600u);
+    t_ok(p.baud == 9600u && p.locked == 0u && p.idx == 0u, "初始化停在 9600、未锁定");
+    t_ok(gw_uart_baud_probe_step(&p, 100u, 0u, 100u, &next) == 0, "首圈只建窗口");
+    t_ok(gw_uart_baud_probe_step(&p, 3000u, 0u, 400u, &next) == 0 && p.baud == 9600u,
+         "未满 5 s 不切档");
+    t_ok(gw_uart_baud_probe_step(&p, 5200u, 0u, 900u, &next) == 1 && next == 115200u,
+         "满 5 s + 有字节 + 无帧 → 切到 115200");
+    t_ok(gw_uart_baud_probe_step(&p, 10300u, 0u, 1800u, &next) == 1 && next == 57600u,
+         "再一轮 → 57600");
+    t_ok(gw_uart_baud_probe_step(&p, 15400u, 0u, 2700u, &next) == 1 && next == 38400u,
+         "再一轮 → 38400");
+    t_ok(gw_uart_baud_probe_step(&p, 20500u, 0u, 3600u, &next) == 1 && next == 9600u,
+         "全失败 → 回到 9600（回环，不卡在最后一档）");
+
+    /* ③ 无字节不切：这是「接线错」与「波特率错」的分界，缺了它现场会看到不停切档 */
+    gw_uart_baud_probe_init(&p, 9600u);
+    (void)gw_uart_baud_probe_step(&p, 100u, 0u, 0u, &next);
+    t_ok(gw_uart_baud_probe_step(&p, 9000u, 0u, 0u, &next) == 0 && p.baud == 9600u &&
+             p.probes == 0u,
+         "满 5 s 但一个字节都没收到 → 不切档");
+
+    /* ④ 命中即锁：帧数动了就锁定，此后永不换档 */
+    gw_uart_baud_probe_init(&p, 9600u);
+    (void)gw_uart_baud_probe_step(&p, 100u, 0u, 100u, &next);
+    t_ok(gw_uart_baud_probe_step(&p, 200u, 1u, 300u, &next) == 2 && next == 9600u,
+         "解出首帧 → 立即锁定当前档（9600）");
+    t_ok(p.locked == 1u && p.baud == 9600u, "锁定后记住档位");
+    t_ok(gw_uart_baud_probe_step(&p, 600000u, 1u, 999999u, &next) == 0 && p.probes == 0u,
+         "锁定后即便 10 分钟没有新帧也不再换档");
+}
+
 static void test_uart_guard(void)
 {
     gw_uart_guard_t g;
@@ -3250,6 +3322,8 @@ int main(void)
     test_net_cmd();                  /* t168 `wifi net`：默认网卡三判据（is_default/probe/无射频） */
     test_timesync_diag();            /* t168 取时：utc_epoch 键名 + errno 符号名 */
     test_uart_guard();               /* t174 UART 自愈：阈值/上限/间隔/回绕 */
+    test_uart_boot_reinit_due();     /* t201 首帧前重 init 的触发条件 */
+    test_uart_baud_probe();          /* t201 自适应波特率：三条件 + 锁死 */
     test_key_events();            /* t138 板载 ADC 按键：基线/去抖/长按/短按/漂移/异常 */
     test_tick_hb();               /* t141 心跳节拍 + 长按状态机（纯逻辑） */
     test_keys_cmd();                 /* t139 `keys` 的 argc 口径：裸 keys 打报告、keys <n> 采样 */
