@@ -1,0 +1,24 @@
+{
+  "resource": "device.message",
+  "event": "report",
+  "event_time": "20261102T025007Z",
+  "event_time_ms": "2026-11-02T02:50:07.357Z",
+  "request_id": "00000000-0000-0000-0000-000000000000",
+  "notify_data": {
+    "header": {
+      "app_id": "__APP_ID__",
+      "device_id": "__DEVICE_ID__",
+      "node_id": "10-dc-b6-91-00-00",
+      "product_id": "__PRODUCT_ID__",
+      "gateway_id": "__DEVICE_ID__"
+    },
+    "body": {
+      "topic": "$oc/devices/__DEVICE_ID__/sys/messages/up",
+      "content": {
+        "name": "node_samples",
+        "id": "__DEVICE_ID__-1793587424000",
+        "content": "[{\"sn\": \"M1\", \"ts\": 1998730, \"type\": \"status\", \"payload\": {\"uptime_s\": 1998, \"rssi\": 0, \"power_src\": \"usb\", \"battery\": 255, \"err_cnt\": 0}, \"seq\": 1842, \"req_id\": 0, \"fw\": \"0.1.0\"}]"
+      }
+    }
+  }
+}

@@ -59,6 +59,37 @@ def _services(body: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
+def _unwrap_passthrough(content: Any, depth: int = 0) -> Any:
+    """拆掉 IoTDA 的**透传信封**，直到露出网关自己发的 payload。
+
+    真机取证（t196，2026-11-02）：平台把 `messages/up` 原样塞在 `notify_data.body.content` 下，
+    于是比 §5.2 多一层包装：
+
+        {"topic": "$oc/devices/{id}/sys/messages/up",
+         "content": {"name": "node_samples", "id": "…-1793587424000", "content": "[{…}]"}}
+
+    外层 `content` 是平台的三件套（`name`/`id`/`content`），不是业务数据；不拆这层，
+    `handle_message` 只看到 dict、既不是 str 也不是 list ⇒ items=[] ⇒ handled=0，
+    而响应仍是 200 —— 10 分钟 111 条 200 却零落库正是这个形状（t196）。
+
+    判定条件刻意保守：必须同时有 `content` 与 `name`，且 `content` 是 str/list 才继续拆，
+    避免把属性上报那种带 `content` 误当信封。
+    """
+    for _ in range(3):
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except ValueError:
+                return content
+        if not (isinstance(content, dict) and "content" in content and "name" in content):
+            return content
+        inner = content["content"]
+        if not isinstance(inner, (str, list, dict)):
+            return content
+        content = inner
+    return content
+
+
 def _properties(body: dict[str, Any]) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for service in _services(body):
@@ -266,7 +297,7 @@ def handle_message(device: dict[str, Any], body: dict[str, Any]) -> int:
     service = services[0]
     topic = service.get("topic")
     if isinstance(topic, str) and topic.endswith(_EVENTS_TOPIC_SUFFIX):
-        payload = service.get("content")
+        payload = _unwrap_passthrough(service.get("content"))
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
@@ -278,7 +309,7 @@ def handle_message(device: dict[str, Any], body: dict[str, Any]) -> int:
         # 事件载荷本身就是 `{"services":[{event_type, paras, …}]}`，直接复用事件分支
         return handle_event(device, payload, None)
 
-    content = service.get("content")
+    content = _unwrap_passthrough(service.get("content"))
     items: list[Any]
     if isinstance(content, str):
         try:

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -343,3 +344,45 @@ def test_sos_source_rejects_malformed_sn(client, device, source):
     assert resp.status_code == 200 and resp.json()["data"]["handled"] == 1
     row = db.fetch_one("SELECT type, node_sn FROM alerts WHERE device_id = :d", {"d": device["id"]})
     assert row["type"] == "sos" and row["node_sn"] is None
+
+
+# --------------------------------------------------------------------------- t196 真机样本
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+
+def _load_real_envelope(device_sn: str) -> dict:
+    """读 t196 在 123.206.99.28 上抓到的真实 webhook 报文（脱敏样本），把占位符换成本测试的设备。"""
+    raw = (FIXTURE_DIR / "iotda_message_node_samples.json").read_text(encoding="utf-8")
+    raw = (raw.replace("__DEVICE_ID__", device_sn)
+              .replace("__PRODUCT_ID__", "test-product-id")
+              .replace("__APP_ID__", "test-app-id"))
+    return json.loads(raw)
+
+
+def test_real_iotda_passthrough_message_envelope(client, device):
+    """真机报文比 §5.2 多一层平台透传信封：`body.content` = {name, id, content}。
+
+    2026-11-02 线上取证（t196）：10 分钟 111 条 `POST /api/iotda/webhook 200`，`sensor_readings`
+    却零新增 —— 平台把 `messages/up` 原样塞进 `notify_data.body.content`，旧的
+    `handle_message` 只看到 dict（既非 str 也非 list）⇒ items=[] ⇒ handled=0，而响应仍是 200。
+    这条用例用**真实报文形状**锁死该回归：必须 handled≥1、且 M1 的 status 行真的落库。
+    """
+    body = _load_real_envelope(str(device["sn"]))
+    resp = _post(client, body)
+    assert resp.status_code == 200
+    summary = resp.json()["data"]
+    assert summary["resource"] == "device.message"
+    assert summary["handled"] == 1, summary
+
+    row = db.fetch_one(
+        "SELECT node_sn, type, payload_json FROM sensor_readings "
+        "WHERE device_id = :d AND node_sn = 'M1' AND type = 'status'",
+        {"d": device["id"]},
+    )
+    assert row is not None, "真机明细没有落库（回到 t196 的零落库状态）"
+    payload = db.jload(row["payload_json"])
+    assert payload["uptime_s"] == 1998 and payload["power_src"] == "usb"
+
+    node = db.fetch_one("SELECT online FROM nodes WHERE device_id = :d AND sn = 'M1'", {"d": device["id"]})
+    assert node is not None and int(node["online"]) == 1
