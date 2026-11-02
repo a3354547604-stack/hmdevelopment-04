@@ -192,19 +192,40 @@ int min_kv_iotda_decode(const uint8_t blk[MIN_KV_BLOCK], min_cred_t *out)
 
 #ifndef MIN_HOST_TEST
 
+/*
+ * t205 修：原实现是「先读探测 3 次、都失败再 FlashInit」。开机第一次读必然是
+ * `[FLASH:E]FlashRead: id 0, controller has NOT been initialized`（现场连打 3 行），
+ * 这 3 次重试毫无信息量。现在改成**先 init、再读**，开机只留一行 [FLASH:I]FlashInit。
+ *
+ * 为什么不能拿 FlashInit 的返回值当判据：反汇编 libhardware.flash.o 的 FlashInit 在
+ * 「已初始化」分支走 `mov.w r8, #1; b fe`（返回 1 = LZ_HARDWARE_FAILURE），
+ * 但控制器其实是好的 —— 所以只把返回值当「本轮是否真的做过一次初始化」的副产品，
+ * 真正的判据是**初始化之后那次 FlashRead 能不能读到**。
+ */
 static int flash_ready(void)
 {
     uint8_t probe[4];
-    int i;
+    static int s_ok;        /* 1 = 已确认可读，后续调用直接短路（省一次 FlashInit） */
+    static int s_tried;
 
-    /* 与旧固件 gw_plat_flash_init() 同口径：先读探测，读通则不重复 FlashInit
-     * （SDK 启动阶段已经初始化过控制器，再调一定返 FAILURE）。 */
-    for (i = 0; i < 3; i++) {
-        if (FlashRead(0u, sizeof(probe), probe) == LZ_HARDWARE_SUCCESS) {
-            return 0;
-        }
+    if (s_ok != 0) {
+        return 0;
     }
-    return (FlashInit() == LZ_HARDWARE_SUCCESS) ? 0 : -1;
+    if (s_tried == 0) {
+        s_tried = 1;
+        (void)FlashInit();
+    }
+    if (FlashRead(0u, sizeof(probe), probe) == LZ_HARDWARE_SUCCESS) {
+        s_ok = 1;
+        return 0;
+    }
+    /* 还是读不通：再 init 一次并重试（覆盖「上电这一拍时钟/SPI 还没就绪」的情形） */
+    (void)FlashInit();
+    if (FlashRead(0u, sizeof(probe), probe) == LZ_HARDWARE_SUCCESS) {
+        s_ok = 1;
+        return 0;
+    }
+    return -1;
 }
 
 int min_kv_save_wifi(const char *ssid, const char *psk)

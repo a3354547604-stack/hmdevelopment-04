@@ -1,24 +1,34 @@
-RK2206 网关烧录（Windows / RKDevTool）— 当前镜像 MIN-GW-v0.5-comms（最小通信验证版）
+RK2206 网关烧录（Windows / RKDevTool）— 当前镜像 MIN-GW-v0.5.1-comms（最小通信验证版·修栈越界）
 根目录只放这一份镜像：gateway-Firmware.img
-  md5 8174a5ff08227646865d57cd49d80bb4
+  md5 259d31277e56361b8d5161ad45541ff7
   体积 2097152 B
-  TAG  MIN-GW-v0.5-comms
-★ 怎么确认板上跑的是这版：复位后首屏横幅必须出现
-    [v05] ---- RK2206 最小通信固件启动 MIN-GW-v0.5-comms (… …) ----
+  TAG  MIN-GW-v0.5.1-comms
 
 ★ 这一版是什么（先说清楚，别按正式版期待）
   只做一条链：连 Wi-Fi → 取时 → 连 IoTDA → 每 10 秒发一条**固定假数据**。
   故意**没有**：UART 读汇聚数据、事件缓存/补发、433、板载键、配网页、规则引擎、告警。
   目的不是演示功能，是**逐级定位**：v1.4 死机前最后一步就是「pub=1 + recovery process 刷屏」，
-  所以先把「联网/取时/上报」和「UART/缓存/433」彻底切开——这一版要是能连跑 10 分钟不死，
+  所以先把「联网/取时/上报」和「UART/缓存/433」彻底切开——这一版能连跑 10 分钟不死，
   就说明通信这条链本身没问题，下一级 v0.6 再加 UART 真实数据。
+  v0.5.1 相对 v0.5 只改两处（都是开机就崩的缺陷，见文末「本版改了什么」）。
 
-★ 怎么确认刷对了
-  复位后第一屏：
-    [v05] ---- RK2206 最小通信固件启动 MIN-GW-v0.5-comms (… …) ----
-    [v05] 本版范围：Wi-Fi + 取时 + IoTDA 假数据（无 UART / 无缓存 / 无 433）
-    [v05] crc16 自检 "123456789" = 0x4B37（应为 0x4B37）
-  第三行对不上（不是 4B37）就是刷错了镜像。
+★ 怎么确认刷对了 —— 刷完复位，开机必须看到这 10 行（顺序不能乱）
+   1  [v05] ---- RK2206 最小通信固件启动 MIN-GW-v0.5.1-comms (… …) ----
+   2  [v05] 本版范围：Wi-Fi + 取时 + IoTDA 假数据（无 UART / 无缓存 / 无 433）
+   3  [v05] KV：Wi-Fi ssid=<热点名> 口令=已读到（不回显）
+   4  [v05] KV：IoTDA <host>:<port> 设备 <device_id>，取时 <host>:<port>
+   5  [v05] crc16 自检 "123456789" = 0x4B37（应为 0x4B37）
+   6  [v05] 逻辑时基=启动时刻；heap 空闲=<数字>B
+   7  [v05] stack guard ok（heap 调用返回、canary 完好；最大局部缓冲 32 B）
+   8  [v05] 串口命令：wifi set|net|show、v05（注册成功）
+   9  [v05] 主任务已启动（栈 12288 B，优先级 24）；心跳 10 s / 假数据 10 s
+  10  [v05] phase=wifi（n=… pub=0 err=0）   ← 之后接 STA 已连接 / 取时成功 / IoTDA 已连接 / pub n=1
+  判读：
+    · 第 5 行不是 4B37              → 镜像刷错了
+    · 看不到第 6/7 行就直接卡死     → 仍是栈/内核问题，把这 10 行整段回传
+    · 第 7 行有、后面断了           → 按「预期日志」继续看 phase 停在哪
+    · 开机又出现多行 [FLASH:E]FlashRead … NOT been initialized → 刷的还是 v0.5 旧镜像
+  断据提醒：**正常开机不应再出现 `[ERR]stack-protector`、也不应出现多行 `[FLASH:E]FlashRead`。**
 
 一、接线与进下载模式
   1. Type-C 插板子丝印 USB_OTG 那个口（不是 UART 口）
@@ -36,7 +46,7 @@ RK2206 网关烧录（Windows / RKDevTool）— 当前镜像 MIN-GW-v0.5-comms�
 四、烧完把 Type-C 换到 UART 口，串口 115200 8N1（先关掉 MobaXterm，它会独占串口）
 
 ★ 刷完就三步
-  1. 刷机 → 复位 → 串口出现上面那三行横幅
+  1. 刷机 → 复位 → 串口出现上面那 10 行
   2. 配 Wi-Fi：串口敲   wifi set <热点名> <密码>
        成功回显： [v05] 已保存 Wi-Fi：ssid=…（口令已写入，不回显）；接着敲 wifi net
        （口令 8~63 字节；只回显 ssid，口令永不回显）
@@ -49,8 +59,8 @@ RK2206 网关烧录（Windows / RKDevTool）— 当前镜像 MIN-GW-v0.5-comms�
      想临时看状态随时敲：  wifi show   （看存了什么、当前 IP）
                           v05         （打一行状态，与 10 s 心跳同一口径）
 
-★ 预期日志（6 行，按顺序出现）
-  1  [v05] ---- RK2206 最小通信固件启动 MIN-GW-v0.5-comms (… …) ----
+★ 预期日志（联网成功后按顺序出现）
+  1  [v05] ---- RK2206 最小通信固件启动 MIN-GW-v0.5.1-comms (… …) ----
   2  [v05] KV：Wi-Fi ssid=<热点名> 口令=已读到（不回显）
   3  [v05] STA 已连接 ssid=<热点名> ip=192.168.137.x
   4  [v05] 取时成功 epoch=<十位数字>
@@ -78,16 +88,27 @@ RK2206 网关烧录（Windows / RKDevTool）— 当前镜像 MIN-GW-v0.5-comms�
   「设备 → 在线调试/消息跟踪」里看到 node_samples 消息。
 
 六、本版记账
-  镜像 TAG     MIN-GW-v0.5-comms（最小通信验证版：只有 Wi-Fi + 取时 + IoTDA 假数据）
-  md5          8174a5ff08227646865d57cd49d80bb4（当次构建；RK2206 镜像跨次不可复现，指纹口径=体积+提交号）
-  体积         2097152 B   （liteos.elf 839672 B）
-  提交号       见仓库本版提交（t204）
-  锚点（可原始字节 grep）  [v05] alive / MIN-GW-v0.5-comms / [v05] pub n= / crc16 自检
-  原始字节 grep 示例      grep -a -c -F '[v05] alive' gateway-Firmware.img   → 1
-                          grep -a -c -F 'MIN-GW-v0.5-comms' gateway-Firmware.img → 1
+  镜像 TAG     MIN-GW-v0.5.1-comms（v0.5 + 修栈越界 + 修 FlashInit 顺序）
+  md5          259d31277e56361b8d5161ad45541ff7（当次构建；RK2206 镜像跨次不可复现，指纹口径=体积+提交号）
+  体积         2097152 B   （liteos.elf 839752 B）
+  提交号       见仓库本版提交（t205）
+  锚点（可原始字节 grep）  [v05] stack guard ok / MIN-GW-v0.5.1-comms / [v05] alive / [v05] pub n= / crc16 自检
+  原始字节 grep 示例      grep -a -c -F '[v05] stack guard ok' gateway-Firmware.img    → 1
+                          grep -a -c -F 'MIN-GW-v0.5.1-comms' gateway-Firmware.img  → 1
                           （中文锚点必须用 grep -a；GNU strings 只输出 7 位 ASCII，会把中文整行拆掉）
+
+  本版改了什么  ① 修 v0.5 开机崩：min_free_heap() 的局部结构体只有 20 B（5×u32），而内核
+                   LOS_MemInfoGet 第一句就按 sizeof(LOS_MEM_POOL_STATUS)=24 B（LOSCFG_MEM_WATERLINE=1
+                   时 6×u32）无条件 memset_s 清零调用者缓冲 → 4 B 写穿栈帧 → canary 校验失败 →
+                   [ERR]stack-protector: Kernel stack is corrupted。已改成 32 B 结构体 + 编译期断言。
+                 ② 修 Flash 顺序：所有 KV 读之前先 FlashInit 再读，开机不再连打 3 行
+                   [FLASH:E]FlashRead: controller has NOT been initialized。
+                 ③ 新增开机自证第 7 行 `[v05] stack guard ok（…最大局部缓冲 32 B）`：
+                   能打出来就说明 heap 那次调用返回时 canary 完好。
+
   已知限制      · 没有 UART：这一版**不读汇聚数据、不上报真实传感器值**（假数据每 10 s 一条）
                 · 没有事件缓存与补发：断网期间的数据直接丢（正式版才有）
                 · 没有 433 / 板载键 / 配网页 / 规则告警
                 · 只验证通信链路，不用于演示；演示/验收用正式版（ELDERCARE-GW-M0-v1.4 及以后）
-  回滚          archive/gateway-Firmware-ELDERCARE-GW-M0-v1.4.img（上一版正式版）
+  回滚          archive/gateway-Firmware-MIN-GW-v0.5-comms.img（上一版验证固件）
+                archive/gateway-Firmware-ELDERCARE-GW-M0-v1.4.img（上一版正式版）

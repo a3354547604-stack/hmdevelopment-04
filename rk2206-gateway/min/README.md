@@ -497,3 +497,38 @@ strings rk2206-gateway/out/gateway-Firmware.img | grep -aF 'baud-lock'
 **另外**：`shell.h`（`osCmdReg`）的 include 目录 `//kernel/liteos_m/components/shell/include`
 不是 board 默认路径，`min/BUILD.gn` 里单独加了一条；新增 `.c` 会撞上构建脚本「必须 6 个 .c」的断言，
 所以串口命令折进 `min_main.c`，没有单独成文件。
+
+### 13.1 t205：v0.5 开机即崩的两个根因与改法
+
+实机 v0.5 日志（截到崩点）：
+```
+[v05] crc16 自检 "123456789" = 0x4B37（应为 0x4B37）
+[ERR]stack-protector: Kernel stack is corrupted in: 0x38112ddc
+```
+
+**根因 1（真凶）：`min_main.c: min_free_heap()` 的局部结构体比内核写的少 4 字节。**
+- 当时声明：`typedef struct { uint32_t totalUsedSize, totalFreeSize, maxFreeNodeSize, usedNodeNum, freeNodeNum; } min_mem_pool_st_t;` = **20 B**。
+- 内核侧：`LOSCFG_MEM_WATERLINE = 1`（`kernel/liteos_m/kernel/include/los_config.h:529-530`）⇒ `LOS_MEM_POOL_STATUS` 是 **6×u32 = 24 B**（末尾多 `usageWaterLine`）。
+- `kernel/liteos_m/kernel/src/mm/los_memory.c` 的 `LOS_MemInfoGet()` 第一句：
+  `(VOID)memset_s(poolStatus, sizeof(LOS_MEM_POOL_STATUS), 0, sizeof(LOS_MEM_POOL_STATUS));`
+  —— 它按 **24 B** 无条件清零调用者缓冲 ⇒ 写穿本函数栈帧 4 B ⇒ 函数返回时 canary 校验失败 ⇒ 内核打
+  `stack-protector: Kernel stack is corrupted`。崩溃位置也吻合：这条语句紧在 `crc16 自检` 那行之后
+  （下一条 printf 的参数就是 `min_free_heap()`，所以「逻辑时基…heap」那行永远打不出来）。
+- 改法：结构体补 `usageWaterLine` + `pad[2]`（共 **32 B**），并加编译期兜底
+  `typedef char min_pool_st_size_check[(sizeof(...) >= 24u && <= 64u) ? 1 : -1];`，谁再删字段就编不过。
+
+**根因 2（噪音/误导）：KV 读早于 `FlashInit`。**
+- 原 `flash_ready()` 是「先读探测 3 次，全失败再 `FlashInit`」⇒ 开机必然连打 3 行
+  `[FLASH:E]FlashRead: id 0, controller has NOT been initialized`，而那 3 次重试不提供任何信息。
+- 改法：**先 `FlashInit` 再读**；`FlashInit` 的返回值不可当判据（反汇编 `libhardware.flash.o` 的
+  `FlashInit` 在「已初始化」分支返回 1 = FAILURE，但控制器其实是好的），真正的判据是初始化后那次
+  `FlashRead` 是否成功；确认成功后用 `static` 标志短路，后续 KV 读不再重复 init。
+
+**自证行**：`[v05] stack guard ok（heap 调用返回、canary 完好；最大局部缓冲 32 B）` 紧跟在 heap 那行之后，
+能打出来就说明这次 `min_free_heap()` 返回时栈帧完好。
+
+**顺带核对过、确认没问题的**（避免下次再怀疑错地方）：`min_kv_wifi_encode()` 的 `hdr[63]` 里
+`memcpy(&hdr[4], ssid, sn)` 最大写到下标 35；`pskbuf[63]` 的 `sk ≤ 63`；`min_kv_load_wifi()` 的
+`hdr[63]/psk[63]`；`min_wifi_t.ssid[33]` 的 `out->ssid[32]='\0'`；`min_cred_t.device_id[64]` 装 47 字符
+（打印设备 ID 全程用 `printf("%s")`，没有中转小缓冲；真正落地的只有 `s_ctx.user[64]` 与
+`s_ctx.client_id[128]`，都是 `snprintf` 截断写）。

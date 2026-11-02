@@ -29,7 +29,7 @@
  * 不注入时默认值照样能单独编过；注入只影响横幅与锚点，不影响业务逻辑）。
  */
 #ifndef MIN_IMAGE_TAG
-#define MIN_IMAGE_TAG       "MIN-GW-v0.5-comms"
+#define MIN_IMAGE_TAG       "MIN-GW-v0.5.1-comms"
 #endif
 #define MIN_LOG_TAG         "min"
 #define MIN_DEVICE_SN       "M0-3F1A2B"            /* 与旧固件 gw_config.h:302 一致：

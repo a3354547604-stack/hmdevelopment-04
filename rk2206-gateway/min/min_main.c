@@ -88,13 +88,30 @@ static void phase_set(const char *name)
  * 再定义一次 → 交叉编译在 -Werror 下直接报错（t204 实测）。内核接口字段是 ABI 固定的，
  * 就地声明比调头文件顺序更稳（`los_memory.h:170-177` 的 LOS_MEM_POOL_STATUS）。
  */
+/*
+ * t205 现场事故回写：这里原来是 5 个 u32 = 20 B，而 SDK 的 LOS_MEM_POOL_STATUS
+ * 在 LOSCFG_MEM_WATERLINE=1（los_config.h:529-530）时有 **6** 个 u32 = 24 B，
+ * 且 los_memory.c 的 LOS_MemInfoGet 第一句就是
+ *     memset_s(poolStatus, sizeof(LOS_MEM_POOL_STATUS), 0, sizeof(LOS_MEM_POOL_STATUS));
+ * —— 它按 24 B 无条件清零调用者的缓冲。于是 4 个字节写穿了本函数的栈帧，
+ * 函数返回时 canary 校验失败 → `[ERR]stack-protector: Kernel stack is corrupted`，
+ * 位置正好在 crc16 自检那行之后（下一条语句就是 heap 打印）。
+ * 改法：按最坏情况留 32 B（6 个字段 + 8 B 余量），以后 SDK 再加统计字段也不会越界。
+ */
 typedef struct {
     uint32_t totalUsedSize;
     uint32_t totalFreeSize;
     uint32_t maxFreeNodeSize;
     uint32_t usedNodeNum;
     uint32_t freeNodeNum;
+    uint32_t usageWaterLine;   /* LOSCFG_MEM_WATERLINE=1 时内核会写这一格 */
+    uint32_t pad[2];           /* 防御余量：宁可多 8 B，也不要再一次写穿栈 */
 } min_mem_pool_st_t;
+
+/* 编译期兜底（-std=c99 没有 _Static_assert）：内核按 sizeof(LOS_MEM_POOL_STATUS)=24 B 清零，
+ * 缓冲小于它就会把 canary 写坏。谁再删字段，这行直接编译失败。 */
+typedef char min_pool_st_size_check[((sizeof(min_mem_pool_st_t) >= 24u) &&
+                                     (sizeof(min_mem_pool_st_t) <= 64u)) ? 1 : -1];
 
 extern unsigned char *m_aucSysMem0;                                  /* los_config.h:423 */
 extern unsigned int  LOS_MemInfoGet(void *pool, min_mem_pool_st_t *st);
@@ -576,6 +593,13 @@ static void min_entry(void)
     printf("[v05] crc16 自检 \"123456789\" = 0x%04X（应为 0x4B37）\n",
            (unsigned)min_crc16((const uint8_t *)"123456789", 9u));
     printf("[v05] 逻辑时基=启动时刻；heap 空闲=%uB\n", (unsigned)min_free_heap());
+    /*
+     * t205 自证行：上面 min_free_heap() 是本轮越界的唯一现场（20 B 缓冲被内核按 24 B 清零）。
+     * 这一行放在它之后，能打出来就说明这一次调用返回时 canary 仍然完好；再顺手把
+     * 栈帧里几块大缓冲的尺寸打出来，日后谁再改结构体一眼能对账。
+     */
+    printf("[v05] stack guard ok（heap 调用返回、canary 完好；最大局部缓冲 %u B）\n",
+           (unsigned)sizeof(min_mem_pool_st_t));
     (void)min_shell_register();
 
     /* 守卫任务先起：主任务万一在 SDK 里卡死，它还能喊话 */
