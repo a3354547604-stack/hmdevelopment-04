@@ -663,3 +663,99 @@ v1.4 用 `PinctrlSet(RX, MUX_FUNC2, PULL_UP, DRIVE_LEVEL2)` / `PinctrlSet(TX, MU
   `uart re-init @`、`uart no-frame 5s` 各命中
 - `bash tools/gw-build-min.sh --check`：主机单测 **91/0**，6 个 .c 交叉语法全 OK
 - 判据不变：10 分钟 alive 不断 / `frames` 涨 / `pub` 与 `frames` 同步 / `err=0` / 服务器 webhook 同步涨
+
+## 16. v0.7-rule：本地规则与告警事件（t208）
+
+这一版在 v0.6.1 的「UART 真实数据 → device.message」之上，只加了**本地规则评估 + 告警事件上报**；
+仍然没有缓存补发、没有 433、没有板载键、没有配网页（卡面边界）。
+
+### 16.1 判据来源：一条都没另创
+
+| 规则 | 出处（`docs/技术/接口契约.md`） | 实现的常量（`min_rule.h`） |
+|---|---|---|
+| 燃气一级 | §8.2（:1356-1382）`gas_t1_mv` 默认 1500 mV，连续 `gas_l1_hold_s`=10 s | `MIN_GAS_T1_MV` / `MIN_GAS_L1_HOLD_MS` |
+| 燃气二级 | §8.2 同上：`gas_t2_mv` 默认 2500 mV 连续 6 s，**或**一级滞留 `gas_l1_to_l2_s`=60 s | `MIN_GAS_T2_MV` / `MIN_GAS_L2_HOLD_MS` / `MIN_GAS_L1_TO_L2_MS` |
+| 燃气恢复 | §8.2：全部 < `gas_t1_mv - gas_recover_mv`（1500−200=1300 mV）连续 30 s | `MIN_GAS_RECOVER_MV` / `MIN_GAS_RECOVER_MS` |
+| 跌倒进入 | §8.4（:1398-1430）：`fall=1` **立即**进 ALARM，链路不加延时 | `MIN_FALL_ZERO_K` 无关，直接 enter |
+| 跌倒退出 | §8.4：**同时**满足 K=3 次 `fall=0` 且距最后一次触发 ≥ `T_hold`=30 s | `MIN_FALL_ZERO_K` / `MIN_FALL_HOLD_MS` |
+| 告警抑制 | §8.8 抑制窗；P0 统一 60 s / 同 `(type, node_sn)`，级别升级立刻放行 | `MIN_DEDUP_WINDOW_MS` / `MIN_DEDUP_SLOTS` |
+
+代码是 `src/gw_rules.c` 的**逐段移植**，不是重新设计：
+
+| 正式固件 | min 固件 | 差异 |
+|---|---|---|
+| `gw_gas_feed()`（`src/gw_rules.c:32-106`） | `min_gas_feed()` | 无（阈值/回差/三条升级路径/恢复条件逐条照抄） |
+| `gw_fall_feed()`（`:108-127`） | `min_fall_feed()` | 无（K=3 + 30 s 双条件） |
+| `gw_dedup_feed()`（`:283-336`） | `min_dedup_allow()` | 只把「按 type 分档窗」简化为统一 60 s（P0 只有 gas/fall 两类，档位本来就都是 60 s） |
+
+> **没有 L3**：契约 §8.2 只有 `正常(0) / 预警(1) / 报警(2)` 三态，没有第三级阈值；
+> 卡面里写的 `gas_l1_mv/gas_l2_mv/gas_l3_mv` 是口语别名，契约 §6.9 注（:735）明确
+> 「`gas_l1`/`gas_l2` → `gas_t1_mv`/`gas_t2_mv`」，`gas_l3_mv` 在契约里不存在。
+> 所以 `level` 只发 **1 / 2**，跌倒固定 `level=2`（§4.4 规定 alert 的 level 只能是 1 或 2）。
+
+### 16.2 为什么规则代码写在 `min_iotda.c` 里，而不是新建 `min_rule.c`
+
+`tools/gw-build-min.sh:164` 有一条硬断言：**暂存目录里的 `.c` 数量必须等于 6**
+（`min_main/min_proto/min_kv/min_net/min_iotda/min_baud`），主机单测（:85）与交叉语法检查（:112）
+也都是逐文件枚举。而 `tools/` 不在 t208 的 inScope（卡面只给 `rk2206-gateway/min/`、`out/`、`烧录说明.txt`）。
+所以：**公开接口放 `min_rule.h`（纯头文件），实现追加在 `min_iotda.c` 末尾的「本地规则」段**，
+`BUILD.gn` 保持 6 个源文件不变。这既没动 UART 解帧逻辑（`min_proto.c` 一行未改），也不用去改构建脚本。
+
+### 16.3 事件报文（契约 §4.4，走 `sys/events/up`，**不是** device.message）
+
+topic：`$oc/devices/{device_id}/sys/events/up`
+
+燃气升二级（`snapshot` 是原帧 `payload` 对象的原样切片）：
+
+```json
+{"services":[{"service_id":"alert","event_type":"alert","paras":{"type":"gas","level":2,"node_sn":"M1","ts":1792243323000,"event_id":"M0-3F1A2B-gas-1792243323000","snapshot":{"smoke":640,"temp":24.5,"humi":56.2}}}]}
+```
+
+跌倒（`level` 固定 2）：
+
+```json
+{"services":[{"service_id":"alert","event_type":"alert","paras":{"type":"fall","level":2,"node_sn":"M2","ts":1792243500000,"event_id":"M0-3F1A2B-fall-1792243500000","snapshot":{"fall":1,"src":"uart"}}}]}
+```
+
+恢复（`recover` 没有 `level`；`event_id` 用 `-rc-` 后缀与告警区分，避免服务器把恢复当成同一条告警去重）：
+
+```json
+{"services":[{"service_id":"alert","event_type":"recover","paras":{"type":"gas","node_sn":"M1","ts":1792243700000,"event_id":"M0-3F1A2B-gas-rc-1792243700000"}}]}
+```
+
+`event_id` 格式照 §4.4：`{gateway_sn}-{type}-{ts}`，网关 SN 用 `MIN_DEVICE_SN`（`M0-3F1A2B`）。
+服务器 `server/app/services/telemetry.py` 的 `handle_event()` 按 `event_id` 幂等，
+`event_type=alert` 才 `alerts.raise_alert()`，`recover` 走 `mark_recovered()` —— 两边字段逐字对齐。
+
+### 16.4 日志怎么读
+
+| 日志行 | 含义 |
+|---|---|
+| `[v07] rule gas level=2 sn=M1 smoke=640` | 规则命中（本地判定），括号里是触发时的 **mV 原值** |
+| `[v07] rule gas recover sn=M1 smoke=120` | 燃气回落满 30 s，清状态并准备发 recover |
+| `[v07] rule fall level=2 sn=M2 fall=1` | 跌倒进入 ALARM |
+| `[v07] rule gas level=1 sn=M1 抑制（60 s 窗内重复，累计抑制 N 次）` | 判定成立但被 §8.8 抑制窗挡下（**不是**没规则） |
+| `[v07] event pub ok seq=12 type=gas level=2 sn=M1 len=213` | 事件已发且收到 PUBACK（`seq` = 触发它的那帧序号） |
+| `[v07] alive … rules=3 events=3 ev_suppress=0` | `rules` = 规则命中次数，`events` = 事件成功发布数，`ev_suppress` = 被抑制次数 |
+
+判读口径：`rules` 涨而 `events` 不涨且 `ev_suppress` 涨 ⇒ 规则在跑、只是去重挡了；
+`rules` 涨但 `events` 与 `ev_suppress` 都不涨 ⇒ 卡在 `event pub`（看 `⚠` 行）。
+
+### 16.5 现场怎么确认告警真的落库
+
+1. 制造一次燃气：对着 MQ-2 哈气或靠近酒精棉 → `[v07] rule gas level=1 …`（10 s 后）；
+   继续靠近会升二级 `level=2`（风险：烟雾浓度太高会同时顶到 T2）。
+2. 手机上 `GET /api/alerts?device_id=<你的设备>&type=gas&limit=20`，应看到最新一条
+   `type=gas`、`level=2`、`node_sn=M1`、`snapshot` 里有当时的 `smoke`。
+3. 跌倒也同理：等 M2 的 `fall=1`（或人站到雷达下触发），`/api/alerts?type=fall` 出现记录，
+   App 提醒页可见；随后 `fall=0` 连续 3 次且 ≥30 s 会来一条 `recover`，那一条**不新增告警**，
+   而是把已有告警标记为已恢复。
+
+### 16.6 已知限制（这一版仍然不做）
+
+- **阈值没有标定**：1500/2500 mV 是契约里的**结构默认值**，不是 CAL-02 标定值（§8.2 注）。
+  现场可能「哈气就报」或「必须很近才报」，这是阈值问题、不是规则问题。
+- **没有缓存补发**：没连上时事件直接丢（日志打 `⚠ 事件 … 未连上，丢弃`）；`ts=0`（取时没成功）时**不发**，
+  绝不发 1970 年的时间戳。
+- **不做 sos**：433 按键不在本版（卡面边界），`event_type=sos` 的报文拼装留到后续版本。
+- 规则只在 `0x01` 节点帧上评估（`sn` 取自帧里的 `sn` 字段）；`0x02` 汇聚心跳不做离线判定。

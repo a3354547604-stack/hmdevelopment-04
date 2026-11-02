@@ -485,9 +485,157 @@ static void test_json_field(void)
     CHECK(min_json_str_field(u, n, "sn", NULL, 0u) == -1, "输出缓冲非法 → -1");
 }
 
+
+/* ------------------------------------------------- t208 规则与事件 */
+
+/* 燃气分级（契约 §8.2）：进入快、退出慢；阈值取结构默认值 1500/2500/200 mV */
+static void test_rule_gas(void)
+{
+    min_gas_t g;
+
+    /* 1) 一级：≥1500 mV 连续 10 s 才进（9.999 s 不进） */
+    min_gas_init(&g);
+    CHECK(min_gas_feed(&g, 0u, 320u) == MIN_RULE_NONE, "320 mV 不应触发");
+    CHECK(min_gas_feed(&g, 0u, 1600u) == MIN_RULE_NONE, "刚超 T1 不应立刻进一级");
+    CHECK(min_gas_feed(&g, 9999u, 1600u) == MIN_RULE_NONE, "9.999 s 还不满 10 s");
+    CHECK(min_gas_feed(&g, 10000u, 1600u) == MIN_RULE_GAS_L1, "满 10 s 应进一级");
+    CHECK(g.level == 1u, "level=%u，期望 1", (unsigned)g.level);
+
+    /* 2) 一级 → 二级：≥T2 连续 6 s */
+    CHECK(min_gas_feed(&g, 10000u, 2600u) == MIN_RULE_NONE, "刚超 T2 不应立刻进二级");
+    CHECK(min_gas_feed(&g, 15999u, 2600u) == MIN_RULE_NONE, "T2 未满 6 s");
+    CHECK(min_gas_feed(&g, 16000u, 2600u) == MIN_RULE_GAS_L2, "T2 满 6 s 应进二级");
+
+    /* 3) 二级 → 正常：连续 30 s 干净（< T1-200 = 1300 mV） */
+    CHECK(min_gas_feed(&g, 16000u, 100u) == MIN_RULE_NONE, "刚回落不应立刻恢复");
+    CHECK(min_gas_feed(&g, 45999u, 100u) == MIN_RULE_NONE, "干净不足 30 s");
+    CHECK(min_gas_feed(&g, 46000u, 100u) == MIN_RULE_GAS_RECOVER, "干净满 30 s 应恢复");
+    CHECK(g.level == 0u, "恢复后 level=%u，期望 0", (unsigned)g.level);
+
+    /* 4) 一级滞留 60 s 也升二级（不走 T2，契约 §8.2 的 gas_l1_to_l2_s） */
+    min_gas_init(&g);
+    CHECK(min_gas_feed(&g, 0u, 1600u) == MIN_RULE_NONE, "起点");
+    CHECK(min_gas_feed(&g, 10000u, 1600u) == MIN_RULE_GAS_L1, "进一级");
+    CHECK(min_gas_feed(&g, 69999u, 1600u) == MIN_RULE_NONE, "滞留 59.999 s 不到 60 s");
+    CHECK(min_gas_feed(&g, 70000u, 1600u) == MIN_RULE_GAS_L2, "滞留 60 s 应升二级");
+
+    /* 5) 回差：1400 mV 落在 200 mV 回差带内 → 不算干净，不恢复 */
+    min_gas_init(&g);
+    (void)min_gas_feed(&g, 0u, 1600u);
+    CHECK(min_gas_feed(&g, 10000u, 1600u) == MIN_RULE_GAS_L1, "进一级");
+    (void)min_gas_feed(&g, 10000u, 1400u);
+    CHECK(min_gas_feed(&g, 60000u, 1400u) == MIN_RULE_NONE,
+          "1400 mV 在回差带内，不应恢复（level=%u）", (unsigned)g.level);
+}
+
+/* 跌倒（契约 §8.4）：fall=1 立即进，退出要 K=3 且 ≥30 s */
+static void test_rule_fall(void)
+{
+    min_fall_t f;
+
+    min_fall_init(&f);
+    CHECK(min_fall_feed(&f, 0u, 1u) == MIN_RULE_FALL_ENTER, "fall=1 应立刻进 ALARM");
+    CHECK(f.in_alarm == 1u, "in_alarm=%u，期望 1", (unsigned)f.in_alarm);
+    CHECK(min_fall_feed(&f, 1000u, 1u) == MIN_RULE_NONE, "ALARM 内重复 fall=1 不产生新告警");
+    CHECK(min_fall_feed(&f, 2000u, 0u) == MIN_RULE_NONE, "fall=0 第 1 次不退出");
+    CHECK(min_fall_feed(&f, 3000u, 0u) == MIN_RULE_NONE, "fall=0 第 2 次不退出");
+    CHECK(min_fall_feed(&f, 4000u, 0u) == MIN_RULE_NONE,
+          "K=3 但距最后一次触发仅 4 s（T_hold=30 s）→ 不退出");
+    CHECK(f.in_alarm == 1u, "仍在 ALARM，in_alarm=%u", (unsigned)f.in_alarm);
+    CHECK(min_fall_feed(&f, 31000u, 0u) == MIN_RULE_FALL_RECOVER, "K=3 且 ≥30 s 应退出");
+    CHECK(f.in_alarm == 0u, "应回到 IDLE");
+    CHECK(min_fall_feed(&f, 32000u, 1u) == MIN_RULE_FALL_ENTER, "恢复后再触发应能再进");
+}
+
+/* 去重（契约 §8.8 抑制窗，P0 统一 60 s） */
+static void test_rule_dedup(void)
+{
+    min_dedup_t d;
+    char t[8];
+    unsigned i;
+
+    min_dedup_init(&d);
+    CHECK(min_dedup_allow(&d, 0u, "gas", "M1", 1u) == 1, "首次应放行");
+    CHECK(min_dedup_allow(&d, 1000u, "gas", "M1", 1u) == 0, "窗口内同级重复应抑制");
+    CHECK(min_dedup_allow(&d, 1000u, "gas", "M2", 1u) == 1, "换 node_sn 不受影响");
+    CHECK(min_dedup_allow(&d, 2000u, "gas", "M1", 2u) == 1, "级别升级应放行");
+    CHECK(min_dedup_allow(&d, 3000u, "gas", "M1", 2u) == 0, "升级后同级再抑制");
+    CHECK(min_dedup_allow(&d, 61000u, "gas", "M1", 2u) == 0, "窗口以升级时刻重算，仍不足 60 s");
+    CHECK(min_dedup_allow(&d, 62000u, "gas", "M1", 2u) == 1, "满 60 s 窗口应放行");
+    min_dedup_clear(&d, "gas", "M1");
+    CHECK(min_dedup_allow(&d, 63000u, "gas", "M1", 2u) == 1, "clear 后应立刻可再发");
+
+    /* 表满不崩：8 槽占满后仍给出确定结果（P0 只有 3 节点，正常走不到） */
+    min_dedup_init(&d);
+    for (i = 0u; i < MIN_DEDUP_SLOTS; i++) {
+        (void)snprintf(t, sizeof(t), "M%u", i + 1u);
+        (void)min_dedup_allow(&d, 0u, "gas", t, 1u);
+    }
+    CHECK(min_dedup_allow(&d, 0u, "gas", "M9", 1u) == 1, "表满时应复用最旧条而不是丢弃新告警");
+    CHECK(min_dedup_allow(&d, 0u, "gas", "M9", 1u) == 0, "复用后同键仍应抑制");
+}
+
+/* 事件报文（契约 §4.4）：用 §3.7 的真帧取字段，逐段核对报文字面 */
+static void test_event_msgs(void)
+{
+    uint8_t buf[1200];
+    uint32_t n;
+    min_parser_t p;
+    min_frame_t fr;
+    char snap[256];
+    char body[1024];
+    char topic[128];
+    int64_t v = 0;
+    int bl;
+
+    /* 1) 0x01 气体帧：smoke 与 payload 切片 */
+    n = bin(FRAME_M1_GAS, buf, sizeof(buf));
+    min_parser_init(&p);
+    CHECK(min_parser_feed(&p, buf, n, &fr) == 1, "0x01 应解出一帧");
+    CHECK(min_json_int_field(fr.payload, fr.plen, "smoke", &v) == 0 && v == 320,
+          "smoke=%lld，期望 320", (long long)v);
+    snap[0] = '\0';
+    /* 注意：切片函数成功时返回**切片长度**（与 int_field 的 0=成功不同） */
+    CHECK(min_json_obj_field(fr.payload, fr.plen, "payload", snap, sizeof(snap)) > 0,
+          "应能切出 payload 对象");
+    CHECK(strcmp(snap, "{\"smoke\":320,\"temp\":24.5,\"humi\":56.2}") == 0, "snapshot=%s", snap);
+
+    /* 2) alert 报文：event_type / type / level / node_sn / event_id / snapshot 全在 */
+    bl = min_msg_alert_event("M0-3F1A2B", "M1", "gas", 2u, 1792243323000ull,
+                             (const uint8_t *)snap, (uint32_t)strlen(snap), body, sizeof(body));
+    CHECK(bl > 0, "alert 报文应拼出来（rc=%d）", bl);
+    CHECK(strstr(body, "\"event_type\":\"alert\"") != NULL, "缺 event_type=alert：%s", body);
+    CHECK(strstr(body, "\"type\":\"gas\"") != NULL, "缺 type=gas：%s", body);
+    CHECK(strstr(body, "\"level\":2") != NULL, "缺 level=2：%s", body);
+    CHECK(strstr(body, "\"node_sn\":\"M1\"") != NULL, "缺 node_sn=M1：%s", body);
+    CHECK(strstr(body, "\"event_id\":\"M0-3F1A2B-gas-1792243323000\"") != NULL,
+          "event_id 不符（§4.4 格式 {gw_sn}-{type}-{ts}）：%s", body);
+    CHECK(strstr(body, "\"snapshot\":{\"smoke\":320") != NULL, "缺 snapshot：%s", body);
+
+    /* 3) recover 报文：没有 level，event_id 带 -rc- 区分 */
+    bl = min_msg_recover_event("M0-3F1A2B", "M1", "gas", 1792243400000ull, body, sizeof(body));
+    CHECK(bl > 0, "recover 报文应拼出来（rc=%d）", bl);
+    CHECK(strstr(body, "\"event_type\":\"recover\"") != NULL, "缺 event_type=recover：%s", body);
+    CHECK(strstr(body, "\"level\"") == NULL, "recover 不应带 level：%s", body);
+    CHECK(strstr(body, "M0-3F1A2B-gas-rc-1792243400000") != NULL, "recover event_id 不符：%s", body);
+
+    /* 4) 跌倒帧：fall 字段 + level 固定 2 */
+    n = bin(FRAME_M2_FALL, buf, sizeof(buf));
+    min_parser_init(&p);
+    CHECK(min_parser_feed(&p, buf, n, &fr) == 1, "0x03 应解出一帧");
+    v = -1;
+    CHECK(min_json_int_field(fr.payload, fr.plen, "fall", &v) == 0 && v == 1,
+          "fall=%lld，期望 1", (long long)v);
+
+    /* 5) 事件 topic：$oc/devices/{id}/sys/events/up */
+    topic[0] = '\0';
+    CHECK(min_iotda_event_topic("DEV123", topic, sizeof(topic)) > 0, "topic 应能拼出来");
+    CHECK(strcmp(topic, "$oc/devices/DEV123/sys/events/up") == 0, "topic=%s", topic);
+}
+
 int main(void)
 {
-    printf("min 固件主机单测（t192 + t193）\n");
+    printf("min 固件主机单测（t192 + t193 + t208）\n");
     test_crc();
     test_real_frames();
     test_bad_frames();
@@ -497,6 +645,10 @@ int main(void)
     test_puback_timeout();
     test_baud_probe();
     test_json_field();
+    test_rule_gas();
+    test_rule_fall();
+    test_rule_dedup();
+    test_event_msgs();
     printf("通过 %d / 失败 %d\n", g_pass, g_fail);
     return (g_fail == 0) ? 0 : 1;
 }

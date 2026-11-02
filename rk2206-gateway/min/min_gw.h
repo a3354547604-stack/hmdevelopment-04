@@ -14,6 +14,7 @@
 #define MIN_GW_H
 
 #include <stdint.h>
+#include "min_rule.h"
 #include <stddef.h>
 
 /* ---------------------------------------------------------------- 常量 */
@@ -29,7 +30,7 @@
  * 不注入时默认值照样能单独编过；注入只影响横幅与锚点，不影响业务逻辑）。
  */
 #ifndef MIN_IMAGE_TAG
-#define MIN_IMAGE_TAG       "MIN-GW-v0.6.1-uart"
+#define MIN_IMAGE_TAG       "MIN-GW-v0.7-rule"
 #endif
 #define MIN_LOG_TAG         "min"
 #define MIN_DEVICE_SN       "M0-3F1A2B"            /* 与旧固件 gw_config.h:302 一致：
@@ -205,6 +206,17 @@ int min_mqtt_connect(min_mqtt_t *m, int fd, const char *client_id, const char *u
 /* QoS1 发布并等 PUBACK；返回 0 = 已确认 */
 int min_mqtt_publish(min_mqtt_t *m, const char *topic, const uint8_t *payload, uint32_t len);
 int min_mqtt_ping(min_mqtt_t *m);
+
+/* t208：事件通道（契约 §4.4）—— 取字段 + 拼 alert/recover 事件 + events/up topic */
+int      min_json_int_field(const uint8_t *js, uint32_t len, const char *key, int64_t *out);
+int      min_json_obj_field(const uint8_t *js, uint32_t len, const char *key, char *out,
+                            uint32_t cap);
+int      min_iotda_event_topic(const char *device_id, char *out, uint32_t cap);
+int      min_msg_alert_event(const char *gw_sn, const char *sn, const char *type, uint8_t level,
+                             uint64_t ts_ms, const uint8_t *snapshot, uint32_t snap_n,
+                             char *out, uint32_t cap);
+int      min_msg_recover_event(const char *gw_sn, const char *sn, const char *type,
+                               uint64_t ts_ms, char *out, uint32_t cap);
 
 /* 报文拼装（纯逻辑，单测用）：把节点原始 JSON 包成 §4.6 的 device.message 形状 */
 int min_msg_node_samples(const char *device_id, uint64_t epoch_ms, const uint8_t *node_json,

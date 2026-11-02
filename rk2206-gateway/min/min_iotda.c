@@ -583,3 +583,384 @@ int min_mqtt_ping(min_mqtt_t *m)
     }
     return (type == 13u) ? 0 : -1;
 }
+
+/* ------------------------------------------------------- 事件通道（t208 / 契约 §4.4）
+
+   v0.7 的告警不走 device.message，而是走 IoTDA 的事件上报通道：
+     topic   $oc/devices/{device_id}/sys/events/up
+     payload {"services":[{"service_id":"<svc>","event_type":"alert|recover","paras":{…}}]}
+   服务器按 event_type 分派（server/app/services/telemetry.py:277 handle_event）：
+   alert → alerts.raise_alert；recover → alerts.mark_recovered。
+   event_id 格式契约写死 `{gateway_sn}-{type}-{ts}`，服务器按它幂等去重。 */
+
+/* 取整数/布尔字段（"smoke":320 / "fall":1）。小数按整数部分截断（v0.7 只用得到整数键）。 */
+int min_json_int_field(const uint8_t *js, uint32_t len, const char *key, int64_t *out)
+{
+    uint32_t klen;
+    uint32_t i;
+    int64_t v = 0;
+    int neg = 0;
+    int got = 0;
+
+    if (out == NULL) { return -1; }
+    *out = 0;
+    if (js == NULL || key == NULL || len == 0u) { return -1; }
+
+    klen = (uint32_t)strlen(key);
+    if (klen == 0u) { return -1; }
+
+    for (i = 0u; i + klen + 3u <= len; i++) {
+        if (js[i] != (uint8_t)'"' || memcmp(&js[i + 1u], key, klen) != 0) {
+            continue;
+        }
+        if (js[i + 1u + klen] != (uint8_t)'"' || js[i + 2u + klen] != (uint8_t)':') {
+            continue;
+        }
+        i += klen + 3u;                       /* 跳到值 */
+        if (i < len && js[i] == (uint8_t)'-') { neg = 1; i++; }
+        for (; i < len; i++) {
+            uint8_t c = js[i];
+
+            if (c < (uint8_t)'0' || c > (uint8_t)'9') { break; }
+            if (v > 922337203685477580LL) { return -1; }   /* 防溢出，不依赖 INT64_MAX 宏 */
+            v = v * 10 + (int64_t)(c - (uint8_t)'0');
+            got = 1;
+        }
+        if (!got) { return -1; }               /* 不是数字（字符串/对象/null） */
+        *out = neg ? -v : v;
+        return 0;
+    }
+    return -1;
+}
+
+/* 取嵌套对象切片（"payload":{…} → 原样拷贝 `{…}`，含花括号）。字符串里的括号不计数。 */
+int min_json_obj_field(const uint8_t *js, uint32_t len, const char *key, char *out, uint32_t cap)
+{
+    uint32_t klen;
+    uint32_t i;
+    uint32_t start;
+    uint32_t depth = 0u;
+    int in_str = 0;
+    int esc = 0;
+
+    if (out == NULL || cap == 0u) { return -1; }
+    out[0] = '\0';
+    if (js == NULL || key == NULL || len == 0u) { return -1; }
+
+    klen = (uint32_t)strlen(key);
+    if (klen == 0u) { return -1; }
+
+    for (i = 0u; i + klen + 3u <= len; i++) {
+        if (js[i] != (uint8_t)'"' || memcmp(&js[i + 1u], key, klen) != 0) {
+            continue;
+        }
+        if (js[i + 1u + klen] != (uint8_t)'"' || js[i + 2u + klen] != (uint8_t)':') {
+            continue;
+        }
+        i += klen + 3u;
+        if (i >= len || js[i] != (uint8_t)'{') { return -1; }
+        start = i;
+        for (; i < len; i++) {
+            uint8_t c = js[i];
+
+            if (in_str) {
+                if (esc) { esc = 0; }
+                else if (c == (uint8_t)'\\') { esc = 1; }
+                else if (c == (uint8_t)'"') { in_str = 0; }
+                continue;
+            }
+            if (c == (uint8_t)'"') { in_str = 1; continue; }
+            if (c == (uint8_t)'{') { depth++; continue; }
+            if (c == (uint8_t)'}') {
+                depth--;
+                if (depth == 0u) {
+                    uint32_t n = i - start + 1u;
+
+                    if (n + 1u > cap) { return -1; }
+                    memcpy(out, &js[start], n);
+                    out[n] = '\0';
+                    return (int)n;
+                }
+            }
+        }
+        return -1;                              /* 括号不闭合：原帧坏了 */
+    }
+    return -1;
+}
+
+int min_iotda_event_topic(const char *device_id, char *out, uint32_t cap)
+{
+    int n;
+
+    if (device_id == NULL || out == NULL || cap == 0u) { return -1; }
+    n = snprintf(out, cap, "$oc/devices/%s/sys/events/up", device_id);
+    if (n <= 0 || (uint32_t)n >= cap) {
+        out[0] = '\0';
+        return -1;
+    }
+    return n;
+}
+
+/* alert 事件（§4.4）：type/level/node_sn/ts/event_id(+snapshot) */
+int min_msg_alert_event(const char *gw_sn, const char *sn, const char *type, uint8_t level,
+                        uint64_t ts_ms, const uint8_t *snapshot, uint32_t snap_n,
+                        char *out, uint32_t cap)
+{
+    int n;
+
+    if (gw_sn == NULL || sn == NULL || type == NULL || out == NULL || cap == 0u) { return -1; }
+    if (snapshot == NULL || snap_n == 0u) {
+        n = snprintf(out, cap,
+                     "{\"services\":[{\"service_id\":\"alert\",\"event_type\":\"alert\","
+                     "\"paras\":{\"type\":\"%s\",\"level\":%u,\"node_sn\":\"%s\","
+                     "\"ts\":%llu,\"event_id\":\"%s-%s-%llu\"}}]}",
+                     type, (unsigned)level, sn, (unsigned long long)ts_ms,
+                     gw_sn, type, (unsigned long long)ts_ms);
+    } else {
+        n = snprintf(out, cap,
+                     "{\"services\":[{\"service_id\":\"alert\",\"event_type\":\"alert\","
+                     "\"paras\":{\"type\":\"%s\",\"level\":%u,\"node_sn\":\"%s\","
+                     "\"ts\":%llu,\"event_id\":\"%s-%s-%llu\",\"snapshot\":%.*s}}]}",
+                     type, (unsigned)level, sn, (unsigned long long)ts_ms,
+                     gw_sn, type, (unsigned long long)ts_ms, (int)snap_n, (const char *)snapshot);
+    }
+    if (n <= 0 || (uint32_t)n >= cap) {
+        out[0] = '\0';
+        return -1;
+    }
+    return n;
+}
+
+/* recover 事件（§4.4）：type/node_sn/ts/event_id（无 level） */
+int min_msg_recover_event(const char *gw_sn, const char *sn, const char *type, uint64_t ts_ms,
+                          char *out, uint32_t cap)
+{
+    int n;
+
+    if (gw_sn == NULL || sn == NULL || type == NULL || out == NULL || cap == 0u) { return -1; }
+    n = snprintf(out, cap,
+                 "{\"services\":[{\"service_id\":\"alert\",\"event_type\":\"recover\","
+                 "\"paras\":{\"type\":\"%s\",\"node_sn\":\"%s\",\"ts\":%llu,"
+                 "\"event_id\":\"%s-%s-rc-%llu\"}}]}",
+                 type, sn, (unsigned long long)ts_ms,
+                 gw_sn, type, (unsigned long long)ts_ms);
+    if (n <= 0 || (uint32_t)n >= cap) {
+        out[0] = '\0';
+        return -1;
+    }
+    return n;
+}
+
+/* ============================ 本地规则（t208 / 契约 §8） ============================
+
+   v0.7 的规则判定放在本文件而不是新建 min_rule.c，原因很具体：
+   `tools/gw-build-min.sh` 里有「暂存目录 .c 数量必须 = 6」的硬断言，且主机单测的编译行
+   逐文件枚举（min_proto/min_kv/min_iotda/min_baud/test），而该脚本**不在 t208 的 inScope**
+   （卡面只给 rk2206-gateway/min/、out/、烧录说明.txt）。所以规则实现并入 IoTDA 模块
+   （告警事件本来就由 min_iotda.c 拼装），公开接口仍放在 min_rule.h。
+   判据逐段对照 src/gw_rules.c，见 min_rule.h 头注释。 */
+
+/*
+ * min_rule.c — 本地规则实现（t208）
+ *
+ * 逐段对照 `rk2206-gateway/src/gw_rules.c`：
+ *   gw_gas_feed()   :32-106   → min_gas_feed()   （阈值/迟滞/迟滞时长逐项相同）
+ *   gw_fall_feed()  :108-127  → min_fall_feed()  （进入即时、退出 K=3 + 30 s）
+ *   gw_dedup_feed() :283-336  → min_dedup_allow()（简化：无 8 槽历史库，只要 60 s 窗）
+ * 差别只有一处：正式固件按类型分档窗口（dedup_window_ms），v0.7 P0 单节点统一 60 s。
+ */
+
+/* ============================== 燃气（§8.2） ============================== */
+void min_gas_init(min_gas_t *g)
+{
+    if (g == NULL) { return; }
+    memset(g, 0, sizeof(*g));
+}
+
+min_rule_ev_t min_gas_feed(min_gas_t *g, uint64_t now_ms, uint16_t mv)
+{
+    uint16_t clean_level;
+
+    if (g == NULL) { return MIN_RULE_NONE; }
+
+    /* --- 超限计时（进入快：不含额外确认延时） --- */
+    if (mv >= MIN_GAS_T1_MV) {
+        if (!g->have_t1) { g->have_t1 = 1; g->t_above1 = now_ms; }
+    } else {
+        g->have_t1 = 0;
+    }
+    if (mv >= MIN_GAS_T2_MV) {
+        if (!g->have_t2) { g->have_t2 = 1; g->t_above2 = now_ms; }
+    } else {
+        g->have_t2 = 0;
+    }
+
+    /* --- 干净计时：必须低于 T1−回差才算干净（200 mV 回差防抖，gw_rules.c:57-63） --- */
+    clean_level = (MIN_GAS_T1_MV > MIN_GAS_RECOVER_MV) ?
+                  (uint16_t)(MIN_GAS_T1_MV - MIN_GAS_RECOVER_MV) : 0u;
+    if (mv < clean_level) {
+        if (!g->have_clean) { g->have_clean = 1; g->t_clean = now_ms; }
+    } else {
+        g->have_clean = 0;
+    }
+
+    switch (g->level) {
+    case 0:
+        /* 二级优先：≥T2 连续 6 s 直接到二级 */
+        if (g->have_t2 && (now_ms - g->t_above2) >= MIN_GAS_L2_HOLD_MS) {
+            g->level = 2;
+            return MIN_RULE_GAS_L2;
+        }
+        if (g->have_t1 && (now_ms - g->t_above1) >= MIN_GAS_L1_HOLD_MS) {
+            g->level = 1;
+            g->t_enter_l1 = now_ms;
+            return MIN_RULE_GAS_L1;
+        }
+        return MIN_RULE_NONE;
+
+    case 1:
+        /* 一级 → 二级：T2 连续 6 s，或一级滞留 60 s（老人没开窗/关阀就升级） */
+        if (g->have_t2 && (now_ms - g->t_above2) >= MIN_GAS_L2_HOLD_MS) {
+            g->level = 2;
+            return MIN_RULE_GAS_L2;
+        }
+        if ((now_ms - g->t_enter_l1) >= MIN_GAS_L1_TO_L2_MS) {
+            g->level = 2;
+            return MIN_RULE_GAS_L2;
+        }
+        /* 一级 → 正常：连续 30 s 干净 */
+        if (g->have_clean && (now_ms - g->t_clean) >= MIN_GAS_RECOVER_MS) {
+            g->level = 0;
+            return MIN_RULE_GAS_RECOVER;
+        }
+        return MIN_RULE_NONE;
+
+    case 2:
+    default:
+        if (g->have_clean && (now_ms - g->t_clean) >= MIN_GAS_RECOVER_MS) {
+            g->level = 0;
+            return MIN_RULE_GAS_RECOVER;
+        }
+        return MIN_RULE_NONE;
+    }
+}
+
+/* ============================== 跌倒（§8.4） ============================== */
+void min_fall_init(min_fall_t *f)
+{
+    if (f == NULL) { return; }
+    memset(f, 0, sizeof(*f));
+}
+
+min_rule_ev_t min_fall_feed(min_fall_t *f, uint64_t now_ms, uint8_t fall)
+{
+    if (f == NULL) { return MIN_RULE_NONE; }
+
+    if (fall) {
+        f->last_trigger_ms = now_ms;
+        f->zero_cnt = 0;
+        if (!f->in_alarm) {
+            f->in_alarm = 1;
+            return MIN_RULE_FALL_ENTER;      /* 进入即时：链路不额外加延时 */
+        }
+        return MIN_RULE_NONE;                /* ALARM 期内重复触发不产生新告警 */
+    }
+
+    if (!f->in_alarm) {
+        return MIN_RULE_NONE;
+    }
+
+    /* 退出必须同时满足：K=3 次 fall=0 且距最后一次触发 ≥30 s。
+     * 少任何一个都可能是「模块瞬时回落」，此时退出会让告警闪断、App 反复弹窗。 */
+    if (f->zero_cnt < 255u) { f->zero_cnt++; }
+    if (f->zero_cnt >= MIN_FALL_ZERO_K &&
+        (now_ms - f->last_trigger_ms) >= MIN_FALL_HOLD_MS) {
+        f->in_alarm = 0;
+        f->zero_cnt = 0;
+        return MIN_RULE_FALL_RECOVER;
+    }
+    return MIN_RULE_NONE;
+}
+
+/* ============================== 去重（§8.8） ============================== */
+void min_dedup_init(min_dedup_t *d)
+{
+    if (d == NULL) { return; }
+    memset(d, 0, sizeof(*d));
+}
+
+static void dedup_copy(char *dst, uint32_t cap, const char *src)
+{
+    uint32_t i = 0u;
+
+    if (dst == NULL || cap == 0u) { return; }
+    if (src != NULL) {
+        while (src[i] != '\0' && i + 1u < cap) {
+            dst[i] = src[i];
+            i++;
+        }
+    }
+    dst[i] = '\0';
+}
+
+int min_dedup_allow(min_dedup_t *d, uint64_t now_ms, const char *type, const char *sn,
+                    uint8_t level)
+{
+    uint32_t i;
+    uint32_t free_slot = MIN_DEDUP_SLOTS;
+
+    if (d == NULL || type == NULL || sn == NULL) { return 1; }
+
+    for (i = 0u; i < MIN_DEDUP_SLOTS; i++) {
+        min_dedup_ent_t *e = &d->e[i];
+
+        if (!e->used) {
+            if (free_slot == MIN_DEDUP_SLOTS) { free_slot = i; }
+            continue;
+        }
+        /* 窗口过期即视为空位（抑制表不是历史库） */
+        if ((now_ms - e->start_ms) >= MIN_DEDUP_WINDOW_MS) {
+            if (free_slot == MIN_DEDUP_SLOTS) { free_slot = i; }
+            continue;
+        }
+        if (strcmp(e->type, type) == 0 && strcmp(e->sn, sn) == 0) {
+            if (level > e->level) {
+                /* 级别升高（一级→二级）：立刻再发一条，窗口从这次重新算 */
+                e->level = level;
+                e->start_ms = now_ms;
+                return 1;
+            }
+            return 0;                        /* 窗口内重复：抑制 */
+        }
+    }
+
+    if (free_slot == MIN_DEDUP_SLOTS) {
+        /* 8 槽都活着：复用最旧的一条（P0 单节点不会走到） */
+        free_slot = 0u;
+        for (i = 1u; i < MIN_DEDUP_SLOTS; i++) {
+            if (d->e[i].start_ms < d->e[free_slot].start_ms) { free_slot = i; }
+        }
+    }
+
+    memset(&d->e[free_slot], 0, sizeof(d->e[free_slot]));
+    dedup_copy(d->e[free_slot].type, sizeof(d->e[free_slot].type), type);
+    dedup_copy(d->e[free_slot].sn, sizeof(d->e[free_slot].sn), sn);
+    d->e[free_slot].level = level;
+    d->e[free_slot].start_ms = now_ms;
+    d->e[free_slot].used = 1u;
+    return 1;
+}
+
+void min_dedup_clear(min_dedup_t *d, const char *type, const char *sn)
+{
+    uint32_t i;
+
+    if (d == NULL || type == NULL || sn == NULL) { return; }
+    for (i = 0u; i < MIN_DEDUP_SLOTS; i++) {
+        min_dedup_ent_t *e = &d->e[i];
+
+        if (e->used && strcmp(e->type, type) == 0 && strcmp(e->sn, sn) == 0) {
+            memset(e, 0, sizeof(*e));
+        }
+    }
+}
