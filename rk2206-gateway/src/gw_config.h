@@ -163,7 +163,7 @@
 /* 构建脚本的断言锚点（tools/gw-build.sh 到 images/Firmware.img 里 grep 这个整串，
  * 用来证明"从源码编出来的固件里确实有网关代码"，而不是只有 SDK 自带的壳）。
  * 改这个值时要同步 tools/gw-build.sh 的 GW_IMAGE_TAG。 */
-#define GW_IMAGE_TAG            "ELDERCARE-GW-M0-v1.3"
+#define GW_IMAGE_TAG            "ELDERCARE-GW-M0-v1.4"
 
 /* ------------------------------------------------------------------ *
  * 7. 节拍与时序（t4：数值来自契约 §8 与队长 2026-10-17 的取时顺序决策）
@@ -368,9 +368,11 @@
 /* 开机不自动联网那一行的原文（施工单 §12 与主机自测都按这个字符串对，别随手改词） */
 #define GW_BOOT_NO_CONNECT_MSG      "开机不自动联网：串口 wifi set / wifi net，或长按配网键"
 #define GW_WIFI_BOOT_SETTLE_MS      8000u   /* 开机等 DHCP（沿用原 net_task 的 8 s） */
-#define GW_WIFI_RETRY_MS            30000u  /* 开机没连上时 net_task 的重试间隔 */
-#define GW_WIFI_RETRY_MAX           6u      /* 最多重试 6 次（≈3 min）后停手：
-                                             * 反复 AddDeviceConfig 会把 SDK 的配置表撑满 */
+/* t202：重试节奏搬到 gw_net.h（GW_NET_RETRY_MS / GW_NET_RETRY_MAX / GW_NET_RETRY_RESET_MS），
+ * 那边是纯逻辑 + 单测钉死的「先 off 复位射频 → 等 3 s → 再连」，上限 3 次。
+ * 这两个旧宏只是历史名字，别再引用；留着是为了让老分支的 grep 还能落到这里。 */
+#define GW_WIFI_RETRY_MS            GW_NET_RETRY_MS
+#define GW_WIFI_RETRY_MAX           GW_NET_RETRY_MAX
 #define GW_NET_REASON_LEN           16u     /* "auth"/"timeout"/"internal"/"busy"/"not_found" */
 #define GW_NET_LIST_MAX             12u     /* wifi scan 最多列 12 个 2.4 G 热点 */
 

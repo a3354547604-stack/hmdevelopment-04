@@ -210,33 +210,37 @@ static int pub_tracked(int rc)
     return rc;
 }
 
-static void gw_publish_events(const char *json, uint32_t len)
+static int gw_publish_events(const char *json, uint32_t len)
 {
     char topic[128];
 
     gw_iotda_topic_events(topic, sizeof(topic), s_cloud.device_id);
     if (gw_cloud_is_connected(&s_cloud) &&
         pub_tracked(gw_cloud_publish(&s_cloud, topic, json, len)) == 0) {
-        return;
+        return 1;
     }
     /* 断网：事件是不可重建的，必须落缓存（§4.7）；属性不落缓存，见 gw_cache.h 的理由 */
     if (gw_cache_push(&s_cache, GW_CACHE_KIND_EVENT, json, (uint16_t)len) != 0) {
         printf("[%s] 事件入缓存失败（超长或 Flash 错），本条丢失\n", GW_LOG_TAG);
+        return -1;
     }
+    return 0;
 }
 
-static void gw_publish_samples(const char *json, uint32_t len)
+static int gw_publish_samples(const char *json, uint32_t len)
 {
     char topic[128];
 
     gw_iotda_topic_messages(topic, sizeof(topic), s_cloud.device_id);
     if (gw_cloud_is_connected(&s_cloud) &&
         pub_tracked(gw_cloud_publish(&s_cloud, topic, json, len)) == 0) {
-        return;
+        return 1;
     }
     if (gw_cache_push(&s_cache, GW_CACHE_KIND_SAMPLES, json, (uint16_t)len) != 0) {
         printf("[%s] 明细入缓存失败\n", GW_LOG_TAG);
+        return -1;
     }
+    return 0;
 }
 
 /* ============================== 事件 → 上云/声光 ============================== */
@@ -337,7 +341,7 @@ static void gw_emit(gw_event_t ev, const char *node_sn, uint32_t now)
         printf("[%s] 事件报文拼装失败 type=%s\n", GW_LOG_TAG, m->type);
         return;
     }
-    gw_publish_events(body, len);
+    (void)gw_publish_events(body, len);
     printf("[%s] 事件 %s type=%s level=%u\n", GW_LOG_TAG, event_id, m->type, m->level);
 }
 
@@ -877,27 +881,35 @@ static void gw_report_samples(uint32_t now)
     }
 }
 
-/* 断网期间攒下的事件/明细：重连后先补事件再补明细（契约 §4.7） */
-static void gw_flush_cache(uint32_t now)
+/* 断网期间攒下的事件/明细：重连后先补事件再补明细（契约 §4.7）。
+ *
+ * t202：原先一次补 4 条，且不管成功失败都 commit —— 现场「pub=1 之后整机没有日志」
+ * 正好发生在这条路径上（待发 1433 条，重连瞬间连续同步发布）。现在的口径：
+ *   · 每轮只补 1 条（把 flush 的耗时压到一次发布的上限）；
+ *   · 发布没成功就**不 commit**（记录留在缓存里下轮再试，不再"补丢"）；
+ *   · 前后各一行 `[CLOUD] flush`，下次卡死能一眼看出是不是卡在补发上。 */
+static int gw_flush_cache(uint32_t now)
 {
     uint8_t kind = 0;
     char rec[GW_CACHE_RECORD_MAX];
     uint16_t len;
-    int budget = 4;     /* 一次最多补 4 条：避免重连瞬间打满 §4.8 的消息数预算 */
+    int rc;
 
-    while (budget-- > 0) {
-        len = gw_cache_pop(&s_cache, &kind, rec, sizeof(rec));
-        if (len == 0) {
-            return;
-        }
-        if (kind == GW_CACHE_KIND_EVENT) {
-            gw_publish_events(rec, len);
-        } else {
-            gw_publish_samples(rec, len);
-        }
-        (void)gw_cache_commit(&s_cache);
-    }
     (void)now;
+    len = gw_cache_pop(&s_cache, &kind, rec, sizeof(rec));
+    if (len == 0) {
+        return 0;
+    }
+    printf("[CLOUD] flush k=1 kind=%u len=%u pending=%u\n", (unsigned)kind, (unsigned)len,
+           (unsigned)gw_cache_count(&s_cache));
+    rc = (kind == GW_CACHE_KIND_EVENT) ? gw_publish_events(rec, len)
+                                       : gw_publish_samples(rec, len);
+    printf("[CLOUD] flush k=1 rc=%d\n", rc);
+    if (rc != 1) {
+        return 0;           /* 失败即停：不 commit，缓存里的记录原样留着 */
+    }
+    (void)gw_cache_commit(&s_cache);
+    return 1;
 }
 
 /* ============================== 取时 / 联网 ============================== */
@@ -1694,45 +1706,98 @@ static void net_wifi_boot(void)
     memset(psk, 0, sizeof(psk));
 }
 
+/* ---- t202：重试前必须复位射频（现场两次开机都死在这条路上） ----
+ *
+ * 一轮连接失败后原来的实现是「什么都不做，等 30 s 再发起一次」。现场后果：
+ * SDK 的 wifi_send_cmd 已经卡在 recovery 里无限重发，新命令继续往同一个邮箱里塞，
+ * 于是每 5 s 刷一行 `recovery process ...`，6 次重试（≈3 min）全废，还把驱动留在坑里。
+ *
+ * 现在顺序固定：`gw_net_radio_off()`（它内部已区分「驱动真卡死 → 只清本地状态」这一支）
+ * → 等 GW_NET_RETRY_RESET_MS(3 s) → 再连。判定逻辑在 gw_net.h 的 gw_net_retry_run()
+ * （纯逻辑、主机有单测；变异把 off 那一步删掉必须转红）。上限 3 次，用完明确告诉人怎么办。
+ */
+static int retry_op_off(void)
+{
+    return gw_net_radio_off();
+}
+
+static void retry_op_wait(void)
+{
+    LOS_Msleep(GW_NET_RETRY_RESET_MS);
+}
+
+static int retry_op_connect(const char *ssid, const char *psk, char *reason, uint32_t cap)
+{
+    char ip[24];
+    int rc;
+
+    /* t202：STA 与配网 SoftAP 互斥。单射频下 AP 还在跑时 DHCP 经常拿不到地址
+     * （现场 ip=0.0.0.0 但 link=1）。只关「不在配网窗口里」的那种常开 AP。 */
+    if (gw_net_ap_sta_mutex(gw_net_ap_state(), gw_prov_active(&s_prov)) != 0) {
+        int arc = gw_net_ap_stop();
+
+        printf("[%s] 连 STA 前先关配网 AP（rc=%d）：单射频下 AP 抢着时 DHCP 拿不到地址\n",
+               GW_LOG_TAG, arc);
+    }
+    rc = gw_net_sta_connect_wait(ssid, psk, GW_WIFI_CONNECT_TIMEOUT_MS, reason, cap);
+    if (rc == 1) {
+        ip[0] = '\0';
+        (void)gw_net_sta_ip(ip, (uint32_t)sizeof(ip));
+        printf("[%s] 重试已连上：IP=%s\n", GW_LOG_TAG, (ip[0] != '\0') ? ip : "0.0.0.0");
+    }
+    return rc;
+}
+
+static const gw_net_retry_ops_t s_retry_ops = {
+    retry_op_off,
+    retry_op_wait,
+    retry_op_connect,
+};
+
+static gw_net_retry_t s_net_retry;
+
 /* 开机没连上时的有限重试：路由器刚重启、DHCP 慢都靠这段兜住。
  * 为什么要有上限：AddDeviceConfig 每次都会往 SDK 的配置表里加一条，
  * 无限重试迟早把它撑满（那以后连正常配置都加不进去）。 */
-static void net_wifi_retry(uint32_t now, uint32_t *last_ms, uint8_t *tries)
+static void net_wifi_retry(uint32_t now)
 {
     char ssid[GW_PROV_SSID_MAX + 1u];
     char psk[GW_PROV_PSK_LEN];
     char reason[GW_NET_REASON_LEN];
     char ip[24];
+    int rc;
 
-    if (*tries >= GW_WIFI_RETRY_MAX) {
-        return;
-    }
-    if (gw_net_sta_ip(ip, (uint32_t)sizeof(ip)) == 0) {
-        return;                 /* 已经连着，没必要再发起一次 */
-    }
     if (gw_prov_active(&s_prov) != 0) {
         return;                 /* 配网窗口里由 gw_prov 自己管 STA，别抢 */
     }
-    if (*last_ms != 0u && (uint32_t)(now - *last_ms) < GW_WIFI_RETRY_MS) {
+    if (s_net_retry.tries >= GW_NET_RETRY_MAX) {
+        /* 只在刚用完额度的那一刻提醒一次（之后每 10 s 别刷屏） */
+        static uint8_t s_told;
+        if (s_told == 0u) {
+            s_told = 1u;
+            printf("[%s] 自动重试已用完 %u 次仍失败：需人工处理 —— 先 `wifi off` 复位射频，"
+                   "再 `wifi net` 重连（还不行就断电重启）\n",
+                   GW_LOG_TAG, (unsigned)GW_NET_RETRY_MAX);
+        }
         return;
     }
-    *last_ms = now;
-    (*tries)++;
     ssid[0] = '\0';
     psk[0] = '\0';
     if (gw_store_cred_load(ssid, (uint32_t)sizeof(ssid), psk, (uint32_t)sizeof(psk)) != 0) {
-        *tries = GW_WIFI_RETRY_MAX;     /* 没有凭证：重试也没用 */
+        s_net_retry.tries = (uint8_t)GW_NET_RETRY_MAX;   /* 没有凭证：重试也没用 */
         return;
     }
-    if (gw_net_sta_connect_wait(ssid, psk, GW_WIFI_CONNECT_TIMEOUT_MS, reason,
-                                (uint32_t)sizeof(reason)) == 1) {
-        ip[0] = '\0';
-        (void)gw_net_sta_ip(ip, (uint32_t)sizeof(ip));
-        printf("[%s] 联网重试成功（第 %u 次）：IP=%s\n", GW_LOG_TAG, (unsigned)*tries, ip);
-        *tries = GW_WIFI_RETRY_MAX;     /* 连上就不再重试 */
-    } else {
-        printf("[%s] 联网重试失败（%u/%u）：%s\n", GW_LOG_TAG, (unsigned)*tries,
-               (unsigned)GW_WIFI_RETRY_MAX, gw_net_reason_text(reason));
+    rc = gw_net_retry_run(&s_net_retry, &s_retry_ops, ssid, psk, reason,
+                          (uint32_t)sizeof(reason), now,
+                          (gw_net_sta_ip(ip, (uint32_t)sizeof(ip)) == 0) ? 1 : 0);
+    if (rc == 1) {
+        s_net_retry.tries = (uint8_t)GW_NET_RETRY_MAX;   /* 连上就不再重试 */
+    } else if (rc < 0) {
+        printf("[%s] 重试前复位射频 rc=%d（%u/%u），已等 %u ms\n", GW_LOG_TAG,
+               s_net_retry.last_off_rc, (unsigned)s_net_retry.tries,
+               (unsigned)GW_NET_RETRY_MAX, (unsigned)GW_NET_RETRY_RESET_MS);
+        printf("[%s] 联网重试失败（%u/%u）：%s\n", GW_LOG_TAG, (unsigned)s_net_retry.tries,
+               (unsigned)GW_NET_RETRY_MAX, gw_net_reason_text(reason));
     }
     memset(psk, 0, sizeof(psk));
 }
@@ -1746,8 +1811,6 @@ static void net_task(void *arg)
 {
     uint32_t now;
     uint32_t last_try_ms = 0;
-    uint32_t last_wifi_ms = 0;
-    uint8_t  wifi_tries = 0;
 
     (void)arg;
     net_wifi_boot();        /* 联网 → 取时 → 连云，顺序不能反 */
@@ -1769,7 +1832,7 @@ static void net_task(void *arg)
         }
 
         if (!gw_cloud_is_connected(&s_cloud)) {
-            net_wifi_retry(now, &last_wifi_ms, &wifi_tries);
+            net_wifi_retry(now);
             if (gw_time_is_synced() == 0) {
                 (void)gw_try_timesync();
             }

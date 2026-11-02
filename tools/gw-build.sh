@@ -238,9 +238,9 @@ build_one() {
 
 case "$MODE" in
     hello)   build_one hello   './b6_uart0:uart0_example'  'uart0_example' 'build-hello'   'uart_example'     'HelloWorld!' ;;
-    gateway) build_one gateway './t4_gateway:gateway_app'  'gateway_app'   'build-gateway' 'gw_crc16_modbus'  'ELDERCARE-GW-M0-v1.3' ;;
+    gateway) build_one gateway './t4_gateway:gateway_app'  'gateway_app'   'build-gateway' 'gw_crc16_modbus'  'ELDERCARE-GW-M0-v1.4' ;;
     both)    build_one hello   './b6_uart0:uart0_example'  'uart0_example' 'build-hello'   'uart_example'     'HelloWorld!'
-             build_one gateway './t4_gateway:gateway_app'  'gateway_app'   'build-gateway' 'gw_crc16_modbus'  'ELDERCARE-GW-M0-v1.3' ;;
+             build_one gateway './t4_gateway:gateway_app'  'gateway_app'   'build-gateway' 'gw_crc16_modbus'  'ELDERCARE-GW-M0-v1.4' ;;
 esac
 
 log "全部通过。证据目录：$OUT"

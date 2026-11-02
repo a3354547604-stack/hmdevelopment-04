@@ -539,6 +539,127 @@ static uint32_t garbage_lcg(uint32_t *st)
 /* ============================== t188：看门狗 + 连接退避 ==============================
  * 两件事都不碰 SDK：看门狗只验"开关宏与周期口径"，退避/关闭路径验的是纯逻辑状态机。
  * 板端真复位要上板看（施工单 §看门狗行为），主机侧能证明的是"判定没写错"。 */
+/* t202：重试顺序必须「先复位射频（off）→ 等 → 再连」。
+ * 现场两次开机就是靠这条顺序救回来的：一轮失败后不做 off，新命令全塞进卡死的邮箱，
+ * 驱动永远停在 wifi_recovery_process 里。变异：把 off 那一步删掉 → 本用例必须转红。 */
+static char   g_rt_log[64];
+static size_t g_rt_len;
+
+static void rt_log_reset(void)
+{
+    g_rt_len = 0;
+    g_rt_log[0] = '\0';
+}
+
+static void rt_log_add(char c)
+{
+    if (g_rt_len + 2u <= sizeof(g_rt_log)) {
+        g_rt_log[g_rt_len++] = c;
+        g_rt_log[g_rt_len] = '\0';
+    }
+}
+
+static int rt_off(void)
+{
+    rt_log_add('O');
+    return 0;
+}
+
+static void rt_wait(void)
+{
+    rt_log_add('W');
+}
+
+static int rt_connect_ok(const char *ssid, const char *psk, char *reason, uint32_t cap)
+{
+    (void)ssid;
+    (void)psk;
+    (void)reason;
+    (void)cap;
+    rt_log_add('C');
+    return 1;
+}
+
+static int rt_connect_fail(const char *ssid, const char *psk, char *reason, uint32_t cap)
+{
+    (void)ssid;
+    (void)psk;
+    (void)cap;
+    rt_log_add('C');
+    if (reason != NULL && cap > 0u) {
+        snprintf(reason, cap, "timeout");
+    }
+    return 0;
+}
+
+static void test_net_retry_off_first(void)
+{
+    gw_net_retry_t r;
+    gw_net_retry_ops_t ops;
+    char reason[GW_NET_REASON_LEN];
+
+    t_start("t202 重试前必须复位射频（off → wait → connect）");
+    t_ok(GW_NET_RETRY_MAX == 3u, "自动重试上限 3 次（用完停手等人工）");
+    t_ok(GW_NET_RETRY_MS == 30000u, "两次重试最小间隔 30 s");
+    t_ok(GW_NET_RETRY_RESET_MS == 3000u, "复位射频后等 3 s 再连");
+    t_ok(GW_NET_AP_RUNNING == 2, "gw_net_ap_state() 的「已启动」取值是 2");
+
+    memset(&r, 0, sizeof(r));
+    memset(reason, 0, sizeof(reason));
+    rt_log_reset();
+    ops.off = rt_off;
+    ops.wait_off = rt_wait;
+    ops.connect = rt_connect_ok;
+
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 100000u, 0) == 1,
+         "第一轮重试成功返回 1");
+    t_ok(strcmp(g_rt_log, "OWC") == 0, "动作顺序是 off → wait → connect（不 off 就重连是本卡要防的）");
+    t_ok(r.tries == 1u, "计数 +1");
+    t_ok(r.last_off_rc == 0, "记录 off 的返回码（日志要打 rc）");
+    t_ok(r.last_ms == 100000u, "记录本轮时刻");
+
+    rt_log_reset();
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 129999u, 0) == 0,
+         "间隔没到返回 0");
+    t_ok(g_rt_log[0] == '\0', "间隔没到时一个动作都不做（不许白白复位射频）");
+    t_ok(r.tries == 1u, "间隔没到不涨计数");
+
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 160000u, 1) == 0,
+         "已经连着返回 0");
+    t_ok(g_rt_log[0] == '\0', "已经连着时不许把链路拆了");
+
+    rt_log_reset();
+    ops.connect = rt_connect_fail;
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 160000u, 0) == -1,
+         "连接失败返回 -1");
+    t_ok(strcmp(g_rt_log, "OWC") == 0, "失败那轮也必须先 off 再连");
+    t_ok(strcmp(reason, "timeout") == 0, "失败原因写回 reason");
+    t_ok(r.tries == 2u, "失败也涨计数（否则永远重试）");
+
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 190000u, 0) == -1,
+         "第 3 轮仍然尝试");
+    t_ok(r.tries == 3u, "用满 3 次");
+    rt_log_reset();
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 220000u, 0) == 0,
+         "上限用完返回 0（停手等人工 wifi off → wifi net）");
+    t_ok(g_rt_log[0] == '\0', "上限用完不再碰射频");
+    t_ok(r.tries == 3u, "上限用完计数不再涨");
+
+    memset(&r, 0, sizeof(r));
+    rt_log_reset();
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 0xFFFFFF00u, 0) == -1,
+         "32 位时刻回绕前能正常发起");
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 0x00000100u, 0) == 0,
+         "回绕后 512 ms < 30 s：间隔判定用无符号差值才对");
+    t_ok(gw_net_retry_run(&r, &ops, "ssid", "psk", reason, sizeof(reason), 0x00008000u, 0) == -1,
+         "回绕后够 30 s 再发起（0xFFFFFF00 + 33024 ms）");
+
+    t_start("t202 配网 AP 与 STA 互斥");
+    t_ok(gw_net_ap_sta_mutex(GW_NET_AP_RUNNING, 0) == 1, "AP 在跑且不在配网窗口 → 先关 AP 再连 STA");
+    t_ok(gw_net_ap_sta_mutex(GW_NET_AP_RUNNING, 1) == 0, "配网窗口里不动 AP（用户正在填密码）");
+    t_ok(gw_net_ap_sta_mutex(0, 0) == 0, "AP 没开时什么也不做");
+}
+
 static void test_wdt_and_backoff(void)
 {
     gw_net_backoff_t b;
@@ -3330,6 +3451,7 @@ int main(void)
     test_hw_adc();                   /* t140 ADC 链路：幂等复用 / 已初始化 / 读失败留痕 */
     test_parser();
     test_wdt_and_backoff();          /* t188：看门狗口径 + 退避 + off 分支 */
+    test_net_retry_off_first();      /* t202：重试前复位射频 + AP/STA 互斥 */
     test_sta_plan();                 /* t189：STA 发起顺序（不必扫、不重复 EnableWifi） */
     test_parser_garbage_flood();     /* t183：200 KB 垃圾流不断言越界/不失步 */
     test_json_depth_guard();          /* t183：cJSON 递归深度预检 */

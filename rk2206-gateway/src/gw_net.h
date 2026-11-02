@@ -201,4 +201,78 @@ static inline void gw_net_sta_plan(int radio_active, int resident_done, gw_net_s
     p->connect = 1u;
 }
 
+/* ==========================================================================
+ * t202：重试节奏（现场两次开机都卡在同一条路上，这一段是要害）
+ *
+ * 事实链（2026-11-02 13:27 / 13:52 两次实机）：
+ *   ① 一轮连接失败后**没有复位射频**就直接重试 → 每条命令都塞进同一个已经卡住的
+ *      邮箱（`wifi_send_cmd` 无限重发 + `wifi_recovery_process` 刷屏），越试越死；
+ *   ② 重试 6 次 ≈ 3 min，全是无效功，还把驱动留在 recovery 里，人工 `wifi net` 也救不回来。
+ * 所以顺序固定为「先 off 复位射频 → 等 3 s → 再连」，且上限压到 3 次，用完就停手等人工。
+ * 这里做纯逻辑 + 注入（off/wait/connect 三个回调）：板级接真函数，主机侧接假函数，
+ * 于是「off 必须在 connect 之前」这件事可以用单测钉死，而不是靠读代码相信它。
+ * ========================================================================== */
+#define GW_NET_RETRY_MAX        3u      /* 自动重试上限：用完打印「需人工 wifi net」并停手 */
+#define GW_NET_RETRY_MS         30000u  /* 两次重试的最小间隔 */
+#define GW_NET_RETRY_RESET_MS   3000u   /* 复位射频后等多久再连（给驱动收拾邮箱的时间） */
+#define GW_NET_AP_RUNNING       2       /* gw_net_ap_state() 的「已启动」取值 */
+
+typedef struct {
+    uint8_t  tries;         /* 已经自动重试过几次 */
+    uint32_t last_ms;       /* 上次重试的时刻（0 = 还没试过） */
+    int      last_off_rc;   /* 上次复位射频的返回码（日志与单测都看它） */
+} gw_net_retry_t;
+
+typedef struct {
+    int  (*off)(void);                                            /* 复位射频 */
+    void (*wait_off)(void);                                       /* 等 GW_NET_RETRY_RESET_MS */
+    int  (*connect)(const char *ssid, const char *psk,
+                    char *reason, uint32_t cap);                  /* 1 = 连上 */
+} gw_net_retry_ops_t;
+
+/* 一轮重试：返回 1 = 连上；0 = 本轮不该动（已连上/未到间隔/到上限）；-1 = 失败。
+ * 顺序写死：先 off，再 wait，再 connect —— 少任何一步都是本卡的回归点。 */
+static inline int gw_net_retry_run(gw_net_retry_t *r, const gw_net_retry_ops_t *ops,
+                                   const char *ssid, const char *psk, char *reason,
+                                   uint32_t cap, uint32_t now_ms, int already_up)
+{
+    if (r == NULL || ops == NULL) {
+        return 0;
+    }
+    if (already_up != 0) {
+        return 0;                       /* 已经连着：别自己把链路拆了 */
+    }
+    if (r->tries >= GW_NET_RETRY_MAX) {
+        return 0;                       /* 上限用完：交给人工（wifi off → wifi net） */
+    }
+    if (r->last_ms != 0u && (uint32_t)(now_ms - r->last_ms) < GW_NET_RETRY_MS) {
+        return 0;                       /* 间隔没到 */
+    }
+    r->last_ms = now_ms;
+    r->tries++;
+
+    if (ops->off != NULL) {
+        r->last_off_rc = ops->off();
+        if (ops->wait_off != NULL) {
+            ops->wait_off();
+        }
+    }
+    if (ops->connect == NULL) {
+        return -1;
+    }
+    return (ops->connect(ssid, psk, reason, cap) == 1) ? 1 : -1;
+}
+
+/* 配网 AP 与 STA 互斥（t202）：这块 SDK 单射频，SoftAP 还在跑时 STA 的 DHCP
+ * 经常拿不到地址（现场 `ip=0.0.0.0` 但 `flags=up|link`）。
+ * 返回 1 = 连 STA 之前先关 AP（AP 已启动，且当前不在配网窗口里，没人需要它）。 */
+static inline int gw_net_ap_sta_mutex(int ap_state, int prov_active)
+{
+    return (ap_state == GW_NET_AP_RUNNING && prov_active == 0) ? 1 : 0;
+}
+
+/* DHCP 阶段可见性（t202）：从 lwip netif 直接读，不碰 SDK，卡死时也能打出来。
+ * link = 「netif 已 up 且链路已 up」；ip 为空或 0.0.0.0 说明 DHCP 还没给地址。 */
+void gw_net_dhcp_snapshot(char *ip, uint32_t ip_cap, char *gwp, uint32_t gw_cap, int *link);
+
 #endif /* GW_NET_H */

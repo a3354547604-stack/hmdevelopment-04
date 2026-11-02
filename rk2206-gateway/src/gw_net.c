@@ -189,6 +189,21 @@ static void net_conn_run(void)
     for (;;) {
         LOS_Msleep(GW_WIFI_CONNECT_POLL_MS);
         waited += GW_WIFI_CONNECT_POLL_MS;
+        /* t202：DHCP 可见。5 s 一行，把「关联上了但没地址」与「压根没关联」分开：
+         *   ip=0.0.0.0 link=1 → 关联成功、DHCP 没回来（AP 抢射频 / 路由器没给地址）
+         *   ip=0.0.0.0 link=0 → 还没关联上（口令/信号/频段问题）
+         *   ip=192.168.x.y    → 拿到了，下一跳就该出 CONNECTED */
+        if ((waited % 5000u) == 0u) {
+            char dip[20];
+            char dgw[20];
+            int  dlink = 0;
+
+            gw_net_dhcp_snapshot(dip, (uint32_t)sizeof(dip), dgw, (uint32_t)sizeof(dgw), &dlink);
+            printf("[NET] dhcp wait n=%u ip=%s gw=%s link=%d\n",
+                   (unsigned)(waited / 5000u),
+                   (dip[0] != '\0') ? dip : "0.0.0.0",
+                   (dgw[0] != '\0') ? dgw : "0.0.0.0", dlink);
+        }
         r = gw_net_sta_poll(reason, (uint32_t)sizeof(reason));
         if (r == 1) {
             net_conn_finish(GW_CONN_OK, NULL);
@@ -200,6 +215,8 @@ static void net_conn_run(void)
         }
         if (waited >= s_conn_timeout_ms) {
             s_sta_pending = 0u;
+            printf("[NET] dhcp timeout：%u ms 内没拿到地址（上限 %u ms）\n",
+                   (unsigned)waited, (unsigned)s_conn_timeout_ms);
             net_conn_finish(GW_CONN_FAIL, "timeout");
             return;
         }
@@ -995,6 +1012,37 @@ int gw_net_sta_ip(char *out, uint32_t cap)
      * 配网页/长按配网键那条路也会经过本函数，在这里再装一次保证不漏。 */
     (void)gw_net_install_default_iface();
     return 0;
+}
+
+/* t202：DHCP 阶段快照。为什么不用 GetLinkedInfo 取地址：那一支要过 SDK，
+ * 驱动卡在 recovery 时它也会跟着卡；而 netif 是我们自己进程里的结构，随取随到。
+ * 现场判读：ip=0.0.0.0 + link=1 → 关联成功但 DHCP 没回来（多半是 AP/STA 抢射频）。 */
+void gw_net_dhcp_snapshot(char *ip, uint32_t ip_cap, char *gwp, uint32_t gw_cap, int *link)
+{
+    struct netif *n;
+
+    if (ip != NULL && ip_cap > 0u) {
+        ip[0] = '\0';
+    }
+    if (gwp != NULL && gw_cap > 0u) {
+        gwp[0] = '\0';
+    }
+    if (link != NULL) {
+        *link = 0;
+    }
+    n = netif_find("wlan0");
+    if (n == NULL) {
+        return;
+    }
+    if (link != NULL) {
+        *link = (netif_is_up(n) && netif_is_link_up(n)) ? 1 : 0;
+    }
+    if (ip != NULL && ip_cap > 0u) {
+        (void)snprintf(ip, ip_cap, "%s", ip4addr_ntoa(netif_ip4_addr(n)));
+    }
+    if (gwp != NULL && gw_cap > 0u) {
+        (void)snprintf(gwp, gw_cap, "%s", ip4addr_ntoa(netif_ip4_gw(n)));
+    }
 }
 
 int gw_net_sta_ssid(char *out, uint32_t cap)
